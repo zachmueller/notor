@@ -23,8 +23,11 @@ subscription. It owns four invariants:
    the orphan and terminates with `FLOW_ERROR`. The engine's own synthesized re-trigger topics
    (`flow.tasks_remaining` / `flow.requirements_unmet`) are **auto-subscribed** to a default step so
    completion-enforcement re-entry never dead-ends at the fallback (see below).
-3. **Deterministic fan-out order** — when multiple steps trigger on one topic, they execute in
-   `notor-steps` declaration order.
+3. **Deterministic fan-out order (breadth-first FIFO drain)** — when multiple steps trigger on one
+   topic, they execute in `notor-steps` declaration order, and the events those subscribers *emit* are
+   **enqueued** and drained FIFO **after** the fan-out set is exhausted (breadth-first), not routed
+   reentrantly mid-fan-out. This makes the event history — and thus the safety detectors and recovery
+   replay that read it — deterministic. See [Fan-out drain discipline](#fan-out-drain-discipline-breadth-first-fifo).
 4. **Terminal discipline** — the loop ends only on the three terminal events
    (`FLOW_COMPLETE` / `FLOW_CANCELLED` / `FLOW_ERROR`), each emitted by a defined producer.
 
@@ -105,9 +108,11 @@ The runner calls `publish()` with a captured topic; routing then proceeds:
 3. **Multiple subscribers ⇒ deliver in `notor-steps` order, ONLY for a declared fan-out topic.** A
    topic listed in the flow's `notor-fanout-topics` may have >1 subscriber; those steps are handed to
    the runner for **sequential** execution in **`notor-steps` declaration order** (FR-112) — never
-   concurrently; the engine spawns no parallelism. A topic with >1 subscriber that is **not** declared
-   in `notor-fanout-topics` is an authoring error **rejected at load** by the parser (see the
-   load invariant below), so the engine never sees an *undeclared* multi-subscriber topic at runtime.
+   concurrently; the engine spawns no parallelism. The events those subscribers themselves emit are
+   **enqueued, not routed reentrantly** — see [Fan-out drain discipline](#fan-out-drain-discipline-breadth-first-fifo).
+   A topic with >1 subscriber that is **not** declared in `notor-fanout-topics` is an authoring error
+   **rejected at load** by the parser (see the load invariant below), so the engine never sees an
+   *undeclared* multi-subscriber topic at runtime.
 4. **Zero subscribers ⇒ FallbackCoordinator.** An orphaned topic (no step triggers on it, not a
    terminal constant, and not an auto-subscribed synthesized topic — see below) is delivered to the
    wildcard `*` subscriber, the `FallbackCoordinator`. An orphaned event **never silently stalls** the
@@ -132,6 +137,30 @@ collision — the parser cannot guess intent, so the author declares it. By the 
 the subscriber set for a topic is already validated (a non-fan-out topic is guaranteed ≤1 subscriber),
 so the engine's ordered fan-out path runs only for declared topics. Authority for the
 `notor-fanout-topics` field: [vault-schema.md](vault-schema.md); load validation: FEAT-002.
+
+### Fan-out drain discipline (breadth-first FIFO)
+
+When a fan-out topic resolves to multiple subscribers `[A, B, …]` (in `notor-steps` order), the runner
+must drain their consequences **breadth-first via a FIFO queue** — this is an **engine invariant**, not
+an implementation choice, because the event history it produces is what the safety detectors
+(`getEventHistory()`) and FR-125 recovery replay (`session-log.jsonl` `event.emitted` order) depend on:
+
+1. Run subscriber **A** to turn completion. **Enqueue** A's captured/synthesized emission onto a FIFO
+   queue — **do not** route it immediately (no reentrant descent into A's downstream chain).
+2. Run subscriber **B** to turn completion; enqueue its emission. …and so on for every subscriber of
+   the fan-out topic, in `notor-steps` order.
+3. Only **after the fan-out set is exhausted** does the engine dequeue and route the enqueued emissions
+   FIFO (each of which may itself fan out, recursing the same discipline).
+
+The resulting `session-log.jsonl` order is therefore deterministic and intuitive — *all direct
+subscribers of the fan-out topic, then their consequences in order* — rather than depending on whether
+A's entire downstream subtree interleaves before B runs. **Why this matters (load-bearing, not
+cosmetic):** (a) the stale/thrashing detectors read the rolling `(topic, source_step)` window, so the
+interleaving changes whether a guard fires; (b) recovery re-publishes dangling `event.emitted` entries
+in log order, so a non-deterministic drain would make replay non-deterministic; (c) a downstream chain
+from A that mutates the scratchpad/task registry B later reads must have a defined ordering.
+**TEST-002** asserts the event-history order for a fan-out whose subscribers each emit. (The
+single-subscriber common case is unaffected — there is nothing to order.)
 
 ---
 
@@ -173,13 +202,33 @@ class FallbackCoordinator {
 **Why no steering.** A synchronous `handle(event, flow)` with only the topic/payload strings cannot
 *infer* an intended topic — it could only do arbitrary edit-distance matching against declared trigger
 names, which risks mis-routing a payload to a step that doesn't expect it (worse than failing fast).
-Orphan-prone topologies (a published topic with no subscriber, a trigger never published, a
-near-miss/typo'd trigger name) are instead caught **before the run** by the load-time topology
-validator (FEAT-002 / FR-110 — hard-errors on unreachable completion / unpublished required-events,
-warns on orphan/dead topics; authority [../spec.md](../spec.md) FR-110). The runtime coordinator is the
-loud, deterministic last line of defense — not a guesser. (A future, explicitly author-declared
+The no-fuzzy-steering stance is retained. What is **strengthened** (Issue-10 fix) is the layer that
+prevents an orphan from reaching the coordinator at all, so that hard-terminating an expensive run on a
+single typo'd/unwired topic is no longer the default outcome:
+
+- **Static orphans are now a HARD load error, not a warning.** The load-time topology validator
+  (FEAT-002 / FR-110) **hard-errors** on **any published-but-unsubscribed non-terminal topic** (a
+  step's `notor-step-publishes` entry that no step triggers on and that is not a terminal/auto-subscribed
+  topic), in addition to the existing hard errors (unreachable completion, unpublished required-events).
+  This was previously only a *warning* (so a typo'd topic could pass load and die at runtime); it is now
+  blocking, so a structurally-orphan-prone topology **cannot run**. (Genuinely-terminal topics and the
+  engine-synthesized re-trigger topics are exempt; a deliberately-unhandled branch must be wired to
+  *some* step — including a trivial code-step sink — or declared terminal.)
+- **Failure-shaped channels are recognized paths, not silent orphans.** The runtime-only channels
+  `{step}.capped` (FR-117a), `{step}.no_emit` (FR-115), and `{step}.code_error` (FR-130) — which the
+  static validator cannot see as "published" — are not left to orphan into a bare `FLOW_ERROR`. For any
+  step that can produce one, the validator **requires** an explicit subscriber **or** the engine
+  attaches a **default failure handler** that records the failure with full context and terminates with
+  `FLOW_ERROR` **carrying the originating step + stopReason/error** (a *diagnosable* failure, not an
+  anonymous orphan). Authors may still subscribe to these channels for graceful degradation / retry.
+
+The runtime coordinator remains the loud, deterministic last line of defense for any *truly*
+unanticipated orphan — but with static orphans blocked at load and failure channels handled, reaching it
+on a clean authoring mistake is now nearly impossible. (A future, explicitly author-declared
 topic-alias table could add deterministic typo-recovery, but it is **out of scope** here; nothing fuzzy
-is performed.)
+is performed. Note: `FLOW_ERROR` is terminal and non-resumable in v1 — retry/resume of a cleanly-errored
+run is out of scope — which is *why* the prevention layer is hardened rather than relying on the
+backstop.)
 
 `FLOW_ERROR` is the coordinator's terminal verdict; it is **the only producer of `FLOW_ERROR`**
 (see Terminal Events below).
@@ -201,9 +250,12 @@ emitting. To guarantee the loop never stalls on a silent step:
   wind-down summary), and the runner publishes *that*.
 - **Narrative text alone never counts** as an emission (FR-116 AC). Only a captured `emit_event`
   call, or the synthesized default, advances the loop.
-- A step with `defaultPublishes === null` that emits nothing is an orphan-by-construction: the
-  runner publishes a `{step}.no_emit` event, which (having no subscriber) routes to the
-  `FallbackCoordinator` and terminates with `FLOW_ERROR`. **No-emit never silently halts.**
+- A step with `defaultPublishes === null` that emits nothing publishes a `{step}.no_emit` event. This
+  is a **recognized failure channel** (Issue-10 fix), not a bare orphan: an author may subscribe to it,
+  and absent a subscriber the engine's **default failure handler** terminates with a *diagnosable*
+  `FLOW_ERROR` naming the silent step (rather than an anonymous fallback orphan). **No-emit never
+  silently halts.** A step whose `notor-step-publishes`/`default-publishes` shape makes `{step}.no_emit`
+  reachable with no handler is surfaced by the FEAT-002 validator (require-subscriber-or-default rule).
 
 Code steps (`notor-step-mode: code`) have the symmetric rule via their return value: a code step
 that returns no `orchestration.emit(...)` result falls back to `default_publishes` the same way; a
@@ -222,8 +274,9 @@ finished. So:
   the step name), with a payload carrying the `stopReason` and the wind-down text — **instead of**
   `default_publishes`.
 - `{step}.capped` routes by the normal rules: an author who declares a trigger for it handles the cap
-  (degrade / retry / route elsewhere); **unsubscribed**, it is an orphan → `FallbackCoordinator` →
-  `FLOW_ERROR` (loud, never silent — FR-113).
+  (degrade / retry / route elsewhere); **unsubscribed**, it is a **recognized failure channel** handled
+  by the engine's default failure handler → a *diagnosable* `FLOW_ERROR` carrying the step + stopReason
+  (loud, never silent — FR-113 / Issue-10), not an anonymous fallback orphan.
 - If the step **did** capture an explicit `emit_event` before the cap fired, that emission is honored
   (the turn had already decided its next event; the cap merely ended an over-long turn).
 
@@ -313,6 +366,34 @@ a handler for the re-trigger no longer silently fails on its own completion mach
 topology validator, FEAT-002, additionally surfaces these and other structural issues at author time;
 see the spec FR-110 group.)
 
+### Completion no-progress guard (bounds the re-trigger alternation — FR-123)
+
+Auto-subscribing the re-trigger back to the **same** completing step is convenient but, if that step
+**structurally cannot** close the work (a task only another step/tool can complete; an LLM that keeps
+declaring done while a `running` task lingers), it produces an **alternation livelock**:
+`FLOW_COMPLETE(stepX) → flow.tasks_remaining(engine) → FLOW_COMPLETE(stepX) → …`. The stale detector
+cannot see it (consecutive `(topic, source_step)` pairs differ), the thrashing detector cannot (no task
+is re-queued — a `running` task merely lingers), and the per-run iteration cap resets each re-triggered
+runner — so absent a dedicated guard the loop would burn the **entire** aggregate budget on a doomed
+retry before terminating. The engine therefore applies a cheap, deterministic **no-progress counter**,
+using state it already computes at each gate check:
+
+- The engine tracks **consecutive blocked completions from the same completing step where the blocking
+  set did not shrink** — i.e. the open/running **task set** (for `flow.tasks_remaining`) or the
+  **missing-required-events set** (for `flow.requirements_unmet`) is the *same or larger* than at the
+  previous block.
+- A block where the set **shrank** (real progress — the step closed a task / produced a required event)
+  **resets** the counter; the step is making headway and is allowed to continue.
+- After **`COMPLETION_NOPROGRESS_THRESHOLD` (default 3)** consecutive no-shrink blocks from the same
+  step, the engine terminates with **`FLOW_ERROR`** carrying the stuck step + the unmet tasks/events as
+  context — failing fast instead of draining the budget.
+
+This needs **no** general cycle detection: the engine already evaluates the blocking set at every
+completion gate (below), so the delta check is local and free. It complements (does not replace) the
+auto-subscription — the useful case (a step that *can* finish the work on a second look, shrinking the
+set) still proceeds; only a genuinely-stuck step fails fast. **TEST-002** asserts a step that re-emits
+`FLOW_COMPLETE` with a non-shrinking open-task set terminates at the threshold.
+
 ---
 
 ## Loop Safety Guards (FEAT-008)
@@ -357,6 +438,13 @@ function isStale(history: OrchestrationEvent[]): boolean {
   forward progress, prefer a deterministic **code-step router** (distinct topics per outcome) or a
   progress-bearing topic name over relying on the stale window.
 
+> **The stale window survives a reload (FR-125 state rehydration).** The rolling window is in-memory,
+> but it is **rebuilt from the replayed `event.emitted` history** during recovery (so are the per-task
+> thrashing/abandonment counters) — *before* the resumed run continues. So a self-loop at 3 of 4
+> strikes before a reload fires on the **next** repeat, not 4 more: reloading to "unstick" a flow does
+> not zero the guard. Authority: [vault-schema.md](vault-schema.md) Parent-rooted recovery, "State
+> rehydration."
+
 #### Known limitation — the stale detector catches self-loops, not multi-step cycles
 
 The `(topic, source_step)` "4 consecutive identical" signature detects a **self-loop** (one step
@@ -368,7 +456,10 @@ re-firing one topic). It **does not** detect a cycle of length ≥ 2, where cons
   step with `flow.tasks_remaining` / `flow.requirements_unmet`; if the step keeps re-emitting
   `FLOW_COMPLETE` without closing the work, the stream **alternates**
   `FLOW_COMPLETE(stepX) → flow.tasks_remaining(engine) → FLOW_COMPLETE(stepX) → …`, which the
-  consecutive-identical signature also misses.
+  consecutive-identical signature also misses. **This specific case is now bounded cheaply by the
+  dedicated [completion no-progress guard](#completion-no-progress-guard-bounds-the-re-trigger-alternation--fr-123)** (terminate after N
+  consecutive no-shrink blocks) — it does **not** rely on draining the aggregate budget. The general
+  multi-step-cycle case below remains budget/runtime-bounded.
 
 **This is an accepted limitation (decision: rely on budget/runtime, not new cycle detection).** The
 backstops for these cases are the **two-layer budget** and **`max_runtime`**, not the stale detector:
@@ -376,11 +467,15 @@ backstops for these cases are the **two-layer budget** and **`max_runtime`**, no
 - An **LLM-driven** cycle (each hop is a conversation step turn) draws down the aggregate
   `iterationsRemaining` / `costRemainingUsd` cell every hop, so it terminates at `cost_cap` /
   iteration exhaustion — *eventually*, after consuming the configured ceiling, not cheaply at the 4th
-  repeat. The completion-enforcement alternation above is LLM-driven (each `FLOW_COMPLETE` re-emit is a
-  step turn), so it is bounded by the aggregate budget.
-- A **code-step-only** cycle consumes neither LLM turns nor cost (D2/FR-117), so it is bounded **only by
-  `notor-max-runtime-minutes`** (and any self-loop the stale detector does catch). Authors of
-  code-step-heavy flows **must** set a sensible `notor-max-runtime-minutes`.
+  repeat. (The completion-enforcement alternation, formerly in this bucket, is now bounded *cheaply* by
+  the no-progress guard above rather than by draining the budget.)
+- A **code-step-only** cycle consumes neither LLM turns nor cost (D2/FR-117), so it is bounded by
+  `notor-max-runtime-minutes` (and any self-loop the stale detector catches). **Crucially, this ceiling
+  is now always present:** `notor-max-runtime-minutes` (like `notor-max-iterations` /
+  `notor-max-cost-usd`) is **defaulted to a finite value by the parser when omitted** (FR-117 / FR-119a;
+  [vault-schema.md](vault-schema.md)) — so a code-step-only flow can no longer run unbounded even if the
+  author sets nothing. (Authors of long code-step flows should still raise it deliberately rather than
+  rely on the 60-minute default.)
 
 **Authoring guidance (the real mitigation):** route distinct outcomes through **distinct topics**, drive
 non-trivial branching through a **code-step router** (deterministic, multi-way), and set
@@ -421,9 +516,14 @@ overlay on top of those substrate caps.
   route), then the mandatory fallback, then the safety overlay ([../tasks.md](../tasks.md)).
   FEAT-008 depends on the engine because both detectors read `getEventHistory()`.
 - **TEST-002** is the gate ([../tasks.md](../tasks.md) per-phase Phase-1 gate): unit tests for
-  single-subscriber routing + declared-fan-out order, undeclared-collision load rejection, orphan →
-  fallback → `FLOW_ERROR` (no fuzzy steering), synthesized-topic auto-subscription to the completing
-  step, `default_publishes` synthesis, the `isStale` 4-consecutive `(topic, source_step)` window
-  (payload-independent), thrashing counts, and the two completion gates.
+  single-subscriber routing + declared-fan-out order, the **breadth-first FIFO fan-out drain** order (a
+  fan-out whose subscribers each emit produces the deterministic *all-subscribers-then-consequences*
+  event history), undeclared-collision load rejection, **load-time hard-error on a published-but-
+  unsubscribed non-terminal topic**, orphan → fallback → `FLOW_ERROR` (no fuzzy steering), the
+  **failure-channel default handler** (`{step}.capped`/`.no_emit`/`.code_error` → diagnosable
+  `FLOW_ERROR` naming the step), synthesized-topic auto-subscription to the completing step, the
+  **completion no-progress guard** (N consecutive non-shrinking blocked `FLOW_COMPLETE` from the same
+  step → `FLOW_ERROR`), `default_publishes` synthesis, the `isStale` 4-consecutive `(topic, source_step)`
+  window (payload-independent), thrashing counts, and the two completion gates.
 - **Write-before-route is observable in tests** by asserting the `session-log.jsonl` `event.emitted`
   append happens before any subscriber callback fires.

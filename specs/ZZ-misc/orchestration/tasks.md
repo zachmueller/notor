@@ -184,9 +184,9 @@ schema (INT-006) and the shared metadata shape (INT-047) exist.
 | Phase | Gate |
 |---|---|
 | 0 | **TEST-001 is a release blocker.** Existing sub-agent suites must pass unmodified; add `run-loop.test.ts` + `budget.test.ts`. No orchestration code merges until green. |
-| 1 | TEST-002 + TEST-003 green; `step-prompt-builder` asserts must-publish always injected. |
-| 2 | TEST-005 (recovery idempotency) green; `history` test confirms step conversations hidden from list. |
-| 3 | TEST-004 green (fence extraction, timeout, error→`{step}.code_error`, helper dispatch). |
+| 1 | TEST-002 + TEST-003 green; `step-prompt-builder` asserts must-publish always injected; TEST-002 also covers the breadth-first fan-out FIFO drain order, the load-time hard-error on a published-but-unsubscribed non-terminal topic, the failure-channel default handler, and the completion no-progress guard. |
+| 2 | TEST-005 (recovery idempotency + budget/safety rehydration + chaining-root + interior-corruption) green; `history` test confirms step conversations hidden from list. |
+| 3 | TEST-004 green (fence extraction, timeout incl. the documented `await`-boundary limitation, error→`{step}.code_error`, helper dispatch). |
 | 4–5 | Notice synthesis unit; pause/resume + paused-session recovery; context-menu jump in e2e. |
 | 7 | TEST-006 green (incl. `child_run_metadata` back-compat parse + edge-DAG no-cycle invariant). |
 | All | TEST-007 + TEST-008 e2e green; VAL-001 walks [quickstart.md](quickstart.md) end-to-end. |
@@ -213,13 +213,18 @@ The hazards that govern ordering (full rationale in [plan.md](plan.md)):
 10. **Chaining adapter (INT-045) depends on code steps (INT-010)** — don't parallelize across Lane B.
 11. **Finalize `use-subagent.ts` (Phase 0) before `run_flow` (INT-042) mirrors its dynamic-tool
     pattern.**
-12. **Parent-rooted recovery (FR-125) — root-only scan in INT-005, child reconciliation in INT-044.**
-    Recovery's top-level scan recovers only root sessions (`origin: "user"`); child sessions
-    (`origin ∈ {run_flow, chaining}`) are reconciled by the parent's replay (reuse a terminal child's
-    result, or tombstone-and-respawn a non-terminal one) — never recovered independently, or a crash
-    mid-`run_flow` duplicates the child. INT-005 defines the root-only contract; INT-044 (composition)
-    wires the reuse/respawn. `once(...)` keys are per-session and cannot dedupe a respawn, so the
-    parent-rooted rule is the mechanism, not per-effect guarding.
+12. **Parent-rooted + chaining-root recovery (FR-125) — root-selection scan in INT-005, `run_flow` child
+    reconciliation in INT-044.** The top-level scan recovers `origin: "user"` (always) and
+    `origin: "chaining"` **iff its parent is already terminal** (a chained successor is fire-and-forget,
+    so it is recovered as its own root — no orphan); `origin: "run_flow"` (and `chaining` with a live
+    parent) is reconciled by the parent's replay, never recovered independently. A `run_flow` child is
+    reconciled via the durable `child.spawned`/`child.result` log entries: **reuse** a terminal child's
+    recorded result (no re-spawn), or **resume** a non-terminal child in place (replay its own log) —
+    **never tombstone-and-respawn**, so the child keeps its log and its `once()` `side_effect.committed`
+    markers survive (dedup across the crash). An absent/unexpected `origin` is a loud recovery error, not
+    a silent skip; `run_flow` is orchestration-context-only so no parentless chat-launched child exists.
+    INT-005 defines the root-selection + chaining-root + reuse/resume contract; INT-044 (composition)
+    wires the parent-replay reuse/resume against real child sessions.
 13. **Session-pinned provider/model (ARCH-007) before any concurrent step turn (FEAT-007).** Step turns
     must resolve provider/model via the pure `resolvePersonaProviderConfig(...)` pinned into the
     `ConversationSession` — never the global-mutating `applyProviderModelOverrides()` — or concurrent

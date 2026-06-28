@@ -126,7 +126,7 @@ sub-agents and conversation-only runs, `structured` is always `null`.
 | **Per-run caps** | iteration cap (default 20), token limit (default 0 = none), context-window proximity (pre-flight reserve `lastInputTokens + 4096` vs `getContextWindow(model)`). | `sub-agent-runner.ts` ~163-205 |
 | **Wind-down** | On any terminal cap (`iteration_cap` / `token_limit` / `context_window` / `cost_cap`), run a final summarization turn and return its text as `RunResult.text`. | `sub-agent-runner.ts` `runWindDown()` ~365-445 |
 | **Abort cascade** | Own `AbortController` linked to `runContext.abort`; parent abort cascades to this run (and to children, since each child inherits a derived signal). Checked before each LLM call. | `sub-agent-runner.ts` ~127-142, ~165 |
-| **Budget accounting** | Per-turn: decrement the shared `runContext.budget` cell (`iterationsRemaining` / `costRemainingUsd`) in place after each turn completes; check both **before** the next turn (see decision rule). | new (`budget.ts`, ARCH-005) |
+| **Budget accounting** | Per-turn: decrement the shared `runContext.budget` cell (`iterationsRemaining` / `costRemainingUsd`) in place after each turn completes; add the turn's spend to `runContext.subtreeConsumed`; surface per-turn `cost_usd` / `token_usage` to the consumer (recorded on `turn.complete` for reload reconstruction); check the shared cell **before** the next turn (see decision rule). | new (`budget.ts`, ARCH-005) |
 | **Hooks** | Fire optional `onTurnStart` / `onTurnComplete` / `onPersist` / `onProgress` at the loop boundaries. | new (ARCH-001) |
 | **Dispatch seam** | Tools dispatched via `executeToolBatches`, which threads `ToolExecuteOptions` (carrying `runContext?`, assembled once in `ToolDispatcher.dispatch()`). | `tool-orchestration.ts` `executeToolBatches` ~114; `dispatcher.ts` ~666 |
 
@@ -180,25 +180,53 @@ per-run terminal conditions, evaluated as today; they trigger wind-down, not a b
 1. **Independent layers, both must pass.** The aggregate budget is additive on top of the per-run
    cap, never a substitute. A reader seeing `budget.iterationsRemaining` on `RunContext` must not
    assume it supersedes `iterationCap`.
-2. **Per-turn decrement of the shared cell, checked before each turn.** As each turn completes, the
-   turn's cost/iteration is subtracted from the **shared** `AggregateBudget` cell (mutated in place,
-   so parent/siblings/children all see it), and the next turn is gated on the cell before it begins —
-   catching cost drift mid-run, not only at spawn boundaries. (Cost is computed via `calculateCost`,
-   see [Cost](#cost).)
-3. **Exhaustion blocks new child spawns only; bounded overshoot is accepted.** When the shared cell
-   hits zero, no new children launch; **in-flight runs finish their current turn gracefully** — no
-   hard-abort, no forced mid-turn wind-down. Because concurrent in-flight turns (semaphore cap 3;
-   concurrent `run_flow`) check-then-act across `await` points, the ceiling tolerates **bounded
-   overshoot** (≈ concurrency × one turn's spend); no lock is taken on the cell. A blocked spawn
-   returns control to the caller (flow-as-tool / `run_flow`) or terminates the chain (chaining); see
-   [tools.md](tools.md).
+2. **Per-turn decrement of the shared cell, checked before each turn (decrement-after / check-before).**
+   As each turn completes, the turn's cost/iteration is subtracted from the **shared** `AggregateBudget`
+   cell (mutated in place, so parent/siblings/children all see it), and the next turn is gated on the
+   cell before it begins — catching cost drift between turns, not only at spawn boundaries. The gate is
+   strict-positive (`costRemainingUsd > 0`), **not** "enough headroom for the next turn" — so a runner
+   at any positive remainder admits **one more full turn**. This is a deliberate, inherent soft-ceiling
+   property (see policy #3); per-turn cost is computed via `calculateCost` ([Cost](#cost)) and recorded
+   on the `turn.complete` log entry for reload reconstruction (policy #5).
+3. **Exhaustion blocks new child spawns only; the ceiling is a SOFT ceiling (bounded overshoot).** When
+   the shared cell hits zero, no new children launch; **in-flight runs finish their current turn
+   gracefully** — no hard-abort, no forced mid-turn wind-down. The cost ceiling is therefore
+   overshootable by **up to one full turn's spend per in-flight runner**, from *two independent* causes:
+   - **(a) Decrement-after / check-before — applies even serially (concurrency = 1).** Because cost is
+     subtracted *after* a turn and the gate is `> 0`, a runner sitting at `$0.01` still runs one more
+     whole turn, whose spend is itself unbounded by the budget (it scales with model, output length,
+     and intra-turn tool fan-out). No cost **pre-flight reservation** is attempted because per-turn cost
+     is not knowable before the turn — so this overshoot is *inherent*, not a defect. (Contrast the
+     context-window cap, which **does** pre-flight-reserve `lastInputTokens + 4096` because that is
+     known in advance.)
+   - **(b) Concurrency check-then-act.** Concurrent in-flight turns check-then-act across `await`
+     points, adding one turn's overshoot per concurrent runner; no lock is taken on the cell. **In v1 a
+     flow tree runs one LLM turn at a time** (single-threaded routing; `run_flow` is a `write` tool
+     serialized within a turn; recursive `run_flow` is a serial awaited chain), so the only
+     genuinely-parallel children are **sub-agents** (semaphore cap 3) and those seed a fresh `Infinity`
+     cell — they never draw on a flow's cell. Net for a flow tree: effective in-flight concurrency
+     against one cell ≈ 1, so the practical worst case is "the cell can go negative by up to one
+     max-cost turn." (If concurrent `run_flow` is ever introduced, the bound becomes ≈ that concurrency
+     × one turn, and a run-tree semaphore would be wired for `run_flow` then — see the axes table.)
+
+   A blocked spawn returns control to the caller (flow-as-tool / `run_flow`) or terminates the chain
+   (chaining); see [tools.md](tools.md).
+5. **Budget + safety state are reconstructed on reload, not reset (FR-125).** The `AggregateBudget` cell
+   is in-memory; it is **not** persisted as a running total. On recovery it is re-seeded from the flow's
+   (defaulted, finite) ceilings and then decremented by **replaying each `turn.complete`'s recorded
+   `cost_usd` / `token_usage`** — so a `$5.00` cap resumed mid-run reflects pre-crash spend rather than
+   resetting to `$5.00` (which a crash-resume loop could otherwise exceed many times over). The stale
+   rolling window and thrashing counters are rehydrated from the replayed event/task history in the same
+   pass ([vault-schema.md](vault-schema.md) Parent-rooted recovery, "State rehydration").
 4. **Sub-agent equivalence is provable, not coincidental.** Sub-agents pass `maxDepth = 0` and a fresh
    `budget` cell of `{ iterationsRemaining: Infinity, costRemainingUsd: Infinity }`, so the per-run
    `iterationCap` is the *only* effective limit. `budget.iterationsRemaining > 0` and
    `budget.costRemainingUsd > 0` are always true (`Infinity > 0`), and decrementing an `Infinity` cell
    leaves it `Infinity` (nothing observable changes), so the decision rule collapses to
-   `localIterations < iterationCap` — byte-identical to today, by construction. This is why the
-   existing sub-agent suites stay green unmodified (see
+   `localIterations < iterationCap` — byte-identical to today, by construction. The added
+   `subtreeConsumed` accumulator is **write-only bookkeeping** for sub-agents (it feeds
+   `child_run_metadata` single-run totals and gates nothing), so it likewise changes nothing
+   observable. This is why the existing sub-agent suites stay green unmodified (see
    [Behavior-preservation gate](#behavior-preservation-gate)).
 
 `stopReason` on the terminal `RunResult` distinguishes the layers: a per-run cap yields
@@ -222,9 +250,17 @@ interface RunContext {
   depth: number;               // current nesting depth (0 = top level)
   maxDepth: number;            // 0 for sub-agents (no nesting); N or Infinity for flows
   budget: AggregateBudget;     // SHARED tree-wide cell { iterationsRemaining, costRemainingUsd } (by reference)
+  subtreeConsumed: SubtreeConsumed; // PER-SUBTREE accumulator (NOT shared) — authority for child_run_metadata; see data-model.md
   abort: AbortSignal;          // cascades from parent
 }
 ```
+
+> **`budget` (shared) vs `subtreeConsumed` (per-node) — do not conflate.** The `budget` cell is shared
+> by reference tree-wide and is the authority for the **spawn gate** and the **root-header rollup**
+> (a single direct read of the root's cell is correct there). `subtreeConsumed` is constructed fresh
+> per child, accumulates only that node's own + its settled descendants' spend, and is the authority
+> for **`child_run_metadata`'s per-subtree numbers** — precisely because a single read of the *shared*
+> cell would absorb concurrent siblings' spend and misattribute it (see [edges.md](edges.md) §5).
 
 ### Spawn gate
 
@@ -270,7 +306,7 @@ scope, and limit — and `RunLoop` must not fold any one into another.
 | Axis | Question it answers | Owner | Limit (today) |
 |---|---|---|---|
 | **Background triggering** | How many *background flows/workflows* start at once | `WorkflowConcurrencyManager` (`src/workflows/workflow-concurrency.ts`; in-memory, FIFO queue, sleep/wake `reconcileAfterWake`) | bounded pool + FIFO queue |
-| **Run-tree expansion** | How deep/wide a single *run tree* spawns children | `RunLoop` shared `Semaphore` (generalized from `src/sub-agents/semaphore.ts`) | `SUB_AGENT_CONCURRENCY_CAP = 3` for sub-agents |
+| **Run-tree expansion** | How deep/wide a single *run tree* spawns children | `RunLoop` shared `Semaphore` (generalized from `src/sub-agents/semaphore.ts`) | sub-agents: `SUB_AGENT_CONCURRENCY_CAP = 3`. **Flows (`run_flow`) in v1: effectively 1 in-flight child turn** — `run_flow` is a `write` tool (serialized within a turn by `executeToolBatches`), the engine routes single-threaded between turns, and recursive `run_flow` is a serial awaited chain. No `run_flow` concurrency semaphore is wired in v1 because there is no `run_flow` parallelism to admit-gate; if concurrent `run_flow` is introduced later, a run-tree-scoped semaphore for it is added then (and the soft-ceiling overshoot bound becomes ≈ that cap × one turn). |
 | **Intra-turn tool dispatch** | How many *tool calls within one turn* run in parallel | `executeToolBatches` internal semaphore (`src/chat/tool-orchestration.ts`, pre-existing) | `DEFAULT_CONCURRENCY_CAP = 5` |
 
 - The **intra-turn axis is pre-existing and free**: because `RunLoop` is built on `executeToolBatches`
@@ -355,7 +391,13 @@ calculateCost(inputTokens: number, outputTokens: number, modelId: string, settin
   (tasks.md sequencing-risk #3: "Cost reachability"). This keeps the run-loop layer free of
   `ChatOrchestrator`.
 - After each turn, the turn's cost is subtracted from the shared `RunContext.budget.costRemainingUsd`
-  cell; the next turn is gated on `budget.costRemainingUsd > 0` (decision rule, policy #2).
+  cell **and recorded on the `turn.complete` log entry** (`cost_usd` + `token_usage`); the next turn is
+  gated on `budget.costRemainingUsd > 0` (decision rule, policy #2). The strict-positive gate makes the
+  ceiling a **soft** one (policy #3): one more full, unbounded-cost turn can run after the remainder
+  goes positive-but-tiny, even at concurrency 1 — there is no cost pre-flight reservation because
+  per-turn cost is not knowable in advance.
+- The recorded per-turn `cost_usd` / `token_usage` are what recovery replays to **rebuild** the
+  in-memory cell on reload (policy #5), so the cost ceiling survives a restart.
 - For sub-agents, the `budget` cell is `{ …, costRemainingUsd: Infinity }`, so cost never blocks —
   preserving today's behavior.
 
@@ -365,9 +407,9 @@ calculateCost(inputTokens: number, outputTokens: number, modelId: string, settin
 
 The extraction is gated on **TEST-001** (a release blocker; tasks.md per-phase gate, Phase 0). The
 existing sub-agent suites must pass **unmodified** after `SubAgentRunner` is refactored to a thin
-adapter over `RunLoop` (`maxDepth = 0`, a fresh `budget` cell of both-`Infinity`,
-`orchestrationContext: undefined`, no persistence hooks; mapping `RunResult` → `SubAgentResult` where
-`structured` is always null):
+adapter over `RunLoop` (`maxDepth = 0`, a fresh `budget` cell of both-`Infinity`, a fresh write-only
+`subtreeConsumed`, `orchestrationContext: undefined`, no persistence hooks; mapping `RunResult` →
+`SubAgentResult` where `structured` is always null):
 
 - `src/chat/sub-agent-runner.test.ts` — runner loop, caps, wind-down, abort behavior.
 - `src/tools/use-subagent.test.ts` — **hard-asserts `iterationCap === 20`**; depth-0 nested rejection.

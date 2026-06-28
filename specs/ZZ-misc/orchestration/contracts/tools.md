@@ -86,11 +86,23 @@ required: [topic, payload]
    the per-step session carriage assembled at the single `ToolDispatcher.dispatch()` site, **distinct
    from `ToolSessionContext`** (it is *not* merged into the chat read-accessor; same different-lifecycle
    rationale as `runContext`, FR-102) — and **writes `{ topic, payload }` to its `pendingEmission`
-   slot** as the turn's pending emission (overwriting any prior pending emission within the same turn —
-   last call wins). Because each step turn gets its **own** `OrchestrationToolContext` instance,
-   concurrent step turns / `run_flow` children never share or race on this slot. If
-   `orchestrationContext` is absent (e.g. the tool is somehow reached outside a step turn),
-   `emit_event` returns `success: false` rather than mutating anything.
+   slot**. Because each step turn gets its **own** `OrchestrationToolContext` instance, concurrent step
+   turns / `run_flow` children never share or race on this slot. If `orchestrationContext` is absent
+   (e.g. the tool is somehow reached outside a step turn), `emit_event` returns `success: false` rather
+   than mutating anything.
+
+   **Overwrite policy within a turn (Issue-13e — terminal latch + audit).** Two cases:
+   - **Non-terminal topics: last-write-wins.** A later `emit_event` with a non-terminal topic
+     overwrites an earlier pending non-terminal emission (a step legitimately picks one next event); the
+     overwrite is recorded as an `event.emission_overwritten` log entry (`prev_topic` → `new_topic`) so
+     the discarded intent is auditable rather than vanishing silently.
+   - **Terminal topics latch.** `FLOW_COMPLETE` / `FLOW_CANCELLED` / `FLOW_ERROR` carry distinct,
+     irreversible semantics (task-enforcement vs bypass vs failure), so the **first** terminal emit in a
+     turn **latches**: any subsequent `emit_event` in the same turn returns `success: false` (the LLM
+     sees the rejection) and the latched terminal emission stands. This prevents a turn from silently
+     flipping `FLOW_CANCELLED` → `FLOW_COMPLETE` (or vice versa) with no trace — consistent with the
+     "never silently advances" ethos (FR-117a). The latch + any rejected later emit are recorded via
+     `event.emission_overwritten` (here, "attempted-overwrite-of-latched-terminal") for audit.
 2. It returns a confirmation `ToolResult` (`success: true`) so the LLM sees the emission was recorded;
    the turn then continues or ends normally.
 3. **After** the `RunLoop` turn completes, the `StepTurnExecutor` (FR-115) reads
@@ -167,6 +179,18 @@ required: [flow, payload]
 
 ### Implementation contract
 
+0. **Orchestration-context-only (FR-172 / FR-125 recovery invariant).** `run_flow` requires an active
+   **`orchestrationContext`** on `ToolExecuteOptions` — exactly as `emit_event` does. If it is **absent**
+   (the tool was reached from a **foreground-chat** turn, a non-orchestration automation, or any context
+   that is not an orchestration step / code step), `run_flow` returns a `ToolResult` `success: false`
+   with a clear message ("run_flow can only be called from within an orchestration flow"). **Why:** a
+   child flow spawned outside an orchestration parent would be stamped `origin: "run_flow"` yet have **no
+   replayable orchestration parent** (a chat session has no `session-log.jsonl`), so on crash it would be
+   a silent orphan — excluded from the top-level recovery scan *and* reconciled by no parent. Gating
+   `run_flow` to orchestration contexts guarantees **every** child flow has either a replayable
+   orchestration parent (`run_flow`) or is a recovery root (`chaining`), so the parent-rooted recovery
+   model holds without exception. A flow is still launchable directly via the **"Run Orchestration"**
+   command (which creates an `origin: "user"` root) and from a step via `run_flow` / `orchestration.callTool`.
 1. **Resolve.** Look up the selected `flow` via `FlowCompositionManager`. An unknown / no-longer-invocable
    flow returns a `ToolResult` `success: false` (not a throw).
 2. **Spawn gate.** Before launching, the child spawn is gated on the `RunContext` carried on
@@ -182,21 +206,35 @@ required: [flow, payload]
    step** threads the identical `runContext` via `orchestration.callTool`
    ([orchestration-helper.md](orchestration-helper.md) "runContext propagation"), so a code-step
    `run_flow` is gated identically — there is no code-step bypass of `max_depth` / the aggregate budget.
-3. **Run-to-terminal on a child `RunLoop`.** The selected flow runs **to its terminal event** in a
-   **child session** on a **child `RunLoop`** (depth + 1, inheriting the parent's remaining aggregate
-   budget). This is the `use_subagent` pattern generalized from a single sub-agent run to a whole flow:
-   the child flow's step turns dispatch through `executeToolBatches`, inheriting batched/parallel
-   intra-turn tool dispatch for free. Child session linkage (`parent_session_id`, isolation mode) is
-   `INT-044`; isolation (`notor-handoff-isolation: isolated | shared`) follows the
+3. **Run-to-terminal on a child `RunLoop`, durably anchored for recovery.** Immediately **before**
+   launching, the parent turn writes a **`child.spawned { turn, step, via_tool_call_id, child_session_id }`**
+   log entry ([vault-schema.md](vault-schema.md)) — the recovery anchor that lets a re-run parent find
+   *this* child. The selected flow then runs **to its terminal event** in a **child session** on a
+   **child `RunLoop`** (depth + 1, inheriting the parent's remaining aggregate budget by reference; a
+   fresh `subtreeConsumed`). This is the `use_subagent` pattern generalized from a single sub-agent run
+   to a whole flow: the child flow's step turns dispatch through `executeToolBatches`, inheriting
+   batched/parallel intra-turn tool dispatch for free. Child session linkage (`parent_session_id`,
+   isolation mode) is `INT-044`; isolation (`notor-handoff-isolation: isolated | shared`) follows the
    [vault-schema.md](vault-schema.md) `definition.md` contract.
-4. **Return.** The tool returns the child's `RunResult` (see [../data-model.md](../data-model.md)):
-   **prefer `structured`, fall back to `text`**. The **only** producer of `structured` is a terminal
-   **code step** that passes a third arg to `orchestration.emit(topic, payload?, structured?)`
-   (authority: [orchestration-helper.md](orchestration-helper.md)); the runner lifts that value onto
+4. **Return (and durably record the result).** When the child reaches its terminal event, the parent
+   turn writes a **`child.result { turn, child_session_id, structured?, text, stop_reason }`** log entry
+   **before continuing** — the durable artifact that makes "reuse the child's recorded result on
+   recovery" real (FR-125): a re-run parent that finds a `child.spawned` with a matching `child.result`
+   **reuses** it instead of re-spawning. The tool then returns the child's `RunResult` (see
+   [../data-model.md](../data-model.md)): **prefer `structured`, fall back to `text`**. The **only**
+   producer of `structured` is a terminal **code step** that passes a third arg to
+   `orchestration.emit(topic, payload?, structured?)` (authority:
+   [orchestration-helper.md](orchestration-helper.md)); the runner lifts that value onto
    `RunResult.structured` verbatim — no JSON round-trip of `payload`. Absent a terminal code step (or
    when it passes no `structured`), `structured` is `null` and `run_flow` falls back to the closing
    `text` produced by a final conversation step instructed via `notor-flow-returns` (the loose
    fallback).
+
+   > **Recovery (FR-125).** If the plugin crashes after `child.spawned` but before `child.result`, the
+   > child was non-terminal: recovery **resumes that child session in place** (replays its own log) and
+   > awaits it — it is **not** tombstoned-and-respawned, so the child's `once()` markers survive (Issue-2
+   > fix). If `child.result` was written, the re-run parent **reuses** it (no re-spawn). Authority:
+   > [vault-schema.md](vault-schema.md) Parent-rooted recovery.
 5. **Edge + rollup.** On return, the calling step's conversation gains a `child` edge to the child
    flow's entry conversation, and the `ToolResult` carries a `child_run_metadata` block with the
    child subtree's aggregate cost / iterations / depth. Both the edge model and the rollup block are
@@ -206,6 +244,62 @@ required: [flow, payload]
 > `run_flow` differs from sub-agents in one structural way only: a sub-agent runs **one** isolated
 > conversation; `run_flow` runs an entire **event-driven flow** (many step turns) to a terminal event.
 > Both share the `RunLoop` substrate and the `child_run_metadata` rendering/rollup path.
+
+---
+
+## Chaining (`notor-on-complete-flow`) — handoff contract
+
+Chaining is the *other* composition mechanism (FR-175): at a flow's terminal event, if
+`notor-on-complete-flow` is set, the runner launches the **successor** flow **instead of finalizing** —
+a **one-way handoff with no return**. [run-loop.md](run-loop.md) (spawn gate) names this file as the
+authority for chaining's gate-consumption and termination semantics; this section delivers it (it was
+previously underspecified relative to `run_flow`).
+
+### Gate, depth, and budget inheritance
+
+The chaining handoff is gated **exactly like a `run_flow` spawn** so an `A → B → A` on-complete cycle
+is genuinely bounded, not just bounded "by intent":
+
+- The gate is evaluated **in the runner's terminal-event handler** (the point where it would otherwise
+  finalize), against the **same `RunContext`** the predecessor's terminal step ran under.
+- The successor's `RunContext` inherits **`depth + 1`** and the **same `AggregateBudget` cell by
+  reference** (not a fresh root cell) — so every successor turn draws down the same tree-wide
+  cost/iteration ceiling, and an on-complete cycle terminates at the aggregate budget / `max_depth`
+  rather than running unbounded with a fresh budget per hop. It carries a fresh `subtreeConsumed`.
+- A **blocked** handoff (`depth >= maxDepth`, or the shared budget cell is exhausted) does **not**
+  launch the successor. Because chaining has no caller to return to, a blocked handoff **terminates the
+  chain** with **`FLOW_ERROR`** (status `error`), carrying the reason (depth/budget) and the intended
+  successor as context — a loud, diagnosable stop, not a silent no-op.
+
+> **Why this matters for cycle-bounding.** The edge-DAG no-cycle invariant ([edges.md](edges.md) §3) is
+> preserved in *conversation-edge space* (each handoff mints a distinct entry conversation, so `A→B→A'`
+> is a linear chain of distinct nodes, not a literal edge cycle) — so a *logical* `A↔B` on-complete
+> cycle is possible. It is bounded **only because** the successor shares the depth counter and the
+> `AggregateBudget` cell by reference (above). Without that inheritance it would start a fresh root
+> budget and a fresh runtime clock each hop and run unbounded. **TEST-006** asserts a two-flow
+> on-complete cycle terminates at `max_depth` / the aggregate budget.
+
+### Recovery of a chained successor (FR-125)
+
+A chained successor is recorded with `origin: "chaining"` and `parent_session_id` = the predecessor.
+Because the predecessor **finalizes** (status `completed`) before the successor launches, the successor
+has **no live parent turn to replay** — so, unlike a `run_flow` child, it is **recovered as a root**:
+the top-level scan recovers an `origin: "chaining"` session **iff** its `parent_session_id` resolves to
+an already-terminal predecessor (closing the "crashed chained successor is a permanent orphan" hole).
+Its `parent`/`child` edges are kept for run-tree lineage only. Authority: [vault-schema.md](vault-schema.md)
+Parent-rooted recovery. (Edge model for the `child` handoff edge with no `via_tool_call_id`:
+[edges.md](edges.md).)
+
+### What chaining shares with `run_flow` and what differs
+
+| | `run_flow` (call/return) | Chaining (`notor-on-complete-flow`, one-way) |
+|---|---|---|
+| Returns to caller | Yes (`RunResult`) | **No** — fire-and-forget at the terminal event |
+| Awaiting tool call | Yes (`via_tool_call_id`) | **No** (`child` edge omits `via_tool_call_id`) |
+| Depth / budget | child inherits `depth+1` + shared cell | **same** — successor inherits `depth+1` + shared cell |
+| Blocked spawn | returns a tool error to the caller | **terminates the chain with `FLOW_ERROR`** |
+| Recovery | reconciled by parent replay (reuse/resume) | **recovered as a root** once predecessor is terminal |
+| Input shaping | LLM/static `payload` | predecessor's terminal step injects successor's `notor-flow-inputs` (optional code-step adapter, INT-045) |
 
 ---
 

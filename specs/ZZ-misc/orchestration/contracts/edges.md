@@ -121,6 +121,14 @@ to migrate; the uniform structure is free to adopt now.
   exists), letting the UI render a "descend" affordance on that exact tool-call card; a chaining
   child has no tool call and omits it. This is precisely why chaining cannot be represented by a
   tool-result-only scheme and why the structural source is the header edge, not `child_run_metadata`.
+  - **Recovery linkage (FR-125).** The `child` edge is the *display/structural* link; the *recovery*
+    link for a `run_flow` child is the parent session-log's **`child.spawned` / `child.result`** pair
+    (keyed by the same `via_tool_call_id` + `child_session_id`), which durably records the child's
+    result so a re-run parent reuses a terminal child rather than re-spawning, and resumes a
+    non-terminal child in place ([contracts/vault-schema.md](vault-schema.md) Parent-rooted recovery).
+    A **chaining** successor (no tool call, no return) is instead recovered as a **root** once its
+    predecessor is terminal — see [contracts/tools.md](tools.md) Chaining and
+    [contracts/vault-schema.md](vault-schema.md).
 - **`parent`** is the back-link from the child entry to the caller. Ascending from a deep child to
   its caller is **one hop** up the `parent` edge.
 
@@ -151,9 +159,9 @@ hierarchy; nothing emits a non-tree edge.
 
 - **Crash-recovery replay** (FR-125 / INT-005) walks the session/edge structure; a pure DAG
   guarantees replay terminates and is idempotent.
-- **Aggregate-subtree rollup** (the consumed cost/iterations summed over the subtree; sourced from the
-  shared `RunContext.budget` cell — `AggregateBudget`, see [contracts/run-loop.md](run-loop.md)) sums
-  over the subtree; a cycle would double-count or loop.
+- **Aggregate-subtree rollup** (the consumed cost/iterations of the subtree; sourced from the child's
+  **`RunContext.subtreeConsumed`** accumulator, which folds in each settled descendant's totals — see
+  [contracts/run-loop.md](run-loop.md) and §5) sums over the subtree; a cycle would double-count or loop.
 - **Run-tree rendering** needs no cycle-detection or infinite-expansion guards at any depth — the
   constraint is what lets a 50-node tree render cleanly.
 
@@ -242,14 +250,28 @@ interface ChildRunMetadata {
 | `profile_name` | profile name (also as `name`) | absent |
 
 For **flows**, the aggregate numbers are the **consumed** cost/iterations of the *whole* child flow
-tree, derived from the shared `AggregateBudget` cell the child subtree drew down (the cascading
-budget; see [contracts/run-loop.md](run-loop.md)) — measured as the cell's spend over the child run
-(e.g. captured-at-spawn remaining minus remaining-at-return, or an explicit per-subtree consumed
-accumulator), not just the direct child. Because the cell is **shared by reference** across the
-subtree, every descendant turn's decrement is already reflected in it, so the rollup is a single read
-rather than a tree walk. For **sub-agents**, the subtree is the sub-agent itself (its `budget` cell is
-seeded `Infinity` and unused for gating), so the same fields carry single-run totals taken from the
-run's own token/iteration counts.
+tree, taken from the child run's **`RunContext.subtreeConsumed`** accumulator
+([../data-model.md](../data-model.md)) — **not** from a delta of the shared `AggregateBudget` cell.
+
+> **Per-subtree numbers come from `subtreeConsumed`, NOT a shared-cell delta (the corrected rule).** An
+> earlier draft computed the per-child rollup as "captured-at-spawn remaining − remaining-at-return" of
+> the **shared** cell, asserting that "because the cell is shared, the rollup is a single read." **That
+> is unsound under concurrent siblings** (a first-class case in the budget model): the shared cell is a
+> *tree-wide* accumulator decremented by **all** nodes, so a child's spawn-to-return delta would absorb
+> any **sibling's** spend during its window and misattribute it (two concurrent `$0.10` siblings would
+> each report ~`$0.20`). The normative mechanism is therefore the **per-subtree `subtreeConsumed`
+> accumulator**: each child run carries its own (zeroed at spawn), accrues its own turns' cost/iterations
+> and folds in each settled descendant's `subtreeConsumed` on return — so a node reports **only its own
+> subtree's** spend regardless of concurrent siblings. The **shared `AggregateBudget` cell** remains the
+> authority for the **spawn gate** and the **root-header rollup** (a single direct read of the *root's*
+> cell is correct there, because the root subtree *is* the whole tree); per-child attribution is the
+> accumulator's job. Even in v1 (where flow children don't actually run concurrently — see
+> [run-loop.md](run-loop.md) axes table), the accumulator is the normative source so the numbers stay
+> correct if concurrent `run_flow` is ever introduced.
+
+For **sub-agents**, the subtree is the sub-agent itself (its `budget` cell is seeded `Infinity` and
+unused for gating), so `subtreeConsumed` carries single-run totals taken from the run's own
+token/iteration counts.
 
 ### Back-compat guarantee (the back-compat parse — TEST-006)
 
@@ -297,8 +319,8 @@ what it reads:
 | Structure: orchestration steps + child flows | `orchestration_edges` (`next`/`prev` for the step chain; `child`/`parent` for cross-flow descent/ascent) |
 | Structure: sub-agent children | the sub-agent `parent_conversation_id` scalar (`src/tools/use-subagent.ts:430`) |
 | Per-node identity / label | `orchestration_*` header fields (§1) for steps; `name` / `profile_name` from `child_run_metadata` for child-flow / sub-agent nodes |
-| Header aggregate rollup (root cost / iterations / max depth) | the root run's shared `RunContext.budget` cell consumption ([contracts/run-loop.md](run-loop.md)) |
-| Peek-card numbers on a spawning tool-call | `child_run_metadata` (aggregate subtree for flows; single-run for sub-agents) — §5 |
+| Header aggregate rollup (root cost / iterations / max depth) | the **root** run's `RunContext.subtreeConsumed` (equivalently, the root cell's total spend — the root subtree is the whole tree); reconstructed on reload by replaying `turn.complete` `cost_usd`/`token_usage` ([contracts/run-loop.md](run-loop.md), [contracts/vault-schema.md](vault-schema.md)) |
+| Peek-card numbers on a spawning tool-call | `child_run_metadata` (per-subtree `subtreeConsumed` for flows — **not** a shared-cell delta; single-run for sub-agents) — §5 |
 | Live updates while a run is active | `WorkflowActivityTracker.onChange()` over the `session-log.jsonl` write points (`turn.start` / `turn.complete` / `event.emitted`) — see [contracts/vault-schema.md](vault-schema.md) |
 | Descend affordance on a tool-call card | `via_tool_call_id` on the `child` edge (run_flow only) |
 | Select-to-navigate into a node | the existing `notor-conversation://{id}` jump + `switchToConversationById` (`src/ui/message-renderer.ts:957`, `src/chat/orchestrator.ts:741`) |

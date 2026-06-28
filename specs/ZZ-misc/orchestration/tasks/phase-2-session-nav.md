@@ -73,9 +73,10 @@ child — see `INT-044`; this task implements only the owning-session case.)
 
 `session.json` shape and the `session-log.jsonl` entry types / enforced write order are defined by
 [../contracts/vault-schema.md](../contracts/vault-schema.md) (`OrchestrationSessionMeta` in
-[../data-model.md](../data-model.md)); do not redefine them here. The `parent_session_id` / `origin`
-fields exist on `session.json` from the start but are written `null` until Phase 7 composition
-(`INT-044`).
+[../data-model.md](../data-model.md)); do not redefine them here. **`origin` is always set at creation
+and is never null** (the recovery discriminator, Issue-4b): a command/`Run Orchestration` launch stamps
+`origin: "user"`; Phase 7 composition stamps `run_flow` / `chaining` (`INT-044`/`INT-045`).
+`parent_session_id` is `null` for a root and set for a composition child (Phase 7).
 
 **FRs:** FR-120 (session workspace), FR-121 (shared scratchpad + path auto-allow).
 
@@ -108,7 +109,8 @@ caller that creates a session on start).
   path-enforcer tests, unmodified).
 - [ ] Per-step path constraints for all non-scratchpad paths are unchanged for orchestration step turns,
   and `enforcePathConstraints` behavior is unchanged for all non-orchestration tool calls.
-- [ ] `parent_session_id` and `origin` are present in `session.json` and default to `null`.
+- [ ] `origin` is **always set** in `session.json` at creation (`"user"` for a command launch — never
+  null); `parent_session_id` is `null` for a root.
 
 ---
 
@@ -255,25 +257,41 @@ step's persona already grants for the orchestrations directory.
 recoverable sessions and replay `session-log.jsonl` to the last consistent state (FR-125). The recovery
 rules follow [orchestration.md → Session Recovery]:
 
-- **Parent-rooted scan (no duplicate child runs).** The top-level scan recovers **only root sessions**
-  (`origin: "user"`) with status `active`/`interrupted`. A **child session** (`origin ∈ {run_flow,
-  chaining}`) is **never** recovered by the top-level scan — its lifecycle is owned by the parent turn
-  that spawned it, which is *also* being replayed. When the parent step that invoked `run_flow` is
-  replayed (its `turn.start` dangles): if the linked child session already reached a terminal status
-  (`completed`/`cancelled`), the parent **reuses the child's recorded result** (read from the child's
-  `session.json`/log) rather than re-spawning; if the child is non-terminal, the parent's replay
-  **tombstones** the stale child (mark its `session.json` status `error`/abandoned) and **re-spawns** a
-  fresh child. This eliminates the race where an independently-recovered child runs *and* the re-run
-  parent spawns a duplicate (the bug this rule exists to prevent). Child↔parent linkage is
-  `parent_session_id` + the `child`/`parent` edges (INT-006 / INT-044).
+- **Recovery-root selection by `origin` (always set; loud on unexpected).** The top-level scan recovers
+  sessions with status `active`/`interrupted` by `origin`: **`origin: "user"`** (always); and
+  **`origin: "chaining"` iff its `parent_session_id` resolves to an already-terminal predecessor** — a
+  chained successor is fire-and-forget (its predecessor finalized before it launched, so there is no
+  live parent to reconcile it; it is recovered as its own root, closing the orphan hole, Issue-3).
+  `origin: "run_flow"` (and a `chaining` session whose parent is still non-terminal) is **not** recovered
+  by the top-level scan — it is reconciled by the parent's replay (`INT-044`). A session with an
+  **absent or unexpected `origin`** is surfaced as a **loud recovery error** (offered as resume-as-root),
+  never silently skipped (Issue-4b). `run_flow` being orchestration-context-only (FR-172) guarantees no
+  parentless chat-launched child can exist.
+- **`run_flow` child reconciliation via `child.spawned`/`child.result` (Issue-1/2).** When a parent
+  turn that invoked `run_flow` is replayed (its `turn.start` dangles), the parent's `child.spawned` /
+  `child.result` log entries drive reconciliation: a child with a recorded `child.result` (terminal) is
+  **reused** — the recorded `structured`/`text` + `stop_reason` is fed back, the parent does **not**
+  re-spawn; a `child.spawned` with no `child.result` (non-terminal) is **resumed in place** — the child
+  session replays its **own** log and the parent awaits it. **Tombstone-and-respawn is removed**: because
+  the child keeps its session/log, its `side_effect.committed` markers survive, so `once(...)` dedupes
+  across the crash for child flows (a respawned fresh child would re-run every prior guarded effect).
 - If the last log entry is a `turn.start` with no matching `turn.complete`, the turn was interrupted →
   **re-emit the triggering event** (the step retries from fresh context; per-step turns are
   fresh-context by design, so retry is safe — **provided scratchpad writes are overwrite-only**, FR-121,
   so a re-run reproduces rather than duplicates scratchpad content).
 - If the last entry is an `event.emitted` with no following `turn.start`, the event was logged but not
   routed → **re-publish the event**.
-- A **truncated/partial final line** (crash mid-write) is treated as absent — the last *complete* entry
-  governs recovery (this is the `TEST-005` truncated-log case).
+- **Budget + safety rehydration (Issue-5/6).** Before resuming, the in-memory `AggregateBudget` cell is
+  re-seeded from the flow's (defaulted, finite) ceilings and decremented by replaying each
+  `turn.complete`'s recorded `cost_usd` / `token_usage`, so the cost/iteration ceiling and the run-tree
+  header rollup reflect pre-crash spend (a `$5.00` cap is not reset to `$5.00` on resume). The stale
+  rolling window and per-task thrashing/abandonment counters are rebuilt from the replayed
+  `event.emitted` / task history in the same pass, so a near-stale self-loop is not zeroed by a reload.
+- **Malformed-line policy (Issue-13d).** A **truncated/partial final line** (crash mid-write) is
+  tolerated — the last *complete* entry governs (the `TEST-005` truncated-log case). A malformed
+  **interior** line is **not** silently skipped/truncated-at: that session's recovery **fails loudly**
+  (mark `session.json` status `error`, surface the error) rather than dropping the dangling tail that
+  drives replay.
 - **Edge backfill tolerance (5b).** A re-run mints **new** conversation ids, so a pre-crash `next`/`prev`
   edge may now point at an abandoned conversation. Recovery **re-backfills** `next`/`prev` against the
   new conversation ids as the resumed steps run; the run-tree (POL-003) **renders only resolvable edges
@@ -300,24 +318,31 @@ must define recovery generically enough that a dangling `user.input.required` (n
 `user.input.received`) recovers as "still paused, re-surface the prompt" rather than re-emitting a
 trigger. `INT-030` lists `INT-005` as a dependency.
 
-**Sequencing note (Risk #12 — parent-rooted child reconciliation):** The **root-only scan** and the
-overwrite-safety/edge-tolerance rules land in `INT-005` itself (Phase 2). The **child-reconciliation**
-half (a replayed `run_flow` reusing a completed child's result, or tombstoning-and-respawning a
-non-terminal child) depends on child sessions existing, which is composition (`INT-043`/`INT-044`, Phase
-7). `INT-005` therefore **defines the parent-rooted contract** (child sessions are not recovered by the
-top-level scan — they carry `origin ∈ {run_flow, chaining}`) so child sessions are inert to the Phase-2
-scanner; `INT-044` wires the parent-replay reuse/respawn behavior against it. Until composition lands,
-the only recoverable sessions are roots, so the contract is correct and complete for Phase 2.
+**Sequencing note (Risk #12 — parent-rooted child reconciliation):** The **root-selection scan** (incl.
+the chaining-root rule), the budget/safety rehydration, the malformed-line policy, and the
+overwrite-safety/edge-tolerance rules land in `INT-005` itself (Phase 2). The **`run_flow`
+child-reconciliation** half (reuse a terminal child's recorded `child.result`; **resume** a non-terminal
+child in place) depends on child sessions and the `child.spawned`/`child.result` log entries existing,
+which is composition (`INT-043`/`INT-044`, Phase 7). `INT-005` therefore **defines the parent-rooted +
+chaining-root contract** (which `origin`s the top-level scan selects, and that `run_flow` children are
+reconciled by parent replay — **never tombstoned-and-respawned**, always reused-or-resumed) so child
+sessions are inert to the Phase-2 scanner; `INT-044` wires the parent-replay reuse/resume behavior
+against it. Until composition lands, the only recoverable sessions are roots (`user`) and, once chaining
+lands, chaining-roots, so the contract is correct and complete for Phase 2.
 
 **FRs:** FR-125 (session recovery on reload).
 
 **Files:**
-- `src/orchestration/session-recovery.ts` — new: scan for `active`/`interrupted` sessions, read each
-  `session-log.jsonl`, classify the dangling tail, compute the idempotent resume action, and collect
-  the set of committed `side_effect.committed` keys so a re-run step's `orchestration.once(key, fn)`
-  skips already-committed effects.
+- `src/orchestration/session-recovery.ts` — new: select recoverable roots by `origin` (`user` always;
+  `chaining` iff its parent is terminal; loud error on absent/unexpected origin), read each
+  `session-log.jsonl`, classify the dangling tail, compute the idempotent resume action, **rebuild the
+  `AggregateBudget` cell from replayed `turn.complete` `cost_usd`/`token_usage` and rehydrate the
+  stale-window + thrashing counters from the replayed event/task history**, and collect the set of
+  committed `side_effect.committed` keys so a re-run step's `orchestration.once(key, fn)` skips
+  already-committed effects.
 - `src/orchestration/session-log.ts` — a reader/parser for `session-log.jsonl` (writer is `FEAT-006`);
-  tolerant of a truncated final line.
+  tolerant of a truncated **final** line, but **fails loudly on a malformed interior line** (marks the
+  session `error`) rather than silently truncating replay.
 - `src/orchestration/runner.ts` — a `resume(session)` entry point that re-emits / re-publishes per the
   classified tail without re-running already-completed turns.
 - `src/main.ts` — load-time scan that invokes session recovery and surfaces the resume prompt (gated on
@@ -327,21 +352,31 @@ the only recoverable sessions are roots, so the contract is correct and complete
 `FEAT-010` (the runner that re-emits/re-publishes and continues the loop).
 
 **Acceptance Criteria:**
-- [ ] On load, **root** sessions (`origin: "user"`) with status `active` or `interrupted` are discovered;
-  `completed` / `cancelled` / `error` sessions are ignored, and **child sessions
-  (`origin ∈ {run_flow, chaining}`) are NOT recovered by the top-level scan** (they are reconciled by
-  the parent replay — INT-044).
+- [ ] On load, `origin: "user"` sessions with status `active`/`interrupted` are discovered (always); an
+  `origin: "chaining"` session whose `parent_session_id` resolves to an **already-terminal** predecessor
+  is **also** recovered as a root (chained-successor orphan fix); `completed`/`cancelled`/`error`
+  sessions are ignored; `origin: "run_flow"` (and a `chaining` session with a non-terminal parent) are
+  **not** scanned (reconciled by the parent replay — INT-044).
+- [ ] A session with **absent or unexpected `origin`** is surfaced as a **loud recovery error** (offered
+  as resume-as-root), never silently skipped.
 - [ ] A dangling `turn.start` (no `turn.complete`) re-emits its trigger; the step retries from fresh
   context.
 - [ ] A dangling `event.emitted` (no following `turn.start`) re-publishes the event.
-- [ ] A truncated final log line is ignored; the last complete entry governs.
+- [ ] A truncated **final** log line is ignored; the last complete entry governs. A malformed **interior**
+  line **fails that session's recovery loudly** (marks `error`), never silently truncating replay.
 - [ ] Engine-bookkeeping replay is **idempotent**: replaying a recovered log a second time produces no
   additional events or double-counted turns (asserted by `TEST-005`).
+- [ ] The `AggregateBudget` cell is **rebuilt** by replaying `turn.complete` `cost_usd`/`token_usage`
+  (the cost/iteration ceiling is not reset to full on reload); the stale-window and thrashing counters
+  are **rehydrated** from the replayed event/task history (a near-stale self-loop fires on the next
+  repeat post-reload, not N more).
 - [ ] Recovery is **at-least-once for step execution**: a re-emitted trigger re-runs the step (and may
-  repeat an unguarded external side effect — documented boundary, not a defect).
+  repeat an unguarded external side effect **and re-spend budget / replay intra-step tool calls** —
+  documented boundary, not a defect).
 - [ ] A side effect wrapped in `orchestration.once(key, fn)` that already recorded a
   `side_effect.committed` entry is **skipped** on a recovery re-run (best-effort; a crash before the
-  marker is written may still re-run it).
+  marker is written may still re-run it) — **including across a non-terminal child resume** (the child
+  keeps its log, so the markers survive; no tombstone-and-respawn).
 - [ ] The recovery classifier leaves room for a dangling `user.input.required` to be treated as "still
   paused" (consumed by `INT-030`), not as an interrupted turn.
 - [ ] Recovery re-runs are safe against scratchpad state because writes are overwrite-only (FR-121); a
@@ -434,8 +469,18 @@ idempotent" AC.
 - [ ] A log ending in a dangling `event.emitted` recovers by re-publishing exactly once.
 - [ ] A log with a **truncated final line** recovers from the last complete entry (the truncated line is
   ignored, no parse throw).
+- [ ] A log with a **malformed interior line** fails that session's recovery **loudly** (marks `error`),
+  **not** silently truncating replay at the bad line.
 - [ ] **Idempotency (engine bookkeeping):** running recovery twice over the same log produces the same
   resume action and no duplicate events or double-counted turns.
+- [ ] **Budget reconstruction:** replaying `turn.complete` entries with `cost_usd`/`token_usage` rebuilds
+  the `AggregateBudget` cell to the pre-crash remaining (a `$5.00`-cap log that had spent `$4.90`
+  resumes at `$0.10` remaining, not `$5.00`).
+- [ ] **Safety-state rehydration:** a log at 3 consecutive identical `(topic, source_step)` pairs fires
+  the stale verdict on the **next** repeat after recovery (not 4 more); per-task abandonment counters
+  are likewise rebuilt.
+- [ ] **Chaining-root recovery:** an `origin: "chaining"` session whose `parent_session_id` resolves to a
+  terminal predecessor is selected as a recovery root; one whose parent is non-terminal is not.
 - [ ] **`once`-guarded side effect skip:** a log with a `side_effect.committed` entry for `key` causes a
   re-run's `orchestration.once(key, fn)` to skip `fn` (the committed-key set is collected during
   replay); an unguarded effect is documented as re-runnable (at-least-once boundary).

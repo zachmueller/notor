@@ -92,8 +92,8 @@ frontmatter**. Parsed into `OrchestrationFlow` ([data-model.md](../data-model.md
 | `notor-flow-description` | string | yes | — | Short description for the flow picker. |
 | `notor-starting-event` | string | yes | — | First event published when the flow starts. |
 | `notor-completion-event` | string | no | `FLOW_COMPLETE` | Terminal event that ends the loop; subject to task enforcement (FR-123). |
-| `notor-max-iterations` | number | no | — | Aggregate tree-wide ceiling on **LLM turns** (maps to `AggregateBudget.iterationsRemaining`; see [contracts/run-loop.md](run-loop.md)). **Code steps are not LLM turns and do not count toward it** — a code-step-only flow/cycle is bounded by `notor-max-runtime-minutes` + stale-loop detection instead (see [contracts/event-engine.md](event-engine.md)). |
-| `notor-max-runtime-minutes` | number | no | — | Wall-clock runtime cap (FR-117). |
+| `notor-max-iterations` | number | no | **`100`** (engine default; never absent at runtime) | Aggregate tree-wide ceiling on **LLM turns** (maps to `AggregateBudget.iterationsRemaining`; see [contracts/run-loop.md](run-loop.md)). **Code steps are not LLM turns and do not count toward it** — a code-step-only flow/cycle is bounded by `notor-max-runtime-minutes` + stale-loop detection instead (see [contracts/event-engine.md](event-engine.md)). When omitted, the `FlowDefinitionParser` injects the finite default (never `Infinity`). |
+| `notor-max-runtime-minutes` | number | no | **`60`** (engine default; never absent at runtime) | Wall-clock runtime cap (FR-117). When omitted, the parser injects the finite default — so **every** flow (including a code-step-only flow that decrements no budget) has a wall-clock backstop and cannot run unbounded. |
 | `notor-required-events` | string[] | no | `[]` | Events that must have been seen before `notor-completion-event` is accepted. |
 | `notor-fanout-topics` | string[] | no | `[]` | Topics explicitly allowed to route to **more than one** step (ordered fan-out, FR-112). A topic with >1 subscriber that is **not** listed here is a load error (FR-111). See the routing rules in [contracts/event-engine.md](event-engine.md). |
 | `notor-steps` | wikilink[] | yes | — | Ordered step references (`"[[planner]]"`), resolved under `steps/`. Order is the fan-out tie-break for a declared `notor-fanout-topics` topic (FR-112). |
@@ -104,8 +104,17 @@ frontmatter**. Parsed into `OrchestrationFlow` ([data-model.md](../data-model.md
 | `notor-flow-returns` | string | no | `null` | **Freeform** description of what the flow hands back to a caller (FR-170/173). |
 | `notor-on-complete-flow` | wikilink \| null | no | `null` | Chaining: successor flow launched at the terminal event (one-way handoff, no return) (FR-175). |
 | `notor-handoff-isolation` | `"isolated"` \| `"shared"` | no | `isolated` | Per-handoff scratchpad mode; `shared` inherits the parent's scratchpad and auto-allows its path (FR-174). |
-| `notor-max-depth` | number \| null | no | `null` | Composition-depth guardrail (caps nesting/chaining) on `RunContext` (FR-176). |
-| `notor-max-cost-usd` | number \| null | no | `null` | Aggregate tree-wide USD cost ceiling on `RunContext` (FR-176). |
+| `notor-max-depth` | number \| null | no | `null` (unlimited *depth*) | Composition-depth guardrail (caps nesting/chaining) on `RunContext` (FR-176). `null` is acceptable: unlimited nesting depth is still bounded by the always-present iteration/cost/runtime ceilings, so only those three are defaulted. |
+| `notor-max-cost-usd` | number | no | **`5.00`** (engine default; never absent at runtime) | Aggregate tree-wide USD cost ceiling on `RunContext` (FR-176). When omitted, the parser injects the finite default (never `Infinity`), so the cost fence is always active. |
+
+> **All three runaway ceilings are defaulted, never `Infinity` (FR-117 / FR-119a).** Although
+> `notor-max-iterations` / `notor-max-runtime-minutes` / `notor-max-cost-usd` are optional in
+> frontmatter, the `FlowDefinitionParser` (FEAT-002) injects finite engine defaults
+> (`100` / `60` / `5.00`, from `src/orchestration/constants.ts`) whenever a field is omitted — so a
+> hand-authored flow can never run with no effective termination ceiling. This is what makes the
+> "auto-terminate a stuck run" user story hold by construction even for a code-step-only flow (which
+> decrements neither budget half and is bounded by the always-present `max-runtime-minutes`). See
+> [data-model.md](../data-model.md) `OrchestrationFlow`.
 
 **Note body is documentation only.** The Markdown body of `definition.md` is human-readable and is
 **never injected into any LLM prompt** (FR-110 AC). Only the frontmatter drives engine behavior.
@@ -283,12 +292,12 @@ defined in [data-model.md](../data-model.md#sessionjson) — not redefined here.
 | `session_id` | string | Matches the directory name. |
 | `flow_name` | string | The flow's `notor-flow-name`. |
 | `status` | `"active"` \| `"interrupted"` \| `"completed"` \| `"cancelled"` \| `"error"` | Recovery scans for `active`/`interrupted` (FR-125). |
-| `iteration` | number | Current turn count. |
+| `iteration` | number | Current **step-turn / hop** count (display/sequence; **includes code steps**). This is the engine hop counter surfaced as `flow.iteration` and in the progress Notice — **not** the same unit as `notor-max-iterations` (which counts **LLM turns only**; see [run-loop.md](run-loop.md)). A code-step-heavy flow's `iteration` can climb well past `notor-max-iterations` without tripping it. |
 | `active_step` | string \| null | Step currently executing (or last, on crash). |
 | `started_at` | string | ISO timestamp. |
 | `prompt` | string | The original user objective (injected into every step turn). |
 | `parent_session_id` | string \| null | Composition linkage (FR-174). |
-| `origin` | `"user"` \| `"run_flow"` \| `"chaining"` \| null | How this session was launched. |
+| `origin` | `"user"` \| `"run_flow"` \| `"chaining"` | **Always set at creation** (never null); the recovery discriminator. See [data-model.md](../data-model.md) `OrchestrationSessionMeta` and Parent-rooted recovery below. |
 
 `status` is the recovery entry point; the authoritative replay source is `session-log.jsonl`.
 
@@ -297,23 +306,49 @@ defined in [data-model.md](../data-model.md#sessionjson) — not redefined here.
 ## `session-log.jsonl` — Append-Only Turn + Event Log
 
 The crash-recovery source of truth at `sessions/{session-id}/session-log.jsonl`. One JSON object per
-line, written **by the engine** (never by step code). Newline-terminated, append-only; a truncated
-trailing line is tolerated by the recovery replay (FR-125 / TEST-005). Written via the `SessionLog`
-writer (FEAT-006).
+line, written **by the engine** (never by step code). Newline-terminated, append-only. Written via the
+`SessionLog` writer (FEAT-006).
+
+**Malformed-line policy (recovery parser contract — FR-125 / TEST-005).** The replay parser tolerates
+**only a malformed/truncated *final* line** — the expected crash signature of an append-only log (a
+crash mid-append leaves a partial last line, treated as absent; the last *complete* entry governs). A
+malformed line **in the interior** of the file (a torn non-atomic flush, an external sync/editor
+touching the file) is **not** silently skipped or silently truncated-at: the parser **fails that
+session's recovery loudly** — it surfaces a recovery error, marks the session `status: error`, and
+offers the failure to the user — rather than dropping every entry after the bad line (which would
+discard exactly the dangling `turn.start` / `event.emitted` tail that drives replay and silently
+mis-recover the run). TEST-005 covers both the tolerated trailing-truncation case and an interior-
+corruption case.
 
 ### Entry type table
 
 | `type` | Written when | Key fields |
 |---|---|---|
-| `session.start` | Flow start, before the starting event | `session_id`, `flow`, `prompt`, `ts` |
+| `session.start` | Flow start, before the starting event | `session_id`, `flow`, `prompt`, `origin`, `parent_session_id`, `ts` |
 | `event.emitted` | Immediately **before** an event is routed (write-before-route) | `turn`, `topic`, `payload`, `source_step`, `ts` |
 | `turn.start` | **Before** the LLM call (conversation) or code execution (code) begins | `turn`, `step`, `trigger_topic`, `conversation_id` (null for code), `ts` |
 | `side_effect.committed` | **After** a guarded side effect completes inside `orchestration.once(key, fn)` (FR-125) | `turn`, `step`, `key`, `ts` |
-| `turn.complete` | **After** the emitted event is captured (or `default_publishes` synthesized) | `turn`, `step`, `emitted_topic`, `conversation_id`, `ts` |
+| `child.spawned` | **Before** a `run_flow` child is launched (FR-125 / FR-173 reuse anchor) | `turn`, `step`, `via_tool_call_id`, `child_session_id`, `ts` |
+| `child.result` | **After** a `run_flow` child returns, **before** the parent turn continues | `turn`, `child_session_id`, `stop_reason`, `structured` (or null), `text`, `ts` |
+| `turn.complete` | **After** the emitted event is captured (or `default_publishes` synthesized) | `turn`, `step`, `emitted_topic`, `conversation_id`, **`cost_usd`**, **`token_usage`** `{input,output}`, `ts` |
+| `event.emission_overwritten` | A step's captured `pendingEmission` was **replaced** within a turn (audit; terminal-emit latch — [contracts/tools.md](tools.md)) | `turn`, `step`, `prev_topic`, `new_topic`, `ts` |
 | `user.input.required` | A step emits the pausing event (FR-150) | `turn`, `step`, `prompt`, `ts` |
 | `user.input.received` | The user supplies input and the loop resumes | `turn`, `payload`, `ts` |
 | `session.cancelled` | `FLOW_CANCELLED` terminates the loop (FR-132) | `reason` (the payload), `ts` |
 | `session.complete` | `notor-completion-event` finalizes the flow (FR-123 satisfied) | `ts` |
+
+> **`turn.complete` carries per-turn cost/tokens (FR-125 budget reconstruction).** `cost_usd` (via
+> `calculateCost`, [run-loop.md](run-loop.md)) and `token_usage` are recorded on every `turn.complete`
+> so recovery can **rebuild the in-memory `AggregateBudget` cell and the run-tree header rollup** by
+> replaying decrements — the aggregate cost/iteration ceiling and the rollup therefore survive a
+> reload instead of silently resetting to full. A code step's `turn.complete` records
+> `cost_usd: 0` / zero tokens (it is not an LLM turn).
+>
+> **`child.spawned` / `child.result` make a `run_flow` child re-usable across a crash.** A parent turn
+> that invokes `run_flow` writes `child.spawned` before launching and `child.result` (the child's
+> `structured`/`text` + `stop_reason`) when it returns. On recovery (Parent-rooted recovery, below),
+> a re-run parent reuses a **terminal** child's recorded `child.result` instead of re-spawning — the
+> durable artifact the earlier "reuse the child's recorded result" rule referenced but never persisted.
 
 ### Enforced write order (recovery invariant)
 
@@ -335,42 +370,102 @@ The order below is **mandatory** — recovery replay depends on it (FR-112, FR-1
    [contracts/orchestration-helper.md](orchestration-helper.md) (At-least-once recovery). Recovery is
    **at-least-once**: a step with non-idempotent external effects must be idempotent or guard itself
    with `once(...)`.
+5. **`child.spawned` before launching a `run_flow` child; `child.result` after it returns, before the
+   parent turn continues.** `child.spawned` is the recovery anchor that lets a re-run parent find the
+   child it previously spawned (matched by `via_tool_call_id` / occurrence order); `child.result`
+   durably records the child's `structured`/`text` + `stop_reason` so a **terminal** child's result is
+   *reused* on re-run rather than re-spawned. A `child.spawned` with no matching `child.result` ⇒ the
+   child was non-terminal at crash ⇒ recovery **resumes that child session in place** (replaying its
+   own log) and awaits its result — it is **not** tombstoned-and-respawned (see Parent-rooted recovery).
+6. **`turn.complete` records `cost_usd` + `token_usage`** so recovery rebuilds the `AggregateBudget`
+   cell and run-tree rollup by replaying decrements (budget survives reload). The safety guards' rolling
+   stale window and per-task thrashing counters are likewise **rehydrated** from the replayed
+   `event.emitted` / task history before the run resumes — so a near-stale self-loop is not reset by a
+   reload (see Parent-rooted recovery, "State rehydration").
 
-Sequence per step turn: `turn.start` → (LLM/code runs; `side_effect.committed` per guarded effect) →
-`turn.complete` → `event.emitted` → (route).
+Sequence per step turn: `turn.start` → (LLM/code runs; `side_effect.committed` per guarded effect;
+`child.spawned`/`child.result` per `run_flow` call) → `turn.complete` (with `cost_usd`/`token_usage`)
+→ `event.emitted` → (route).
 
 ### Parent-rooted recovery (no duplicate child runs — FR-125)
 
-Recovery is **parent-rooted**: the load-time scan recovers **only root sessions** (`session.json`
-`origin: "user"`). A **child session** (`origin ∈ {run_flow, chaining}`, with `parent_session_id` set)
-is **never** recovered by the top-level scan — its lifecycle belongs to the parent turn that spawned it,
-which is itself replayed. When a parent step that invoked `run_flow` is replayed:
+Recovery is **parent-rooted**, with one explicit addition for chaining. The load-time scan selects a
+session to recover by its `session.json` `origin` (always set — see [data-model.md](../data-model.md)):
 
-- if the child already reached a terminal status (`completed`/`cancelled`), the parent **reuses the
-  child's recorded result** instead of re-spawning;
-- if the child is non-terminal, the parent's replay **tombstones** it (sets its `session.json` status to
-  `error`) and **re-spawns** a fresh child.
+| `origin` | Recovered by the top-level scan? | Lifecycle owner |
+|---|---|---|
+| `"user"` | **Yes**, always | itself (a root run) |
+| `"chaining"` | **Yes, iff** its `parent_session_id` resolves to an **already-terminal** predecessor | itself (the predecessor finalized — there is no live parent; see below) |
+| `"run_flow"` | **No** | its parent turn's replay (reuse / resume; see below) |
+| `"chaining"` with a **non-terminal** parent | **No** | its parent's replay (the rare case the parent is still alive) |
+| *absent / any other value* | **No, but surfaced as a recovery error** (loud, never silent) — offered as resume-as-root | n/a (a defaulting/write bug) |
 
-This removes the double-execution race (an independently-recovered child running *while* the re-run
-parent spawns a duplicate). The `origin` discriminator on `session.json` is the load-bearing field:
-**recovery filters on `origin === "user"`** at the top level. Wiring: INT-005 (root-only scan +
-contract) → INT-044 (parent-replay reuse/respawn). `once(...)` keys are per-session, so they do **not**
-deduplicate across a tombstoned-and-respawned child — which is *why* the parent-rooted rule (not
-per-effect guarding) is the mechanism that prevents duplicate child runs.
+**Why chaining must be a recovery root once its predecessor finalized.** Chaining
+(`notor-on-complete-flow`, FR-175) is a **one-way, fire-and-forget** handoff: the predecessor
+**finalizes** (status `completed`) *before* the successor launches, and the successor has **no
+awaiting tool call** (its `child` edge omits `via_tool_call_id` — [edges.md](edges.md)). So unlike a
+`run_flow` child, a chained successor has **no live parent turn to replay** — the predecessor is done.
+If the scan excluded it, a crash mid-successor would leave a permanently abandoned `active`/`interrupted`
+session (the orphan the parent-rooted model exists to prevent, reappearing for chaining). Therefore the
+scan **does** recover an `origin: "chaining"` session whose `parent_session_id` points at an
+already-terminal predecessor, treating it as its own root. Its `parent`/`child` edges are retained for
+run-tree lineage only; recovery treats it as a root. Wiring: INT-005 (scan + chaining-root rule).
+
+**`run_flow` child reconciliation (reuse a terminal child; resume a non-terminal one).** A `run_flow`
+child (`origin: "run_flow"`) is reconciled when its **parent step turn** is replayed. The parent turn's
+`child.spawned` / `child.result` log entries make this deterministic:
+
+- **Terminal child (`completed`/`cancelled`) → reuse, do not re-spawn.** The parent's re-run finds the
+  `child.spawned` for the `run_flow` call (matched by `via_tool_call_id` / occurrence order) and the
+  matching `child.result`, and **feeds the recorded result back** to the re-run in place of a fresh
+  spawn. This is the durable artifact the rule depends on — the child's `structured`/`text` +
+  `stop_reason` live in `child.result`, so "reuse the child's recorded result" is literally backed by
+  the log (closing the earlier "reuse has nothing to reuse" gap).
+- **Non-terminal child → resume in place, do not tombstone-and-respawn.** A `child.spawned` with no
+  matching `child.result` means the child was interrupted. Recovery **resumes that same child session**
+  by replaying *its own* `session-log.jsonl` (re-running only its dangling tail), then awaits its
+  completion and consumes its result. The child keeps its session id and its log, so its
+  `side_effect.committed` markers **survive natively** — `once(...)` therefore dedupes correctly across
+  the crash with **no** cross-session key needed. (The earlier "tombstone the stale child and re-spawn
+  a fresh one" rule is **removed**: a fresh child got an empty log, so every `once()`-guarded external
+  effect the interrupted child had already committed would re-run — a duplicate-effect hole. Resuming
+  the child in place eliminates it.)
+
+This preserves the no-double-execution invariant — a `run_flow` child is still **never** recovered
+independently by the top-level scan; the parent orchestrates its reuse-or-resume — while making
+`once()` truthful across recovery (Issue-2 fix) and giving "reuse" a real artifact (Issue-1 fix).
+
+**State rehydration on recovery (budget + safety guards).** Before a resumed run continues, recovery
+reconstructs the engine's in-memory runtime state from the replayed log, so it is not silently reset:
+
+- the **`AggregateBudget` cell** is re-seeded from the flow's ceilings (the defaulted finite values)
+  and then **decremented by replaying each `turn.complete`'s `cost_usd` / `token_usage`** — so the
+  cost/iteration ceiling and the run-tree header rollup reflect pre-crash spend (a `$5.00` cap resumed
+  mid-run does not reset to `$5.00`);
+- the **stale-loop rolling window** (last 5 `(topic, source_step)` pairs) and the **per-task
+  thrashing/abandonment counters** are rebuilt from the replayed `event.emitted` / task history — so a
+  self-loop at 3 of 4 strikes before a reload fires on the **next** repeat, not 4 more.
+
+Wiring: INT-005 (root-only + chaining-root scan, malformed-line policy, `child.spawned`/`child.result`
+classification, resume-in-place, state rehydration) → INT-044 (composition: parent-replay reuse/resume).
 
 ### Sample lines
 
 ```jsonl
-{"type":"session.start","session_id":"abc123","flow":"code-implementation","prompt":"implement --verbose flag","ts":"2026-06-27T10:00:00Z"}
+{"type":"session.start","session_id":"abc123","flow":"code-implementation","prompt":"implement --verbose flag","origin":"user","parent_session_id":null,"ts":"2026-06-27T10:00:00Z"}
 {"type":"event.emitted","turn":1,"topic":"build.start","payload":"implement --verbose flag","source_step":null,"ts":"2026-06-27T10:00:00Z"}
 {"type":"turn.start","turn":2,"step":"📋 Planner","trigger_topic":"build.start","conversation_id":"conv-uuid-1","ts":"2026-06-27T10:00:01Z"}
-{"type":"turn.complete","turn":2,"step":"📋 Planner","emitted_topic":"tasks.ready","conversation_id":"conv-uuid-1","ts":"2026-06-27T10:00:42Z"}
+{"type":"turn.complete","turn":2,"step":"📋 Planner","emitted_topic":"tasks.ready","conversation_id":"conv-uuid-1","cost_usd":0.0123,"token_usage":{"input":4200,"output":900},"ts":"2026-06-27T10:00:42Z"}
 {"type":"event.emitted","turn":2,"topic":"tasks.ready","payload":"{\"task\":\"step-01-impl\"}","source_step":"📋 Planner","ts":"2026-06-27T10:00:42Z"}
 {"type":"turn.start","turn":3,"step":"🔍 Verify Tests","trigger_topic":"build.done","conversation_id":null,"ts":"2026-06-27T10:05:10Z"}
-{"type":"turn.complete","turn":3,"step":"🔍 Verify Tests","emitted_topic":"tests.failed","conversation_id":null,"ts":"2026-06-27T10:05:31Z"}
+{"type":"turn.complete","turn":3,"step":"🔍 Verify Tests","emitted_topic":"tests.failed","conversation_id":null,"cost_usd":0,"token_usage":{"input":0,"output":0},"ts":"2026-06-27T10:05:31Z"}
 {"type":"event.emitted","turn":3,"topic":"tests.failed","payload":"{\"exitCode\":1}","source_step":"🔍 Verify Tests","ts":"2026-06-27T10:05:31Z"}
 {"type":"session.complete","ts":"2026-06-27T10:20:00Z"}
 ```
+
+> Note the code step (turn 3, 🔍 Verify Tests) records `cost_usd: 0` and zero tokens — it is not an
+> LLM turn. A `run_flow` parent turn would additionally bracket `child.spawned` … `child.result`
+> entries between its `turn.start` and `turn.complete`.
 
 ---
 

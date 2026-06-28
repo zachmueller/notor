@@ -70,8 +70,8 @@ Pipeline:
 
 4. **Execute** the compiled async function with a **timeout guard** wrapping the *whole* async function.
    The default is **300 s (5 min)**, overridable per step via the **`notor-step-timeout-seconds`**
-   frontmatter field ([vault-schema.md](vault-schema.md)). On expiry the run is abandoned and the step
-   errors (`{step}.code_error`).
+   frontmatter field ([vault-schema.md](vault-schema.md)). On expiry — **at the next `await` boundary**,
+   see the limitation below — the run is abandoned and the step errors (`{step}.code_error`).
 
    > **The step timeout must exceed any inner shell timeout.** A code step that runs a long command
    > (e.g. `utils.executeShellCommand("npm test", { timeoutSeconds: 120 })`) sets an **inner** budget;
@@ -80,6 +80,33 @@ Pipeline:
    > step that needs a longer command (large test suite, deploy) raises `notor-step-timeout-seconds`
    > accordingly. (This is why the default is 300 s, not the 60 s an MCP-style convention would suggest —
    > build/test verification is a primary code-step use case.)
+
+   > ### ⚠️ Known limitation — the timeout only fires at `await` boundaries; a synchronous loop is NOT interruptible
+   >
+   > The timeout guard is a `Promise.race` / `setTimeout` around the compiled `AsyncFunction`. Code steps
+   > run as `new AsyncFunction(...)` **on Obsidian's main (renderer) event-loop thread** — there is no
+   > Worker / VM isolation (full parity with user-defined tools, by design). A `setTimeout` callback can
+   > only fire when control **returns to the event loop**, i.e. at an `await`. Therefore:
+   >
+   > - **An unbounded *synchronous* section is NOT interruptible** by the timeout. A `while (true) {}`, a
+   >   CPU-bound transform, or a long synchronous loop with no `await` never yields, so the timeout never
+   >   fires, the step is **not** abandoned, and **the entire plugin freezes** (UI, foreground chat, every
+   >   other flow). `runContext.abort` has the same limitation — abort is observed only at `await` points.
+   > - **What the timeout *does* bound:** a step that is slow because it is `await`-ing (a long shell
+   >   command, network I/O, many tool calls) — the guard fires at the next `await` after expiry. This is
+   >   the common, intended shape (build/test verify, data fetch). Contrast the **inner**
+   >   `utils.executeShellCommand` timeout, which *is* a hard kill because the command runs
+   >   out-of-process (`child_process`), not on the event-loop thread.
+   >
+   > **Mitigation (this is trusted, author-written code — not LLM-generated):** the scaffold author
+   > guidance and the `orchestration-creator` persona instruct authors to **never write unbounded
+   > synchronous loops** and to **insert `await` yield points** (e.g. `await Promise.resolve()` or any
+   > tool/IO await) inside long loops so the timeout/abort can fire between iterations. **Future work:**
+   > running code steps in a `worker_threads` Worker with a watchdog that can hard-terminate a runaway is
+   > the only true fix, but it is **out of scope for v1** — it would break the `app`/`obsidian`/`utils`/
+   > `libs` main-thread parity that is the whole point of reusing the user-tool pipeline. The AC
+   > "the code-step timeout … abandons the step on expiry" is accordingly scoped to **`await`-yielding
+   > code**.
 5. **Capture** the returned `CodeStepResult` and hand its `{topic, payload}` back to the engine to
    route the next event (write-before-route, exactly like a conversation step's captured emit).
 
@@ -116,7 +143,10 @@ Notable members a code step inherits unchanged (full surface:
 
 > Because code steps run with full plugin privileges (same as user tools), the **timeout guard** and
 > `{step}.code_error` capture are the only runtime guardrails — by design, a code step is trusted code
-> the flow author wrote, not LLM-generated.
+> the flow author wrote, not LLM-generated. **Caveat (see the Known-limitation box above):** the timeout
+> guard only fires at `await` boundaries, so it does **not** protect against an unbounded *synchronous*
+> loop (which freezes the plugin). Author guidance + the `orchestration-creator` persona cover this;
+> Worker-based hard isolation is future work, out of scope for v1.
 
 ---
 
@@ -170,6 +200,10 @@ interface OrchestrationHelper {
    * BEST-EFFORT, not exactly-once: it cannot cover a crash that occurs DURING `fn` (after the effect
    * landed but before `side_effect.committed` is written) — such an effect may still re-run. It
    * collapses the common window, not the irreducible one. See "At-least-once recovery" below.
+   *
+   * Works for CHILD flows too: a non-terminal child is RESUMED in place on recovery (it replays its
+   * own session log), so its side_effect.committed markers survive — once() is NOT defeated by child
+   * recovery (the old tombstone-and-respawn rule, which gave a respawned child an empty log, is gone).
    */
   once<T>(key: string, fn: () => Promise<T>): Promise<T | undefined>;
 
@@ -336,8 +370,11 @@ timeout (per INT-010 / FR-130):
 2. An **error `Notice`** is shown (the one non-silent UI path besides explicit `utils.notify`).
 3. `turn.start` / `turn.complete` are **still written** to `session-log.jsonl` (audit + recovery).
 
-Author a step subscribing to `{step}.code_error` to handle failures, or let it route to the
-`FallbackCoordinator` (which terminates with `FLOW_ERROR`, FR-113).
+Author a step subscribing to `{step}.code_error` to handle failures. `{step}.code_error` is a
+**recognized failure channel** (Issue-10): unsubscribed, it is handled by the engine's default failure
+handler → a *diagnosable* `FLOW_ERROR` naming the step + carrying the error/stack (not an anonymous
+`FallbackCoordinator` orphan). See [event-engine.md](event-engine.md) (FallbackCoordinator — failure
+channels).
 
 ---
 
@@ -353,14 +390,32 @@ exactly-once**: a step that performed an **external, non-idempotent side effect*
 `utils.executeShellCommand("git push")`, a Slack post via `callMcpTool`, a deploy) and then crashed
 before `turn.complete` will **repeat that effect** on re-run.
 
+> **A re-run re-does the *whole* turn — it re-spends budget and replays intra-step tool calls (Issue-13g).**
+> "Re-runs from fresh context" means the entire interrupted step turn is repeated, not just the final
+> emission. A conversation step can run up to the per-run `iterationCap` (20) LLM turns of tool use
+> before emitting; a step that crashed on its 19th internal iteration redoes all 19 — **re-spending the
+> aggregate budget** (each re-run turn decrements the cost/iteration cell afresh) and **re-executing
+> every intra-step tool call that is not individually `once()`-guarded**. The corollary authors must
+> internalize: `once(...)` must wrap **every** non-idempotent intra-step effect — not only the obvious
+> external ones (`git push`/Slack/deploy) shown below, but any side-effecting MCP/shell/tool call made
+> mid-turn — and `notor-max-cost-usd` should be sized with the possibility of reload re-runs in mind.
+> (Recovery is offered as a user *resume prompt*, not silent auto-re-execution, which bounds how often
+> this happens in practice.)
+
 This is an inherent property — a plugin cannot make `git push` transactional — so the contract is
 named honestly and a guard primitive is provided rather than a guarantee implied:
 
 - **The boundary is the step author's to manage.** A code (or conversation) step with irreversible
   external effects must be idempotent or guard itself.
-- **`orchestration.once(key, fn)` is the guard.** It runs `fn` only if no `side_effect.committed`
-  entry for `key` exists in this session's log, and appends one on success. On a recovery re-run, the
-  already-committed `key` is skipped:
+- **`orchestration.once(key, fn)` is the guard, and it now survives a child-flow crash.** It runs `fn`
+  only if no `side_effect.committed` entry for `key` exists in this session's log, and appends one on
+  success. On a recovery re-run, the already-committed `key` is skipped. **Because a non-terminal child
+  flow is now *resumed in place* (it replays its own `session-log.jsonl`) rather than
+  tombstoned-and-respawned (FR-125, [vault-schema.md](vault-schema.md) Parent-rooted recovery), the
+  child keeps its session log — so its `side_effect.committed` markers survive the crash and `once()`
+  dedupes correctly across recovery for child flows too** (the earlier tombstone-and-respawn rule gave
+  the respawned child an empty log, defeating `once()` for every prior effect; that hole is closed). On
+  a recovery re-run, the already-committed `key` is skipped:
 
   ```typescript
   // Without a guard, a crash after push but before turn.complete re-pushes on recovery.

@@ -34,11 +34,33 @@ interface AggregateBudget {
 - **Sharing model:** the root run constructs one `AggregateBudget`; every descendant `RunContext`
   carries a reference to it. `decrementAggregate(budget, turnCostUsd)` (`src/run-loop/budget.ts`,
   ARCH-005) mutates the shared cell in place — there is no per-child copy.
-- **Concurrency:** concurrent in-flight turns (sub-agent semaphore cap 3; concurrent `run_flow`
-  children) may check-then-act across `await` points, so the ceiling tolerates **bounded overshoot**
-  (up to ≈ concurrency × one turn's spend). This is the same "in-flight runs finish their current
-  turn" semantics the spawn gate already specifies — exhaustion blocks *new* spawns, it never
-  hard-aborts a running turn. No lock is required.
+- **Overshoot (the soft-ceiling property).** The aggregate cost ceiling is a **soft** ceiling,
+  overshootable by **up to one full turn's spend per in-flight runner**, for *two independent*
+  reasons (the earlier draft named only the second):
+  1. **Decrement-after / check-before (applies even serially, at concurrency = 1).** A turn's cost is
+     subtracted from the cell **after** the turn completes and the next turn is gated on
+     `costRemainingUsd > 0` (strict-positive — **not** "enough headroom for the next turn"). A runner
+     sitting at any positive remainder (e.g. `$0.01`) therefore runs one more **whole** turn, whose
+     spend is itself unbounded by the budget (it scales with model, output length, and intra-turn tool
+     fan-out). No cost pre-flight reservation is attempted because per-turn cost is not knowable before
+     the turn runs — so this overshoot is *inherent*, not a bug. (Contrast the context-window cap,
+     which **does** pre-flight-reserve `lastInputTokens + 4096` because that quantity *is* known.)
+  2. **Concurrency check-then-act.** Concurrent in-flight turns may check-then-act across `await`
+     points, adding one more turn's overshoot per concurrent runner. In v1 a single flow tree runs
+     **one** LLM turn at a time (the engine routes single-threaded between turns; `run_flow` is a
+     `write` tool serialized within a turn; recursive `run_flow` is a serial awaited chain) — so the
+     only genuinely-parallel children are **sub-agents** (semaphore cap 3), and those seed a fresh
+     `Infinity` cell and never draw on a flow's cell. Net: for a flow tree, in-flight concurrency
+     against any one cell is effectively **1**, so the practical worst case is "the ceiling can go
+     negative by up to one max-cost turn." Exhaustion blocks *new* spawns; it never hard-aborts a
+     running turn. No lock is required.
+- **Reconstruction on reload (FR-125).** The cell is in-memory and **not** persisted as a running
+  total. Recovery rebuilds it by replaying the per-turn `cost_usd` / `token_usage` now recorded on
+  each `turn.complete` log entry (see [contracts/vault-schema.md](contracts/vault-schema.md) log
+  schema): the root's cell is re-seeded from the flow's ceilings (or the defaults below) and each
+  replayed `turn.complete` re-applies its decrement, so the cost/iteration ceiling and the run-tree
+  header rollup survive a reload rather than silently resetting to full. Without this, a `$5.00` cap
+  resumed at full after a crash-resume loop could be exceeded many times over.
 
 ### RunContext
 
@@ -51,17 +73,34 @@ interface RunContext {
   depth: number;               // current nesting depth (0 = top level)
   maxDepth: number;            // 0 for sub-agents (no nesting); N or Infinity for flows
   budget: AggregateBudget;     // SHARED tree-wide cell (by reference, never copied); see above
+  subtreeConsumed: SubtreeConsumed; // PER-SUBTREE accumulator (NOT shared); see below
   abort: AbortSignal;          // cascades from parent
+}
+
+// Per-subtree consumed accounting — the authority for child_run_metadata's aggregate numbers.
+// Distinct from the shared `budget` cell: each child run constructs its OWN SubtreeConsumed and
+// folds a settled child's totals into its parent's on return, so a node reports only the spend of
+// ITS OWN subtree, never absorbing concurrent siblings' spend (the bug the old "single read of the
+// shared cell" rollup had). See contracts/edges.md §5.
+interface SubtreeConsumed {
+  costUsd: number;             // this node's own turns + settled descendants' subtree cost
+  iterations: number;          // LLM turns: this node + settled descendants
+  maxDepthReached: number;     // deepest depth reached at or below this node
 }
 ```
 
 - A child run inherits the parent's `budget` **by reference** (`{ ...parent, depth: depth + 1 }`
-  copies the *reference*, so the cell is shared) and `depth + 1`.
+  copies the *reference*, so the cell is shared) and `depth + 1`, but constructs a **fresh**
+  `subtreeConsumed` (zeroed) — the subtree accumulator is *not* shared. When the child settles, its
+  final `subtreeConsumed` is **added into** the parent's `subtreeConsumed` (and surfaced on the
+  parent's `child_run_metadata`), so each subtree's numbers are isolated from concurrent siblings.
 - Spawning a child is gated on `depth < maxDepth` AND `budget.iterationsRemaining > 0` AND
-  `budget.costRemainingUsd > 0`.
+  `budget.costRemainingUsd > 0` — the **shared `budget` cell** remains the authority for the spawn
+  gate and the root-header rollup; `subtreeConsumed` is purely the per-child attribution channel.
 - Sub-agents seed `maxDepth = 0` and a fresh `budget` of `{ iterationsRemaining: Infinity,
   costRemainingUsd: Infinity }` → today's behavior, by construction (an `Infinity` cell can never be
-  the binding constraint, and nothing observable decrements it).
+  the binding constraint, and nothing observable decrements it). They also carry a `subtreeConsumed`
+  holding their own single-run totals (used for `child_run_metadata`).
 
 ### RunResult (always-both)
 
@@ -219,8 +258,8 @@ interface OrchestrationFlow {
   flowDir: string;              // {notor_dir}/orchestrations/{flow-name}/
   startingEvent: string;        // notor-starting-event
   completionEvent: string;      // notor-completion-event (default FLOW_COMPLETE)
-  maxIterations: number;        // notor-max-iterations
-  maxRuntimeMinutes: number;    // notor-max-runtime-minutes
+  maxIterations: number;        // notor-max-iterations (LLM turns; parser DEFAULT 100 when omitted — never Infinity)
+  maxRuntimeMinutes: number;    // notor-max-runtime-minutes (wall-clock; parser DEFAULT 60 when omitted)
   requiredEvents: string[];     // notor-required-events
   fanoutTopics: string[];       // notor-fanout-topics (default []); topics that MAY route to >1 step
   steps: StepDefinition[];      // resolved from notor-steps wikilinks under steps/
@@ -231,10 +270,22 @@ interface OrchestrationFlow {
   flowReturns: string | null;   // notor-flow-returns (freeform NL)
   onCompleteFlow: string | null;// notor-on-complete-flow (chaining successor wikilink)
   handoffIsolation: "isolated" | "shared"; // notor-handoff-isolation (default isolated)
-  maxDepth: number | null;      // notor-max-depth
-  maxCostUsd: number | null;    // notor-max-cost-usd (aggregate)
+  maxDepth: number | null;      // notor-max-depth (null = unlimited nesting depth; gated only by budget/iterations/runtime)
+  maxCostUsd: number;           // notor-max-cost-usd (aggregate USD; parser DEFAULT 5.00 when omitted — never Infinity)
 }
 ```
+
+> **Every flow is bounded by construction (FR-117 / FR-119a).** `maxIterations`, `maxRuntimeMinutes`,
+> and `maxCostUsd` are **optional in frontmatter but never absent at runtime**: when a field is
+> omitted the `FlowDefinitionParser` (FEAT-002) injects a finite engine default —
+> **`maxIterations = 100`, `maxRuntimeMinutes = 60`, `maxCostUsd = 5.00`** (tunable; defined in
+> `src/orchestration/constants.ts`). This closes the "flow authored with no effective ceiling" hole:
+> because code steps decrement neither budget half, a code-step-only cycle is bounded by the
+> always-present `maxRuntimeMinutes`, and an LLM cycle by the always-present cost/iteration ceilings —
+> so the "auto-terminate a stuck run" user story holds even when an author sets nothing. `maxDepth`
+> stays `null`-able (unlimited *depth* is acceptable because the budget/iteration/runtime ceilings
+> still bound total work); only the three runaway ceilings are defaulted. Authority for the default
+> values: [contracts/vault-schema.md](contracts/vault-schema.md) frontmatter table.
 
 ### StepDefinition
 
@@ -307,20 +358,52 @@ interface OrchestrationSessionMeta {
   started_at: string;
   prompt: string;                       // original user objective
   parent_session_id: string | null;    // composition linkage (design Phase 7)
-  origin: "user" | "run_flow" | "chaining" | null;
+  origin: "user" | "run_flow" | "chaining"; // ALWAYS set at session creation — never null; see below
 }
 ```
+
+- **`origin` is always set at creation (FR-125).** It is the load-bearing recovery discriminator, so
+  it is **never** `null`/absent: `OrchestrationSessionManager` stamps it when it writes `session.json`
+  (`user` for a command/`Run Orchestration` launch, `run_flow` for a `run_flow` child, `chaining` for
+  an `on-complete` successor). Recovery filters on it (below), so a missing/unknown value is a
+  **loud diagnostic**, not a silent skip:
+  - the top-level scan recovers `origin: "user"` (always), and `origin: "chaining"` **iff** its
+    `parent_session_id` resolves to an already-terminal predecessor (the chained-successor recovery
+    rule — [contracts/vault-schema.md](contracts/vault-schema.md) Parent-rooted recovery);
+  - `origin: "run_flow"` (and a `chaining` session whose parent is still non-terminal) is reconciled
+    by its parent's replay, never recovered independently;
+  - a session whose `origin` is **absent or any unexpected value** (a defaulting bug, a partially
+    written `session.json`) is **surfaced as a recovery error** (logged + offered as a resume-as-root
+    prompt), never silently skipped — mirroring the engine's "never silent" stance everywhere else.
 
 ### session-log.jsonl (append-only; crash-recovery source)
 
 Entry types and **enforced write order** in [contracts/vault-schema.md](contracts/vault-schema.md).
 Entry `type ∈ { session.start, turn.start, turn.complete, event.emitted, side_effect.committed,
-session.cancelled, session.complete, user.input.required, user.input.received }`.
+child.spawned, child.result, event.emission_overwritten, session.cancelled, session.complete,
+user.input.required, user.input.received }`.
+
+- `turn.complete` now also carries **`cost_usd`** and **`token_usage`** for the turn (FR-125 budget
+  reconstruction, Issue-5 fix) — recovery replays these decrements to rebuild the in-memory
+  `AggregateBudget` cell and the run-tree header rollup, so the cost/iteration ceiling survives a
+  reload (see `AggregateBudget` reconstruction above).
+- `child.spawned` / `child.result` (FR-125 / FR-173) durably record a `run_flow` child invocation so a
+  re-run parent can **reuse** a terminal child's result instead of re-spawning it (closing the
+  "reuse has nothing to reuse" hole). `child.spawned { turn, step, via_tool_call_id, child_session_id }`
+  is written **before** spawning; `child.result { turn, child_session_id, structured?, text,
+  stop_reason }` is written when the child returns, **before** the parent turn continues. Shapes +
+  write order: [contracts/vault-schema.md](contracts/vault-schema.md).
+- `event.emission_overwritten` (Issue-13e) records that a step's captured `pendingEmission` was
+  replaced within a turn (terminal-emit latch / audit); see
+  [contracts/tools.md](contracts/tools.md) `emit_event`.
 
 `side_effect.committed` (FR-125) records that a guarded side effect keyed `key` completed within a
 turn; recovery's at-least-once replay consults it so `orchestration.once(key, fn)` skips an
 already-committed effect on re-run (see [contracts/orchestration-helper.md](contracts/orchestration-helper.md)
 for the helper and [contracts/vault-schema.md](contracts/vault-schema.md) for the entry shape).
+Because a non-terminal child is now **resumed in place** (it replays its *own* log) rather than
+tombstoned-and-respawned, its `side_effect.committed` markers survive the crash natively, so
+`once(...)` dedupes correctly across recovery without any cross-session key (Issue-2 fix).
 
 ### Task note (`tasks/{key}.md`)
 
