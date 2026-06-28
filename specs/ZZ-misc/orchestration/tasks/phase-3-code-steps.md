@@ -78,7 +78,19 @@ compile error, runtime throw, unhandled rejection, or timeout, the executor fire
 `Notice`, and **still** writes `turn.start` / `turn.complete` to `session-log.jsonl` for audit and
 crash recovery (write-order per [../contracts/event-engine.md](../contracts/event-engine.md) /
 vault-schema). The error event then routes normally — to a step subscribing on `{step}.code_error`,
-or to the `FallbackCoordinator` (FR-113).
+or, if unsubscribed, it is a **recognized failure channel** handled by the engine's default failure
+handler → a *diagnosable* `FLOW_ERROR` naming the step (Issue-10), not an anonymous `FallbackCoordinator`
+orphan.
+
+**Known limitation — the timeout fires only at `await` boundaries (Issue-7).** Code steps run as
+`new AsyncFunction(...)` on the **main event-loop thread** — there is **no Worker / VM isolation** in v1
+(`src/extensions/compiler.ts`). The `setTimeout`-based timeout guard can only preempt the function **when
+it yields at an `await`**: an unbounded **synchronous** loop (`while (true) {}`, a tight CPU loop with no
+`await`) is **not interruptible** — it freezes the plugin and the timeout cannot fire. The timeout AC
+below is therefore scoped to **await-yielding code**. Mitigation is authoring guidance (POL-001 /
+DOC-001 / the `orchestration-creator` persona): **never write an unbounded synchronous loop in a code
+step**, and insert `await` yield points in long loops so the guard can fire. Worker/VM isolation that
+would make synchronous loops preemptible is **future work / out of scope for v1**.
 
 **Cost / identity:** a code step creates no conversation and consumes zero tokens; it is **not an LLM
 turn**, so it draws on **neither** half of the shared aggregate `RunContext.budget` cell — neither
@@ -122,16 +134,25 @@ into this executor; the conversation path it skips).
 - [ ] The first `ts`/`typescript`/`js`/`javascript` fence in `bodyContent` is extracted, type-stripped
   via `stripTypes()`, and compiled to an `AsyncFunction` with exactly `CODE_STEP_ARG_NAMES`.
 - [ ] A missing/empty fence is treated as a code error (does not throw).
-- [ ] Execution is bounded by a timeout guard (default **300 s**, overridable per step via `notor-step-timeout-seconds`; the outer guard must exceed any inner shell `timeoutSeconds`); on expiry the run is
-  abandoned and the step errors.
-- [ ] On compile error, runtime throw, unhandled rejection, or timeout, the executor fires a
-  `{step}.code_error` event carrying the error message + stack **and** shows an error `Notice`.
+- [ ] **For await-yielding code**, execution is bounded by a timeout guard (default **300 s**,
+  overridable per step via `notor-step-timeout-seconds`; the outer guard must exceed any inner shell
+  `timeoutSeconds`); on expiry at an `await` boundary the run is abandoned and the step errors.
+- [ ] **Documented limitation (Issue-7):** because code steps run as `new AsyncFunction` on the main
+  event-loop thread (no Worker/VM isolation in v1), the timeout fires **only at `await` boundaries** — an
+  unbounded **synchronous** loop is **not** interruptible and freezes the plugin; the mitigation is
+  authoring guidance (never write unbounded sync loops; insert `await` yield points), and Worker isolation
+  is future work.
+- [ ] On compile error, runtime throw, unhandled rejection, or (await-yielding) timeout, the executor
+  fires a `{step}.code_error` event carrying the error message + stack **and** shows an error `Notice`.
 - [ ] `turn.start` and `turn.complete` are written to `session-log.jsonl` **even on error** (audit +
   recovery).
 - [ ] A code step decrements **neither** `RunContext.budget.costRemainingUsd` **nor**
   `budget.iterationsRemaining` (it is not an LLM turn; `notor-max-iterations` counts LLM turns only —
   D2/FR-117). It **does** advance the engine **step-turn** sequence counter (`flow.iteration` display),
   participate in **stale-loop** detection (it emits an event), and elapse **wall-clock runtime**.
+  (Note — Issue-13c: `flow.iteration` / `session.json.iteration` is a **step-turn / HOP counter that
+  INCLUDES code steps** and is **not** the same unit as `notor-max-iterations`, which counts **LLM turns
+  only**; the two must not be conflated.)
 - [ ] A returned `CodeStepResult`'s `{topic, payload}` is handed to the engine for write-before-route
   routing; a `topic` not in the step's `notor-step-publishes` is treated as an orphan
   (FallbackCoordinator, FR-113), identical to a conversation-step emission.
@@ -160,7 +181,11 @@ contract; do not redefine it here. Members:
   re-run an already-committed `key` skips `fn` (returns `undefined`). Wrap non-idempotent external
   effects (git push, Slack/MCP post, deploy). Best-effort, not exactly-once — cannot cover a crash
   *during* `fn` (authority: [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md),
-  At-least-once recovery).
+  At-least-once recovery). **The markers now survive a non-terminal child resume (Issue-2):** because a
+  crashed non-terminal `run_flow` child is **resumed in place** (it replays its own
+  `session-log.jsonl`) — **never tombstoned-and-respawned** — its `side_effect.committed` keys persist
+  across the crash, so `once(...)` dedupes correctly across recovery for child flows too (a respawned
+  fresh child would have an empty log and re-run every prior guarded effect).
 - `scratchpad` (`read`/`write`/`list`/`exists`) → backed by the owning session's
   `sessions/{id}/scratchpad/` (INT-001). The session's scratchpad path is auto-allowed in path
   enforcement (FR-120/FR-121), so a code step needs no explicit `allowed_paths`. **`write` is
@@ -168,10 +193,11 @@ contract; do not redefine it here. Members:
   (FR-121/125).
 - `callTool(name, params)` / `callMcpTool(server, tool, params)` → dispatch through the **same**
   `ToolDispatcher.dispatch()` seam (`src/chat/dispatcher.ts:388`) as LLM tool calls, **threading the
-  step's `runContext` (depth + shared aggregate-budget cell + parent abort) and `orchestrationContext`
-  onto `ToolExecuteOptions`** (constructed by INT-010 from the runner-supplied shared budget cell + depth
-  + abort) — so a child-spawning tool (`run_flow`) reached from a code step is **depth/budget-gated and
-  abort-cascaded identically** to an LLM-step call (no guardrail bypass; authority
+  step's `runContext` (depth + shared aggregate-budget cell + fresh per-node `subtreeConsumed`, Issue-12
+  + parent abort) and `orchestrationContext` onto `ToolExecuteOptions`** (constructed by INT-010 from the
+  runner-supplied shared budget cell + depth + a fresh `subtreeConsumed` + abort) — so a child-spawning
+  tool (`run_flow`) reached from a code step is **depth/budget-gated and abort-cascaded identically** to
+  an LLM-step call (no guardrail bypass; authority
   [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md) "runContext propagation"
   + [../contracts/run-loop.md](../contracts/run-loop.md) spawn gate). Honor path enforcement and the
   owning session's auto-allowed scratchpad path. `callMcpTool` namespaces as `{serverName}__{toolName}`
@@ -220,7 +246,9 @@ the `tasks` member shares their backing).
 - [ ] A terminal `emit(topic, payload, structured)` populates `RunResult.structured` (lifted by the
   runner, INT-010); a non-terminal emit ignores `structured`.
 - [ ] `once(key, fn)` runs `fn` once and appends `side_effect.committed`; a re-run with an
-  already-committed `key` skips `fn` and returns `undefined` (best-effort at-least-once guard).
+  already-committed `key` skips `fn` and returns `undefined` (best-effort at-least-once guard) —
+  **including across a non-terminal child resume** (the child resumes in place and keeps its log, so the
+  markers survive; no tombstone-and-respawn — Issue-2).
 - [ ] A code step that returns no `CodeStepResult` synthesizes the step's
   `notor-step-default-publishes` (parity with a no-emit conversation turn, FR-115).
 - [ ] `callTool` / `callMcpTool` dispatch through `ToolDispatcher.dispatch()` (registered built-in
@@ -236,7 +264,8 @@ the `tasks` member shares their backing).
 - [ ] `tasks.ensure/start/close/list` share the INT-002 task backing; `ensure` is idempotent;
   `list({status})` filters by status.
 - [ ] `flow.name`/`flow.iteration`/`flow.sessionId` reflect the current turn; `flow.iteration` equals
-  the engine turn counter.
+  the engine **step-turn / HOP counter (includes code steps)** — distinct from `notor-max-iterations`,
+  which counts LLM turns only (Issue-13c).
 - [ ] `eventHistory(limit?)` returns the session's recent `OrchestrationEvent`s (newest last;
   `limit` defaults to all).
 - [ ] `utils` and `libs` are the **identical** objects from `buildUtils()`/`buildLibs()` — no
@@ -352,7 +381,10 @@ runner suite but is verified here for the helper-emit path).
 - [ ] **Type strip + arg signature:** a typed fence compiles via `stripTypes()`; the compiled function
   is invoked with exactly `CODE_STEP_ARG_NAMES` (`app`, `obsidian`, `utils`, `libs`, `event`,
   `orchestration`).
-- [ ] **Timeout:** a fence that exceeds the timeout guard is abandoned and surfaces `{step}.code_error`.
+- [ ] **Timeout (await-yielding code):** a fence that **yields at `await`** and exceeds the timeout guard
+  is abandoned and surfaces `{step}.code_error`. The test documents the **sync-loop limitation**
+  (Issue-7): an unbounded **synchronous** loop is **not** interruptible by the `setTimeout`-based guard
+  (no Worker isolation in v1) — so the timeout AC is explicitly scoped to await-yielding code.
 - [ ] **Error → `{step}.code_error`:** compile error, runtime throw, and unhandled rejection each fire
   `{step}.code_error` (payload carries message + stack), show an error `Notice`, and still write
   `turn.start`/`turn.complete`.

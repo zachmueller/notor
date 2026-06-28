@@ -124,6 +124,31 @@ Authority for the resolution: this Finding + [data-model.md](data-model.md) (`Re
 pinning) + [contracts/run-loop.md](contracts/run-loop.md) (the `model` on `RunLoopOptions` is pinned,
 never global). Tracked as **ARCH-007** ([tasks.md](tasks.md), Phase 0); FEAT-007 depends on it.
 
+### Post-review corrections verified (HEAD-grounded)
+
+Two HEAD facts back design corrections applied during review; both are verified against the working tree
+and named here so the corrected designs rest on real code, not assumption:
+
+- **Code steps run on the MAIN event-loop thread — a `setTimeout`-based timeout cannot preempt a
+  synchronous loop (Issue-7).** `CodeStepExecutor` compiles the fence via `new AsyncFunction(...)` reusing
+  the existing extension pipeline (`stripTypes` + the `compileToolFunction()` mechanism in
+  `src/extensions/compiler.ts`). There is **no Worker / VM isolation** — the compiled function executes
+  in-process on the main thread, so the timeout guard can only fire when the function **yields at an
+  `await`**. An unbounded *synchronous* loop (`while(true){}`) never yields and **freezes the plugin** —
+  the guard cannot interrupt it. (By contrast `utils.executeShellCommand`, backed by
+  `src/shell/shell-executor.ts` via Node `child_process`, runs **out-of-process**, so a long shell command
+  is genuinely killable.) Consequently the timeout AC is scoped to await-yielding code, the mitigation is
+  authoring guidance (no unbounded sync loops + `await` yield points), and Worker isolation is future
+  work / out of scope for v1.
+- **`run_flow` is a `write` tool, so `executeToolBatches` serializes it within a turn — there is no
+  concurrent `run_flow` parallelism in v1 (supports the cascading-guardrail overshoot bound + the
+  per-subtree `subtreeConsumed` rule).** Tool dispatch partitions read-vs-write and serializes write tools
+  within a turn (`partitionToolCalls` / `executeToolBatches` in `src/chat/tool-orchestration.ts`); routing
+  is single-threaded per session. So a step turn cannot launch two `run_flow` children in parallel, the
+  soft-ceiling overshoot is at most one full turn per in-flight runner (decrement-after / check-before) —
+  **not** "concurrency × one turn" — and no `run_flow` concurrency semaphore is needed in v1. (Line
+  numbers omitted as the surrounding code may shift; the symbols are the seam-table entries below.)
+
 ---
 
 ## Verified seam table

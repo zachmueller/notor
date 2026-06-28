@@ -102,7 +102,22 @@ distinct `notor-persona-chip-emoji` (e.g. a flow/loop glyph), and it MUST includ
   non-idempotent side effects and the terminal-`structured` return), the scratchpad / `callTool` / `callMcpTool` /
   `tasks` helper surface, and the error model (a thrown error fires `{step}.code_error` and shows a
   Notice). The authority is [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md);
-  the persona inlines a faithful summary.
+  the persona inlines a faithful summary. It MUST also teach the recovery-safety + timeout caveats:
+  - **Overwrite-only scratchpad + `once()` for non-idempotent effects.** Scratchpad writes are
+    **overwrite-only** (never incrementally append — a crash-recovery re-run would duplicate appended
+    content); wrap any external non-idempotent side effect (git push, Slack/MCP post, deploy) in
+    `orchestration.once(key, fn)` so a re-run skips an already-committed effect (at-least-once boundary,
+    FR-125).
+  - **Never write an unbounded synchronous loop in a code step (Issue-7).** Code steps run as
+    `new AsyncFunction` on the **main event-loop thread** (no Worker isolation in v1), so the timeout
+    (default 300 s) fires **only at `await` boundaries**; an unbounded synchronous loop (`while(true){}`)
+    is **not interruptible** and freezes the plugin. Always insert `await` yield points in long loops and
+    bound iteration counts.
+- **Verification + deterministic routing discipline.** Teach that the engine has **no** semantic verifier
+  (a `completed`-but-wrong emission is taken at face value), so authors should **wire a verifier on a
+  step's output edge** (the canonical `[Builder] → [Verify Tests] → …` code-step pattern), and route
+  distinct outcomes through **distinct topics** driven by a **deterministic code-step router** rather than
+  re-firing one topic and relying on the stale-loop guard.
 - **The composition fields (depends on `INT-040`).** How to make a flow invocable
   (`notor-flow-invocable: true`), how to write a good `notor-flow-inputs` / `notor-flow-returns`
   natural-language contract, that the reliable return is a terminal **code step** populating
@@ -181,6 +196,11 @@ into the persona surface (the `INT-013` work item, completed jointly with DOC-00
   (consistent with [../contracts/vault-schema.md](../contracts/vault-schema.md)), the code-step contract
   (consistent with [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md)), and
   the composition fields (consistent with [../contracts/tools.md](../contracts/tools.md)).
+- [ ] The system prompt carries the recovery-safety + timeout authoring guidance: **overwrite-only
+  scratchpad** + **`once(key, fn)` for non-idempotent effects**; **never write an unbounded synchronous
+  loop** in a code step and **insert `await` yield points** (the timeout fires only at `await` — Issue-7);
+  **wire a verifier on a step's output edge** (the engine has no semantic verifier); and **distinct topics
+  per outcome + a deterministic code-step router**.
 - [ ] A flow authored by following the persona (frontmatter + step notes it produces) parses without
   error under `FlowDefinitionParser` / `StepNoteParser` (FEAT-002) including the composition fields
   (INT-040) — verifiable by feeding a persona-authored sample flow through the parser.
@@ -242,7 +262,10 @@ the `run_flow` calls match [../contracts/tools.md](../contracts/tools.md). They 
 > not implement; the critic does not write code), and (c) emits exactly one event from its declared
 > `notor-step-publishes`. The engine's scaffold (FEAT-005) injects orientation/verify/report structure
 > and the must-publish rule around every body; reference-flow bodies should complement that scaffold,
-> not duplicate or fight it. Iterate the bodies against real runs.
+> not duplicate or fight it. Iterate the bodies against real runs. The reference flows must also model the
+> recovery-safety + timeout caveats: **overwrite-only scratchpad writes**, **`orchestration.once(key, fn)`
+> around non-idempotent external effects** (at-least-once recovery boundary), and **no unbounded
+> synchronous loops in code steps** (the timeout fires only at `await` — Issue-7).
 
 **FRs:** FR-161 (reference flows). Exercises FR-110/111 (flow/step schema), FR-130/131 (code steps +
 helper), and FR-172/173 (`run_flow` composition) as authored content.
@@ -298,10 +321,15 @@ surfaces do not drift. Three coupled pieces:
    schema (linking the canonical reference rather than duplicating it where possible), conversation vs.
    **code steps** (the `INT-013` guidance — when to use code, the arg signature, the
    `return orchestration.emit(...)` contract, the `OrchestrationHelper` surface from
-   [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md)), the session
-   workspace / scratchpad / tasks / `memories.md`, running a flow from the command palette, the
-   safety/limit model, composition (`run_flow` + chaining), and the run-tree view. It should reference
-   the three POL-002 reference flows as worked examples.
+   [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md), and the **code-step
+   timeout caveat** — fires only at `await`, never write an unbounded synchronous loop, Issue-7), the
+   session workspace / scratchpad / tasks / `memories.md`, running a flow from the command palette, the
+   safety/limit model, composition (`run_flow` + chaining), and the run-tree view. It must note the
+   **at-least-once recovery boundary** (overwrite-only scratchpad + `orchestration.once(key, fn)` for
+   non-idempotent effects) and the **iteration-counter distinction (Issue-13c)** — the progress-Notice /
+   `session.json` `iteration` (a step-turn/HOP counter that **includes code steps**) is **not** the same
+   unit as `notor-max-iterations` (LLM turns only). It should reference the three POL-002 reference flows
+   as worked examples.
 
 2. **Persona / tool-creator updates.** Update the existing built-in personas so their inlined references
    account for the new surfaces, then verify there is **no drift** between code and prose:
@@ -368,7 +396,10 @@ maintenance only.
   member surfaced to code steps).
 - [ ] The code-step guidance (`INT-013`) is present in **both** `docs/orchestration.md` and the
   `orchestration-creator` persona, consistent with
-  [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md).
+  [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md), including the
+  **at-least-once + `once()` + overwrite-only-scratchpad + no-unbounded-sync-loop caveats** and the
+  **iteration-counter distinction** (HOP counter incl. code steps vs `notor-max-iterations` LLM-turns —
+  Issue-13c).
 - [ ] The `audit-personas-docs` skill's audit targets are extended to include `orchestration-creator`,
   the `notor-settings://Orchestration` deep-link, the orchestration tool scaffolds, and the
   `OrchestrationHelper` API.

@@ -218,7 +218,10 @@ ends the run with status `cancelled` and **bypasses** completion-task enforcemen
 4. Press run.
 
 **What you see.** After each step turn, a brief **progress Notice** names the flow, step, and
-iteration — e.g. `Hello Research · 🔎 Gather · iteration 2` (FR-140). The starting event
+iteration — e.g. `Hello Research · 🔎 Gather · iteration 2` (FR-140). (That `iteration N` is the
+**step-turn / HOP counter, which INCLUDES code steps** — it is **not** the same unit as
+`notor-max-iterations`, which counts **LLM turns only**; a code step advances the HOP counter but not the
+LLM-turn budget.) The starting event
 (`research.start`) carries your prompt; routing then proceeds
 `research.start → plan → plan.done → gather → gather.done → check → check.passed → report →
 FLOW_COMPLETE`. The original objective is re-injected into every step turn, so each step is grounded
@@ -267,8 +270,9 @@ collapses finished branches; manual collapse is ephemeral (not persisted). Desce
 flow or sub-agent is just expanding its `child` edge; ascending is one hop up `parent`.
 
 **Aggregate rollup.** The root header shows the whole-subtree totals — cost / iterations / max depth —
-sourced from the root `RunContext` accumulator (FR-176, FR-177). For a single flow this is the flow's
-own totals; with composition (Scenario 5) it sums the entire child tree.
+sourced from the root run's `RunContext.subtreeConsumed` accumulator (the root subtree is the whole tree;
+FR-176, FR-177), and reconstructed on reload by replaying `turn.complete` `cost_usd`/`token_usage`. For a
+single flow this is the flow's own totals; with composition (Scenario 5) it sums the entire child tree.
 
 **Live → static.** While the run is active, the tree shows a `[⟳ live]` badge and updates as turns
 complete (subscribed via the `WorkflowActivityTracker.onChange()` pattern over the `turn.start` /
@@ -317,9 +321,11 @@ Use the returned report as the basis for your summary.
 A code step can call it programmatically via `orchestration.callTool("run_flow", { flow: "...",
 payload: "..." })`.
 
-**What happens.** `run_flow` runs the child flow to its terminal event in a **child session** on a
-**child `RunLoop`**, then returns the child's result to the caller — preferring `structured` and
-falling back to `text` (FR-173). `structured` is populated **only** when the child's *terminal* step is
+**What happens.** `run_flow` is **orchestration-context-only** — it returns `success: false` if called
+outside a flow step (e.g. from a foreground chat), so a parentless, unrecoverable child flow cannot exist
+(FR-172). From a step, it runs the child flow to its terminal event in a **child session** on a **child
+`RunLoop`**, then returns the child's result to the caller — preferring `structured` and falling back to
+`text` (FR-173). `structured` is populated **only** when the child's *terminal* step is
 a **code step** that passes a third argument to `emit`, e.g. `return orchestration.emit("FLOW_COMPLETE",
 "3 angles covered.", { report, sources })` — the runner lifts that object onto `RunResult.structured`
 verbatim. If the terminal step is instead a conversation step (as in the `report` step above), the
@@ -334,7 +340,9 @@ only if `depth < maxDepth` AND the **shared** aggregate-budget cell has headroom
 
 - The calling step's tool-call card renders the shared **`child_run_metadata`** peek (direct child
   summary + aggregate subtree rollup) — the same rendering path `use_subagent` uses (FR-177; single
-  authority [contracts/edges.md](contracts/edges.md)).
+  authority [contracts/edges.md](contracts/edges.md)). The per-subtree numbers come from the child run's
+  **`RunContext.subtreeConsumed`** accumulator (its own subtree only) — **not** a delta of the shared
+  aggregate-budget cell, which would absorb concurrent siblings' spend (FR-176/177).
 - Opening the run tree shows the **child flow's subtree** nested under the calling step via a `child`
   edge carrying `session_id` and `via_tool_call_id`; the header rollup now includes the child tree's
   cost/iterations/depth.
@@ -360,12 +368,30 @@ only if `depth < maxDepth` AND the **shared** aggregate-budget cell has headroom
    and offers a **"Resume orchestration?"** prompt summarizing where it left off.
 4. Confirm the prompt — the run resumes.
 
-**How recovery works (FR-125).** Recovery replays `session-log.jsonl` idempotently:
+**How recovery works (FR-125).** Recovery replays `session-log.jsonl` idempotently. The top-level scan
+selects recovery roots by `origin` (which is **always set** at creation, never null — an absent/unexpected
+origin is surfaced as a **loud diagnostic**, not silently skipped): **`origin: "user"`** roots always, and
+**`origin: "chaining"` successors whose predecessor is already terminal are recovered as roots** (a chained
+successor is fire-and-forget — its predecessor finalized before it launched, so it has no live parent to
+reconcile it). `origin: "run_flow"` children are **not** scanned at the top level — they are reconciled by
+the parent's replay.
 
 - A dangling `turn.start` with no matching `turn.complete` means a turn was interrupted → the engine
   **re-emits the triggering event** so the step retries from fresh context.
 - A dangling `event.emitted` with no following `turn.start` means an event was written but not routed
   → the engine **re-publishes the event**.
+- A replayed parent turn that invoked `run_flow` is reconciled from the parent's durable
+  **`child.spawned` / `child.result`** ledger: a child with a recorded `child.result` (terminal) is
+  **reused** — the recorded `structured`/`text` + `stop_reason` is fed back, the parent does **not**
+  re-spawn; a `child.spawned` with **no** `child.result` (non-terminal) is **resumed in place** — that
+  child session replays its **own** log and the parent awaits it. The child is **never
+  tombstoned-and-respawned**, so its `once()` `side_effect.committed` markers survive the crash and an
+  already-committed external effect is not re-run.
+- **Budget + safety are rebuilt on reload**, not reset: the in-memory aggregate-budget cell is rebuilt by
+  replaying each `turn.complete`'s `cost_usd` / `token_usage` (a `$5.00` cap that had spent `$4.90`
+  resumes at `$0.10` remaining, **not** `$5.00`), and the stale-loop window + per-task thrashing counters
+  are rehydrated from the replayed event/task history (a near-stale self-loop fires on the next repeat
+  post-reload, not N more).
 
 Replay is **at-least-once, not exactly-once.** The engine's own bookkeeping (events, turns) replays
 idempotently, and vault state is safe to repeat **provided scratchpad writes are overwrite/idempotent**
@@ -405,12 +431,24 @@ tasks in [tasks.md](tasks.md).
       (FR-119)
 - [ ] **Authoring:** a hand-authored flow (`definition.md` + `steps/`) is discovered and appears in the
       flow picker; the `definition.md` body is never injected into a prompt. (FR-110, FR-111)
-- [ ] **Routing:** the run routes `research.start → plan → gather → check → report → FLOW_COMPLETE`
-      with one step per trigger topic. (FR-112, FR-118)
+- [ ] **Finite ceiling defaults:** a `definition.md` that omits `notor-max-iterations` /
+      `notor-max-runtime-minutes` / `notor-max-cost-usd` still runs bounded — the parser injects finite
+      defaults (`100` / `60` / `5.00`, never `Infinity`). (FR-117/FR-119a)
+- [ ] **Orphan hard-error:** a published-but-unsubscribed non-terminal topic is rejected at **load**
+      (hard error, not a runtime fallback). (FR-110)
+- [ ] **Routing + breadth-first FIFO fan-out:** the run routes
+      `research.start → plan → gather → check → report → FLOW_COMPLETE` with one step per trigger topic;
+      a declared fan-out drains breadth-first FIFO (all direct subscribers, then their consequences in
+      order). (FR-112, FR-118)
+- [ ] **No-progress completion guard:** a `FLOW_COMPLETE` re-blocked from the same step with a
+      non-shrinking open-task / missing-required-event set terminates with `FLOW_ERROR` at the threshold
+      (default 3), rather than draining the budget. (FR-123)
 - [ ] **Must-publish always injected:** a step with no `emit_event` call still advances via its
       `default_publishes`. (FR-114, FR-115)
 - [ ] **Code step:** `check` runs with no conversation file and zero tokens; its return value routes
-      the flow; an error fires `{step}.code_error`. (FR-130, FR-131)
+      the flow; an error fires `{step}.code_error`. The timeout (default 300 s) fires only at `await`
+      boundaries — an unbounded synchronous loop is **not** interruptible (no Worker isolation in v1), so
+      step bodies avoid them and insert `await` yield points. (FR-130, FR-131)
 - [ ] **Cancellation:** an empty `findings.md` drives `FLOW_CANCELLED`, terminating with status
       `cancelled` and bypassing task enforcement. (FR-132)
 - [ ] **Progress Notices:** a per-turn Notice names flow + step + iteration; right-click (desktop)
@@ -420,15 +458,22 @@ tasks in [tasks.md](tasks.md).
 - [ ] **Run tree:** reachable from the spawning card, the activity indicator, and a progress Notice;
       one tree renders steps and sub-agents; selecting a node loads its conversation; the header shows
       the aggregate rollup; live while running, static when done. (FR-178, FR-179)
-- [ ] **Composition:** an invocable flow appears in the `run_flow` enum; calling it runs a child
+- [ ] **Composition:** an invocable flow appears in the `run_flow` enum; `run_flow` is
+      **orchestration-context-only** (`success: false` outside a flow step); calling it runs a child
       session on a child `RunLoop`; the structured return is preferred over text; the child subtree
-      nests in the run tree via a `child` edge with `via_tool_call_id`. (FR-170…FR-174, FR-177)
+      nests in the run tree via a `child` edge with `via_tool_call_id`; the per-subtree rollup numbers
+      come from the child run's `subtreeConsumed` (not a shared-cell delta). (FR-170…FR-174, FR-177)
 - [ ] **Cascading guardrails:** a spawn is gated on `depth < maxDepth` AND the **shared** aggregate
       budget cell (tree-wide, decrements visible to parent/siblings); a blocked spawn surfaces to the
-      caller and in-flight runs finish their current turn. (FR-176)
+      caller and in-flight runs finish their current turn; a two-flow on-complete (`A → B → A`) chaining
+      cycle terminates at `max_depth` / the aggregate budget (successor shares the cell by reference).
+      (FR-176)
 - [ ] **Recovery (at-least-once):** reloading mid-run offers a resume prompt; resuming completes the
-      run; engine-bookkeeping replay is idempotent (including a paused-on-input session); an
-      `orchestration.once`-guarded side effect is not repeated on re-run, while unguarded external
-      effects may repeat (documented boundary). (FR-125, FR-131, FR-150)
+      run; engine-bookkeeping replay is idempotent (including a paused-on-input session). A `run_flow`
+      child is **reused** from its recorded `child.result` (terminal) or **resumed in place** (non-terminal
+      — never tombstone-and-respawn, so its `once()` markers survive); a chained successor whose
+      predecessor is terminal is recovered as a **root**; the aggregate budget is **rebuilt** on reload
+      (a cost cap is not reset to full). An `orchestration.once`-guarded side effect is not repeated on
+      re-run, while unguarded external effects may repeat (documented boundary). (FR-125, FR-131, FR-150)
 - [ ] **Sub-agent regression gate (foundation):** existing sub-agent suites pass unmodified after the
       `RunLoop` extraction — no behavioral change. (FR-101; release-blocker TEST-001)
