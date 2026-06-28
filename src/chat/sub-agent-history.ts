@@ -110,3 +110,32 @@ export function chatMessagesToMessages(
 export function isSubAgentFilename(filename: string): boolean {
 	return filename.includes("_subagent_");
 }
+
+/**
+ * Generalized hidden-from-flat-list predicate (INT-006).
+ *
+ * A conversation is hidden from the flat sidebar (`listConversations()` /
+ * `searchConversations()`) when EITHER:
+ *  - its filename follows the legacy sub-agent convention (back-compat with
+ *    already-persisted sub-agent files — {@link isSubAgentFilename}); or
+ *  - its header `_type` marks it as a child run that the flat list excludes:
+ *    `"sub_agent_conversation"` or `"orchestration_step_conversation"`.
+ *
+ * The header-`_type` check is the **authoritative** discriminator for the
+ * orchestration case (the marker survives renames), while the filename check is
+ * kept as a cheap back-compat guard for old sub-agent files. The run-tree
+ * (POL-003) is the only surface that renders the hidden orchestration step
+ * conversations.
+ *
+ * @param filename   - The conversation's JSONL filename.
+ * @param headerType - The header's `_type` (when the header has been read).
+ *
+ * @see specs/ZZ-misc/orchestration/contracts/edges.md — §4 Hidden-From-Flat-List Rule
+ */
+export function isHiddenFromConversationList(filename: string, headerType?: string): boolean {
+	if (isSubAgentFilename(filename)) return true;
+	return (
+		headerType === "sub_agent_conversation" ||
+		headerType === "orchestration_step_conversation"
+	);
+}

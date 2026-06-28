@@ -110,7 +110,11 @@ function fakeExecutor(
 	} as unknown as StepTurnExecutor;
 }
 
-function makeRunner(f: OrchestrationFlow, executor: StepTurnExecutor) {
+function makeRunner(
+	f: OrchestrationFlow,
+	executor: StepTurnExecutor,
+	listOpenTasks?: () => Promise<Array<{ key: string; description: string }>>,
+) {
 	let convId = 0;
 	return new OrchestrationRunner({
 		executor,
@@ -127,6 +131,7 @@ function makeRunner(f: OrchestrationFlow, executor: StepTurnExecutor) {
 		sessionId: "s1",
 		abortSignal: new AbortController().signal,
 		origin: "user",
+		listOpenTasks,
 	});
 }
 
@@ -237,6 +242,80 @@ describe("OrchestrationRunner", () => {
 		const result = await makeRunner(f, executor).start(f, "objective");
 		expect(result.status).toBe("completed");
 		expect(runOrder).toContain("Reviewer");
+	});
+
+	it("blocks FLOW_COMPLETE while a task is open, re-triggers flow.tasks_remaining, then completes (INT-003)", async () => {
+		// Planner emits FLOW_COMPLETE while a task is still open → blocked and
+		// re-injected as flow.tasks_remaining (auto-subscribed back to Planner).
+		// On the re-trigger the task is closed → FLOW_COMPLETE finalizes.
+		const planner = step("Planner", {
+			triggers: ["start", "flow.tasks_remaining"],
+			publishes: [FLOW_COMPLETE],
+		});
+		const f = flow([planner]);
+		const runOrder: string[] = [];
+
+		let open = true;
+		const executor = fakeExecutor((name) => {
+			if (name === "Planner") {
+				// First turn leaves the task open; the re-trigger closes it.
+				if (runOrder.filter((n) => n === "Planner").length >= 2) open = false;
+				return { topic: FLOW_COMPLETE };
+			}
+			return { topic: FLOW_COMPLETE };
+		}, runOrder);
+
+		const listOpenTasks = async () =>
+			open ? [{ key: "step-01", description: "Implement the flag" }] : [];
+
+		const result = await makeRunner(f, executor, listOpenTasks).start(f, "objective");
+		expect(result.status).toBe("completed");
+		// Planner ran at least twice (blocked once, then completed).
+		expect(runOrder.filter((n) => n === "Planner").length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("FLOW_COMPLETE finalizes immediately when there are no open tasks (INT-003)", async () => {
+		const planner = step("Planner", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+		const f = flow([planner]);
+		const executor = fakeExecutor(() => ({ topic: FLOW_COMPLETE }), []);
+		const result = await makeRunner(f, executor, async () => []).start(f, "objective");
+		expect(result.status).toBe("completed");
+	});
+
+	it("the flow.tasks_remaining payload enumerates the remaining task keys/descriptions (INT-003)", async () => {
+		const planner = step("Planner", {
+			triggers: ["start", "flow.tasks_remaining"],
+			publishes: [FLOW_COMPLETE],
+		});
+		const f = flow([planner]);
+		const seen: string[] = [];
+		let calls = 0;
+		const executor = {
+			execute: vi.fn(async (req: StepTurnRequest): Promise<StepTurnResult> => {
+				calls++;
+				// Capture the re-trigger payload the runner injected.
+				if (req.event.topic === "flow.tasks_remaining") seen.push(req.event.payload);
+				return {
+					emission: { topic: FLOW_COMPLETE, payload: "" },
+					stopReason: "completed",
+					costUsd: 0,
+					tokenUsage: { input: 0, output: 0 },
+				};
+			}),
+		} as unknown as StepTurnExecutor;
+
+		let open = true;
+		const result = await makeRunner(f, executor, async () => {
+			const r = open ? [{ key: "step-01", description: "Implement the flag" }] : [];
+			open = false;
+			return r;
+		}).start(f, "objective");
+
+		expect(result.status).toBe("completed");
+		expect(seen.length).toBeGreaterThanOrEqual(1);
+		expect(seen[0]).toContain("step-01");
+		expect(seen[0]).toContain("Implement the flag");
+		expect(calls).toBeGreaterThanOrEqual(2);
 	});
 
 	it("terminates with FLOW_ERROR after the completion no-progress threshold (Issue-9)", async () => {

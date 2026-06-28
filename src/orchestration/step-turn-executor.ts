@@ -36,7 +36,7 @@
  * @see specs/ZZ-misc/orchestration/contracts/run-loop.md
  */
 
-import type { LLMProvider, ToolDefinition } from "../providers/provider";
+import type { ChatMessage, LLMProvider, ToolDefinition } from "../providers/provider";
 import type { ToolDispatcher } from "../chat/dispatcher";
 import type { ConversationMode, Persona } from "../types";
 import type { NotorSettings } from "../settings/types";
@@ -52,6 +52,7 @@ import { resolvePersonaProviderConfig } from "../personas/provider-config-resolv
 import { logger } from "../utils/logger";
 import type { SessionLog } from "./session-log";
 import type { StepPromptBuilder } from "./step-prompt-builder";
+import type { StepConversationStore } from "./step-conversation-store";
 import type { OrchestrationEvent, OrchestrationFlow, StepDefinition } from "./types";
 
 const log = logger("StepTurnExecutor");
@@ -95,6 +96,21 @@ export interface StepTurnExecutorDeps {
 	resolveIncludes?: IncludeResolver;
 	/** Per-run iteration cap for a step turn (default `SUB_AGENT_ITERATION_CAP`). */
 	iterationCap?: number;
+	/**
+	 * Vault-relative path to the persistent `memories.md` note (INT-004 / FR-124),
+	 * injected into every step prompt's `### MEMORY` section. Omitted in unit
+	 * tests → the section is skipped.
+	 */
+	memoriesPath?: string;
+	/**
+	 * Persists each conversation-step turn as a hidden step conversation with its
+	 * `orchestration_edges` header, backfilling the `next`/`prev` chain (INT-006).
+	 * Omitted in unit tests → step conversations are not written (the engine's
+	 * routing is unaffected).
+	 */
+	stepConversationStore?: StepConversationStore;
+	/** Provider/model labels for the persisted step-conversation header (INT-006). */
+	providerLabel?: { providerId: string; modelId: string };
 }
 
 /** Inputs the runner threads into a single step-turn execution. */
@@ -135,6 +151,13 @@ export interface StepTurnResult {
 }
 
 export class StepTurnExecutor {
+	/**
+	 * The id of the most recently persisted step conversation in this run — the
+	 * `prev` target for the next turn's step conversation (INT-006 edge backfill).
+	 * Reset only by constructing a new executor (one per run).
+	 */
+	private lastStepConversationId: string | null = null;
+
 	constructor(
 		private readonly deps: StepTurnExecutorDeps,
 		private readonly sessionLog: SessionLog,
@@ -201,6 +224,7 @@ export class StepTurnExecutor {
 			scratchpadPath: req.orchestrationContext.scratchpadPath,
 			tasksPath: req.orchestrationContext.tasksPath,
 			iteration: req.iteration,
+			memoriesPath: this.deps.memoriesPath,
 			resolvedBody,
 		});
 
@@ -257,7 +281,47 @@ export class StepTurnExecutor {
 			token_usage: tokenUsage,
 		});
 
+		// (INT-006) Persist the step conversation with its orchestration_edges
+		// header; backfill the next/prev chain. The header `_type` marker hides it
+		// from the flat conversation list. Persistence failure never fails the turn.
+		await this.persistStepConversation(req, result.messages, resolved.modelId);
+
 		return { emission, stopReason: result.stopReason, costUsd, tokenUsage };
+	}
+
+	/**
+	 * Persist the just-completed conversation step as a hidden step conversation
+	 * (INT-006). Links `prev` → the previous step conversation; the store backfills
+	 * the reciprocal `next` on the predecessor. No-op when no store is wired (unit
+	 * tests). Best-effort — a persistence error is logged, never thrown.
+	 */
+	private async persistStepConversation(
+		req: StepTurnRequest,
+		messages: ChatMessage[],
+		modelId: string,
+	): Promise<void> {
+		const store = this.deps.stepConversationStore;
+		if (!store) return;
+		try {
+			await store.persist({
+				conversationId: req.conversationId,
+				sessionId: req.orchestrationContext.sessionId,
+				flowName: req.flow.name,
+				stepName: req.step.name,
+				iteration: req.iteration,
+				prevConversationId: this.lastStepConversationId,
+				createdAtMs: Date.now(),
+				providerId: this.deps.providerLabel?.providerId ?? "",
+				modelId: this.deps.providerLabel?.modelId ?? modelId,
+				messages,
+			});
+			this.lastStepConversationId = req.conversationId;
+		} catch (e) {
+			log.warn("Failed to persist step conversation", {
+				step: req.step.name,
+				error: String(e),
+			});
+		}
 	}
 
 	/**

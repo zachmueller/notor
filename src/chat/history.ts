@@ -51,7 +51,7 @@
 import { normalizePath, type Vault } from "obsidian";
 import type { Conversation, Message } from "../types";
 import type { CompactionRecord } from "../context/compaction";
-import { isSubAgentFilename } from "./sub-agent-history";
+import { isSubAgentFilename, isHiddenFromConversationList } from "./sub-agent-history";
 import { logger } from "../utils/logger";
 import type { ContentBlock } from "../media/types";
 import { getTextContent } from "../media/types";
@@ -625,7 +625,9 @@ export class HistoryManager {
 		for (const file of files.files) {
 			if (!file.endsWith(".jsonl")) continue;
 
-			// Skip sub-agent conversation files (Phase 6)
+			// Skip sub-agent conversation files by filename before reading (cheap
+			// back-compat guard); the header-_type check below catches orchestration
+			// step conversations (INT-006).
 			const fname = file.split("/").pop() ?? file;
 			if (isSubAgentFilename(fname)) continue;
 
@@ -637,7 +639,12 @@ export class HistoryManager {
 				if (!headerLine.trim()) continue;
 
 				const headerObj = JSON.parse(headerLine) as Record<string, unknown>;
-				if (headerObj._type !== "conversation") continue;
+				// Hidden-from-flat-list (INT-006): exclude sub-agent + orchestration
+				// step conversations via the generalized header-_type predicate.
+				// A header with no `_type` (legacy) defaults to "conversation".
+				const headerType = (headerObj._type as string | undefined) ?? "conversation";
+				if (headerType !== "conversation") continue;
+				if (isHiddenFromConversationList(fname, headerType)) continue;
 
 				const convId = headerObj.id as string | undefined;
 				const convUpdatedAt = headerObj.updated_at as string | undefined;
@@ -719,7 +726,9 @@ export class HistoryManager {
 		for (const file of files.files) {
 			if (!file.endsWith(".jsonl")) continue;
 
-			// Skip sub-agent conversation files (Phase 6)
+			// Skip sub-agent conversation files by filename before reading (cheap
+			// back-compat guard); the header-_type check below catches orchestration
+			// step conversations (INT-006).
 			const fname = file.split("/").pop() ?? file;
 			if (isSubAgentFilename(fname)) continue;
 
@@ -731,7 +740,11 @@ export class HistoryManager {
 				if (!headerLine.trim()) continue;
 
 				const headerObj = JSON.parse(headerLine) as Record<string, unknown>;
-				if (headerObj._type !== "conversation") continue;
+				// Hidden-from-flat-list (INT-006): exclude sub-agent + orchestration
+				// step conversations via the generalized header-_type predicate.
+				const headerType = (headerObj._type as string | undefined) ?? "conversation";
+				if (headerType !== "conversation") continue;
+				if (isHiddenFromConversationList(fname, headerType)) continue;
 
 				const convId = headerObj.id as string | undefined;
 				const convUpdatedAt = headerObj.updated_at as string | undefined;

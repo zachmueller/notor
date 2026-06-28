@@ -80,6 +80,14 @@ export interface EventEmissionOverwrittenEntry extends BaseEntry {
 	new_topic: string;
 }
 
+export interface SideEffectCommittedEntry extends BaseEntry {
+	type: "side_effect.committed";
+	turn: number;
+	step: string;
+	/** The `orchestration.once(key, fn)` key whose guarded effect committed. */
+	key: string;
+}
+
 export interface ChildSpawnedEntry extends BaseEntry {
 	type: "child.spawned";
 	turn: number;
@@ -126,6 +134,7 @@ export type SessionLogEntry =
 	| TurnCompleteEntry
 	| EventEmittedEntry
 	| EventEmissionOverwrittenEntry
+	| SideEffectCommittedEntry
 	| ChildSpawnedEntry
 	| ChildResultEntry
 	| SessionCancelledEntry
@@ -196,6 +205,17 @@ export class SessionLog {
 		entry: Omit<EventEmissionOverwrittenEntry, "type" | "ts">,
 	): Promise<void> {
 		return this.write({ type: "event.emission_overwritten", ts: this.now(), ...entry });
+	}
+
+	/**
+	 * `side_effect.committed` (FR-125): written **after** a guarded side effect
+	 * lands inside `orchestration.once(key, fn)`. Recovery's at-least-once replay
+	 * consults committed `key`s so a re-run skips an already-committed effect. The
+	 * consumer (`orchestration.once`) arrives in Phase 3 (INT-011); the writer +
+	 * the recovery reader (INT-005) are here now.
+	 */
+	appendSideEffectCommitted(entry: Omit<SideEffectCommittedEntry, "type" | "ts">): Promise<void> {
+		return this.write({ type: "side_effect.committed", ts: this.now(), ...entry });
 	}
 
 	appendChildSpawned(entry: Omit<ChildSpawnedEntry, "type" | "ts">): Promise<void> {

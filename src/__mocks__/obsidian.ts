@@ -9,6 +9,18 @@ import { vi } from "vitest";
 
 export const requestUrl = vi.fn();
 
+/**
+ * Normalize a vault path the way Obsidian does: collapse backslashes to forward
+ * slashes, collapse duplicate slashes, strip a leading slash. Pure utility —
+ * safe to expose to every suite.
+ */
+export function normalizePath(path: string): string {
+	return path
+		.replace(/\\/g, "/")
+		.replace(/\/{2,}/g, "/")
+		.replace(/^\//, "");
+}
+
 export function getFrontMatterInfo(content: string): { exists: boolean; contentStart: number } {
 	const match = content.match(/^---\n[\s\S]*?\n---\n?/);
 	if (!match) return { exists: false, contentStart: 0 };

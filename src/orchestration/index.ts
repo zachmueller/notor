@@ -12,6 +12,7 @@ export type {
 	OrchestrationFlow,
 	StepDefinition,
 	OrchestrationEvent,
+	OrchestrationSessionMeta,
 } from "./types";
 export {
 	FLOW_COMPLETE,
@@ -48,3 +49,37 @@ export type { SafetyGuardResult, ThrashingCounters } from "./safety";
 export { StepTurnExecutor } from "./step-turn-executor";
 export { OrchestrationRunner } from "./runner";
 export type { OrchestrationRunResult } from "./runner";
+export { OrchestrationSessionManager } from "./session-manager";
+export type {
+	SessionFs,
+	SessionWorkspace,
+	CreateSessionArgs,
+} from "./session-manager";
+export {
+	TaskRegistry,
+	serializeTaskNote,
+	parseTaskNote,
+	sanitizeTaskKey,
+} from "./task-registry";
+export type {
+	TaskFs,
+	TaskNote,
+	TaskStatus,
+	EnsureResult,
+	MutateResult,
+} from "./task-registry";
+export { seedMemoriesNote, memoriesPath, MEMORIES_SKELETON } from "./memories";
+export { SessionLogReader, SessionLogParseError } from "./session-log-reader";
+export type { ParsedSessionLog } from "./session-log-reader";
+export { SessionRecovery } from "./session-recovery";
+export type {
+	RecoveryAction,
+	RecoverableSession,
+	RecoveryFs,
+} from "./session-recovery";
+export { VaultStepConversationStore, buildStepConversationHeader } from "./step-conversation-store";
+export type {
+	StepConversationStore,
+	StepConversationRecord,
+	StepConversationFs,
+} from "./step-conversation-store";

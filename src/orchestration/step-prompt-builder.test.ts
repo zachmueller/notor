@@ -144,6 +144,29 @@ describe("StepPromptBuilder — always-injected sections", () => {
 		expect(out).toContain("tasks.ready");
 	});
 
+	it("injects the persistent memory section (path + consult/append) when memoriesPath is supplied (INT-004)", () => {
+		const out = builder.build({
+			step: step("body"),
+			flow: flow(),
+			event: event(),
+			eventHistory: [],
+			objective: "obj",
+			scratchpadPath: "sp",
+			tasksPath: "tp",
+			iteration: 1,
+			memoriesPath: "notor/orchestrations/memories.md",
+		});
+		expect(out).toContain("### MEMORY");
+		expect(out).toContain("notor/orchestrations/memories.md");
+		expect(out).toMatch(/consult/i);
+		expect(out).toMatch(/append/i);
+	});
+
+	it("omits the MEMORY section when no memoriesPath is supplied", () => {
+		const out = build("body");
+		expect(out).not.toContain("### MEMORY");
+	});
+
 	it("uses the resolvedBody (post-include) when provided instead of the raw body", () => {
 		const out = builder.build({
 			step: step("<include_note>x</include_note>"),

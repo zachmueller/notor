@@ -37,6 +37,7 @@ import { FallbackCoordinator } from "./fallback-coordinator";
 import { OrchestrationEventEngine } from "./event-engine";
 import { LoopSafetyGuards, type ThrashingCounters } from "./safety";
 import type { SessionLog } from "./session-log";
+import type { RecoverableSession } from "./session-recovery";
 import type { StepTurnExecutor } from "./step-turn-executor";
 import {
 	FLOW_CANCELLED,
@@ -80,6 +81,13 @@ export interface OrchestrationRunnerDeps {
 	/** Session origin for the session.start log entry. */
 	origin: "user" | "hook" | "run_flow" | "chaining";
 	parentSessionId?: string | null;
+	/**
+	 * Query the session's still-open/running tasks for `FLOW_COMPLETE` enforcement
+	 * (INT-003). Returns each remaining task's key + description so the synthesized
+	 * `flow.tasks_remaining` re-trigger can enumerate them. Omitted in Phase-1
+	 * unit tests (and any flow with no task registry) → treated as no open tasks.
+	 */
+	listOpenTasks?: () => Promise<Array<{ key: string; description: string }>>;
 	/** Optional progress callback surfaced per turn. */
 	onProgress?: (status: string) => void;
 }
@@ -108,14 +116,7 @@ export class OrchestrationRunner {
 		this.startedAtMs = Date.now();
 		this.budget = newRootBudget(flow.maxIterations, flow.maxCostUsd);
 
-		// Register the mandatory wildcard fallback (cannot be overridden), then
-		// subscribe each step's triggers in notor-steps order.
-		this.engine.subscribe("*", this.fallbackSentinel());
-		for (const step of flow.steps) {
-			for (const topic of step.triggers) {
-				this.engine.subscribe(topic, step);
-			}
-		}
+		this.wireSubscriptions(flow);
 
 		await this.deps.sessionLog.appendSessionStart({
 			session_id: this.deps.sessionId,
@@ -132,6 +133,89 @@ export class OrchestrationRunner {
 		const result = await this.drive(flow, promptText, starting);
 		await this.finalize(result);
 		return result;
+	}
+
+	/**
+	 * Resume an interrupted session from its classified recovery state (INT-005 /
+	 * FR-125). Re-seeds the in-memory budget + safety state from the replayed log
+	 * (so a `$5.00` cap is not reset to full and a near-stale loop is not zeroed),
+	 * then drives the loop from the classified dangling tail:
+	 *  - `re_emit_trigger` → re-emit the interrupted turn's trigger (the step
+	 *    retries from fresh context);
+	 *  - `re_publish_event` → re-publish the logged-but-not-routed event;
+	 *  - `still_paused` / `none` → nothing to drive (INT-030 handles the pause;
+	 *    a terminal tail needs no action).
+	 *
+	 * Engine-bookkeeping replay is idempotent: it does **not** re-run already
+	 * completed turns; it re-injects exactly the one dangling event. Step
+	 * execution is at-least-once (the re-emitted trigger re-runs the step) — the
+	 * documented recovery boundary.
+	 */
+	async resume(
+		flow: OrchestrationFlow,
+		recovered: RecoverableSession,
+	): Promise<OrchestrationRunResult> {
+		this.startedAtMs = Date.now();
+		// Re-seed the budget from the replayed decrements (NOT reset to full).
+		this.budget = {
+			iterationsRemaining: recovered.budget.iterationsRemaining,
+			costRemainingUsd: recovered.budget.costRemainingUsd,
+		};
+		// Approximate the LLM-turn count from the rehydrated history so the
+		// iteration-cap guard reflects pre-crash spend.
+		this.llmTurns = Math.max(
+			0,
+			Math.round(flow.maxIterations - recovered.budget.iterationsRemaining),
+		);
+
+		this.wireSubscriptions(flow);
+		// Rehydrate the stale-window history + abandonment counters before resuming.
+		this.engine.rehydrateHistory(recovered.safety.history);
+		for (const [key, count] of recovered.safety.abandonCounts) {
+			this.abandonCounts.set(key, count);
+		}
+		// Advance the hop counter past the pre-crash turns (display/sequence).
+		this.iteration = recovered.meta.iteration;
+
+		const objective = recovered.meta.prompt;
+		const action = recovered.action;
+
+		let seed: OrchestrationEvent | null = null;
+		if (action.kind === "re_emit_trigger") {
+			this.engine.setEmissionContext(this.nextIteration(), null);
+			seed = this.engine.publish(action.topic, action.payload, this.deps.sessionLog);
+		} else if (action.kind === "re_publish_event") {
+			this.engine.setEmissionContext(this.nextIteration(), action.source_step);
+			seed = this.engine.publish(action.topic, action.payload, this.deps.sessionLog);
+		}
+
+		if (!seed) {
+			// still_paused / none — nothing to drive in Phase 2.
+			log.info("Resume has no replayable tail; leaving session as-is", {
+				sessionId: recovered.sessionId,
+				action: action.kind,
+			});
+			return this.terminalResult("completed", this.synthTerminal(FLOW_COMPLETE, "Nothing to resume."));
+		}
+
+		const queue: RoutingJob[] = [];
+		const seedTerminal = this.enqueueRouting(flow, seed, queue);
+		const result = seedTerminal ?? (await this.driveQueue(flow, objective, queue));
+		await this.finalize(result);
+		return result;
+	}
+
+	/**
+	 * Register the mandatory wildcard fallback (cannot be overridden) and subscribe
+	 * each step's triggers in `notor-steps` order. Shared by `start` and `resume`.
+	 */
+	private wireSubscriptions(flow: OrchestrationFlow): void {
+		this.engine.subscribe("*", this.fallbackSentinel());
+		for (const step of flow.steps) {
+			for (const topic of step.triggers) {
+				this.engine.subscribe(topic, step);
+			}
+		}
 	}
 
 	// -- The event loop ------------------------------------------------------
@@ -152,6 +236,19 @@ export class OrchestrationRunner {
 		const seedTerminal = this.enqueueRouting(flow, starting, queue);
 		if (seedTerminal) return seedTerminal;
 
+		return this.driveQueue(flow, objective, queue);
+	}
+
+	/**
+	 * Drain an already-seeded routing queue to a terminal event. Shared by `drive`
+	 * (fresh start) and `resume` (recovery), so both honor the breadth-first FIFO
+	 * fan-out drain, the per-turn safety guards, and terminal handling identically.
+	 */
+	private async driveQueue(
+		flow: OrchestrationFlow,
+		objective: string,
+		queue: RoutingJob[],
+	): Promise<OrchestrationRunResult> {
 		while (queue.length > 0) {
 			if (this.deps.abortSignal.aborted) {
 				return this.terminalResult("cancelled", this.synthTerminal(FLOW_CANCELLED, "Run aborted."));
@@ -206,7 +303,7 @@ export class OrchestrationRunner {
 			}
 
 			// Route the emission (terminal handling / fan-out enqueue).
-			const terminal = this.routeEmission(flow, emitted, job.step, queue);
+			const terminal = await this.routeEmission(flow, emitted, job.step, queue);
 			if (terminal) return terminal;
 		}
 
@@ -224,12 +321,12 @@ export class OrchestrationRunner {
 	 * enqueue the next subscriber(s). Returns a terminal result when the loop
 	 * should end, else `null` (work was enqueued).
 	 */
-	private routeEmission(
+	private async routeEmission(
 		flow: OrchestrationFlow,
 		emitted: OrchestrationEvent,
 		sourceStep: StepDefinition,
 		queue: RoutingJob[],
-	): OrchestrationRunResult | null {
+	): Promise<OrchestrationRunResult | null> {
 		// Terminal short-circuits.
 		if (emitted.topic === FLOW_CANCELLED) {
 			return this.terminalResult("cancelled", emitted);
@@ -245,23 +342,40 @@ export class OrchestrationRunner {
 	}
 
 	/**
-	 * Completion enforcement (FR-123, Phase-1 scope = required_events only).
-	 * A premature completion is blocked and re-injected via a synthesized
-	 * `flow.requirements_unmet` topic auto-subscribed to the completing step; the
-	 * no-progress guard (Issue-9) bounds the alternation.
+	 * Completion enforcement (FR-123). A premature completion is blocked and
+	 * re-injected via a synthesized topic auto-subscribed to the completing step;
+	 * the no-progress guard (Issue-9) bounds the alternation.
+	 *
+	 * Two coexisting blocking conditions, kept as a **discrete branch** so INT-012's
+	 * `FLOW_CANCELLED` can bypass it without duplicating logic (and it already does —
+	 * `FLOW_CANCELLED` short-circuits in {@link routeEmission} before reaching here):
+	 *  - **`required_events` unmet** (Phase-1 condition) → re-inject `flow.requirements_unmet`.
+	 *  - **open/running tasks** (INT-003) → re-inject `flow.tasks_remaining` whose
+	 *    payload enumerates the remaining task keys + descriptions.
+	 *
+	 * Tasks are queried via the injected `listOpenTasks` (the session's task
+	 * registry, INT-002). When both conditions block, the missing required events
+	 * are surfaced first.
 	 */
-	private handleCompletion(
+	private async handleCompletion(
 		flow: OrchestrationFlow,
 		emitted: OrchestrationEvent,
 		sourceStep: StepDefinition,
 		queue: RoutingJob[],
-	): OrchestrationRunResult | null {
+	): Promise<OrchestrationRunResult | null> {
 		const missing = this.missingRequiredEvents(flow);
 
-		// Phase-2 task-enforcement seam: open/running tasks would also block here
-		// (INT-003). In Phase 1 the open-task set is always empty.
-		const openTasks: string[] = [];
-		const blockingSet = [...missing, ...openTasks];
+		// INT-003: query the session task registry for still-open/running tasks.
+		let openTasks: Array<{ key: string; description: string }> = [];
+		if (this.deps.listOpenTasks) {
+			try {
+				openTasks = await this.deps.listOpenTasks();
+			} catch (e) {
+				log.warn("listOpenTasks failed during completion enforcement", { error: String(e) });
+			}
+		}
+		const openTaskKeys = openTasks.map((t) => t.key);
+		const blockingSet = [...missing, ...openTaskKeys];
 
 		if (blockingSet.length === 0) {
 			this.engine.resetNoProgress();
@@ -281,14 +395,16 @@ export class OrchestrationRunner {
 			);
 		}
 
-		// Re-trigger via the synthesized topic (auto-subscribed to the completing step).
+		// Choose the re-trigger topic + payload. Missing required events take
+		// precedence; otherwise enumerate the remaining tasks (FR-123 payload).
 		const reTopic = missing.length > 0 ? "flow.requirements_unmet" : "flow.tasks_remaining";
+		const payload =
+			missing.length > 0
+				? JSON.stringify({ missing })
+				: JSON.stringify({ remaining_tasks: openTasks });
+
 		this.engine.setEmissionContext(this.iteration, sourceStep.name);
-		const reEvent = this.engine.publish(
-			reTopic,
-			JSON.stringify({ missing: blockingSet }),
-			this.deps.sessionLog,
-		);
+		const reEvent = this.engine.publish(reTopic, payload, this.deps.sessionLog);
 		const subs = this.engine.getSubscribers(reTopic, sourceStep);
 		for (const step of subs) {
 			queue.push({ event: reEvent, step });

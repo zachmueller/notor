@@ -136,6 +136,57 @@ export interface Conversation {
 	 * Persisted in the JSONL header. null/undefined = no tasks set.
 	 */
 	tasks?: TaskItem[] | null;
+	/**
+	 * Conversation-kind marker for the hidden-from-flat-list filter (INT-006).
+	 * Defaults to `"conversation"` when absent (back-compat). Orchestration step
+	 * conversations carry `"orchestration_step_conversation"` so they are excluded
+	 * from the flat sidebar (the run-tree, POL-003, is their only surface).
+	 *
+	 * @see specs/ZZ-misc/orchestration/contracts/edges.md — §1 Conversation Header Extensions
+	 */
+	_type?: "conversation" | "orchestration_step_conversation";
+	/** Owning orchestration session (`sessions/{id}/`). Step conversations only. */
+	orchestration_session_id?: string;
+	/** `notor-flow-name` of the running flow. Step conversations only. */
+	orchestration_flow_name?: string;
+	/** `notor-step-name` of the step that produced this turn. Step conversations only. */
+	orchestration_step_name?: string;
+	/** The flow iteration (turn number) this conversation represents. Step conversations only. */
+	orchestration_iteration?: number;
+	/**
+	 * Typed adjacency list — the structural source for the run-tree (POL-003).
+	 * A tree-constrained DAG (no cyclic / sibling / return edges). In Phase 2 the
+	 * executor backfills `next`/`prev` to chain a flow's step conversations;
+	 * `child`/`parent` are produced by Phase-7 composition.
+	 *
+	 * @see specs/ZZ-misc/orchestration/contracts/edges.md — §2 OrchestrationEdge
+	 */
+	orchestration_edges?: OrchestrationEdge[];
+}
+
+/**
+ * A typed edge on an orchestration step conversation's header.
+ *
+ * **Single authority:** specs/ZZ-misc/orchestration/contracts/edges.md §2 — this
+ * declaration must remain byte-consistent with it.
+ *
+ *  - `next` / `prev` chain a flow's step conversations in execution order (no
+ *    `session_id` — they never cross a flow boundary).
+ *  - `child` links a calling step → a child flow's entry conversation (carries
+ *    `session_id`; `via_tool_call_id` only for a `run_flow` tool call).
+ *  - `parent` is the back-link from a child entry → its caller's step.
+ *
+ * A crash-recovery re-run mints new conversation ids, so a pre-crash `next`/`prev`
+ * may dangle; consumers render only resolvable edges and skip dangling ones.
+ */
+export interface OrchestrationEdge {
+	kind: "next" | "prev" | "child" | "parent";
+	/** The conversation this edge points at. */
+	conversation_id: string;
+	/** Present on child/parent edges that cross a flow-session boundary. */
+	session_id?: string;
+	/** Present on child edges originating from a `run_flow` tool call. */
+	via_tool_call_id?: string;
 }
 
 /** Plan/Act mode. */

@@ -35,6 +35,11 @@ import { FlowDefinitionParser } from "./flow-parser";
 import { StepPromptBuilder } from "./step-prompt-builder";
 import { StepTurnExecutor, type StepRuntime, type StepRuntimeFactory } from "./step-turn-executor";
 import { SessionLog, type SessionLogWriter } from "./session-log";
+import { OrchestrationSessionManager, type SessionFs } from "./session-manager";
+import { TaskRegistry, type TaskFs } from "./task-registry";
+import { seedMemoriesNote, memoriesPath } from "./memories";
+import { SessionRecovery, type RecoveryFs, type RecoverableSession } from "./session-recovery";
+import { VaultStepConversationStore } from "./step-conversation-store";
 import { OrchestrationRunner, type OrchestrationRunResult } from "./runner";
 import type { OrchestrationFlow } from "./types";
 
@@ -45,9 +50,67 @@ function newSessionId(): string {
 	return `sess-${crypto.randomUUID().slice(0, 12)}`;
 }
 
-/** Vault-relative path to a session directory. */
-function sessionDir(notorDir: string, sessionId: string): string {
-	return normalizePath(`${notorDir.replace(/\/$/, "")}/orchestrations/sessions/${sessionId}`);
+/**
+ * Query a session's still-open/running tasks for the runner's `FLOW_COMPLETE`
+ * enforcement (INT-003). Backed by the same vault-adapter {@link TaskRegistry}
+ * the task-tool scaffolds write through, so the open-task set the runner reads is
+ * exactly what those tools persisted.
+ */
+async function listOpenTaskKeys(
+	plugin: NotorPlugin,
+	tasksPath: string,
+): Promise<Array<{ key: string; description: string }>> {
+	const adapter = plugin.app.vault.adapter;
+	const fs: TaskFs = {
+		exists: (p) => adapter.exists(normalizePath(p)),
+		read: (p) => adapter.read(normalizePath(p)),
+		write: async (p, data) => adapter.write(normalizePath(p), data),
+		mkdir: async (p) => adapter.mkdir(normalizePath(p)),
+		list: async (dir) => {
+			const norm = normalizePath(dir);
+			if (!(await adapter.exists(norm))) return [];
+			return (await adapter.list(norm)).files;
+		},
+	};
+	const open = await new TaskRegistry(fs).listOpen(tasksPath);
+	return open.map((t) => ({ key: t.key, description: t.description }));
+}
+
+/**
+ * Build the {@link StepTurnExecutor} wired to the plugin's chat stack. Shared by
+ * a fresh launch and a recovery resume so both run on the identical runtime.
+ */
+function buildExecutor(plugin: NotorPlugin, sessionLog: SessionLog): StepTurnExecutor {
+	// INT-006: persist each step conversation (hidden from the flat list) with its
+	// orchestration_edges header into the chat history directory.
+	const stepConversationStore = new VaultStepConversationStore(
+		new VaultSessionFs(plugin.app),
+		plugin.settings.history_path,
+	);
+	return new StepTurnExecutor(
+		{
+			personaManager: {
+				getPersonaByName: (name: string) => plugin.getPersonaManager().getPersonaByName(name),
+			},
+			providerRegistry: plugin.getProviderRegistry(),
+			settings: plugin.settings,
+			promptBuilder: new StepPromptBuilder(),
+			runtimeFactory: makeRuntimeFactory(plugin),
+			memoriesPath: memoriesPath(plugin.settings.notor_dir),
+			stepConversationStore,
+			resolveIncludes: async (body, notePath) => {
+				const result = await resolveIncludeNotes(
+					body,
+					plugin.app.vault,
+					plugin.app.metadataCache,
+					notePath,
+					"workflow",
+				);
+				return result.inlineContent;
+			},
+		},
+		sessionLog,
+	);
 }
 
 /** A {@link SessionLogWriter} backed by Obsidian's append-only adapter. */
@@ -61,6 +124,41 @@ class VaultSessionLogWriter implements SessionLogWriter {
 			await this.app.vault.adapter.mkdir(dir);
 		}
 		await this.app.vault.adapter.append(path, data);
+	}
+}
+
+/** A {@link SessionFs} backed by Obsidian's vault adapter (INT-001). */
+export class VaultSessionFs implements SessionFs {
+	constructor(private readonly app: App) {}
+
+	exists(path: string): Promise<boolean> {
+		return this.app.vault.adapter.exists(normalizePath(path));
+	}
+
+	async mkdir(path: string): Promise<void> {
+		const norm = normalizePath(path);
+		// Obsidian's adapter.mkdir is not recursive — create parents first.
+		const parts = norm.split("/");
+		let current = "";
+		for (const part of parts) {
+			current = current ? `${current}/${part}` : part;
+			if (!(await this.app.vault.adapter.exists(current))) {
+				await this.app.vault.adapter.mkdir(current);
+			}
+		}
+	}
+
+	async write(path: string, data: string): Promise<void> {
+		const norm = normalizePath(path);
+		const dir = norm.slice(0, norm.lastIndexOf("/"));
+		if (dir && !(await this.app.vault.adapter.exists(dir))) {
+			await this.mkdir(dir);
+		}
+		await this.app.vault.adapter.write(norm, data);
+	}
+
+	read(path: string): Promise<string> {
+		return this.app.vault.adapter.read(normalizePath(path));
 	}
 }
 
@@ -167,35 +265,31 @@ export async function launchOrchestration(
 	},
 ): Promise<OrchestrationRunResult> {
 	const sessionId = newSessionId();
-	const dir = sessionDir(plugin.settings.notor_dir, sessionId);
-	const logPath = `${dir}/session-log.jsonl`;
-	const sessionLog = new SessionLog(logPath, new VaultSessionLogWriter(plugin.app));
+	const origin = options?.origin ?? "user";
+	const parentSessionId = options?.parentSessionId ?? null;
 
-	const promptBuilder = new StepPromptBuilder();
-	const runtimeFactory = makeRuntimeFactory(plugin);
-
-	const executor = new StepTurnExecutor(
-		{
-			personaManager: {
-				getPersonaByName: (name: string) => plugin.getPersonaManager().getPersonaByName(name),
-			},
-			providerRegistry: plugin.getProviderRegistry(),
-			settings: plugin.settings,
-			promptBuilder,
-			runtimeFactory,
-			resolveIncludes: async (body, notePath) => {
-				const result = await resolveIncludeNotes(
-					body,
-					plugin.app.vault,
-					plugin.app.metadataCache,
-					notePath,
-					"workflow",
-				);
-				return result.inlineContent;
-			},
-		},
-		sessionLog,
+	// INT-001: create the session workspace (dir + scratchpad/ + tasks/ +
+	// session.json status `active`) before the first turn runs.
+	const sessionManager = new OrchestrationSessionManager(
+		plugin.settings.notor_dir,
+		new VaultSessionFs(plugin.app),
 	);
+	const ws = await sessionManager.createSession({
+		sessionId,
+		flowName: flow.name,
+		prompt: promptText,
+		origin,
+		parentSessionId,
+	});
+
+	// INT-004: seed the persistent cross-session memories note on first use
+	// (idempotent — never overwrites an existing note).
+	await seedMemoriesNote(plugin.settings.notor_dir, new VaultSessionFs(plugin.app)).catch((e) =>
+		log.warn("memories.md seeding failed", { error: String(e) }),
+	);
+
+	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(plugin.app));
+	const executor = buildExecutor(plugin, sessionLog);
 
 	const abortController = new AbortController();
 	const abortSignal = options?.abortSignal ?? abortController.signal;
@@ -205,8 +299,8 @@ export async function launchOrchestration(
 		sessionLog,
 		makeOrchestrationContext: (_conversationId): OrchestrationToolContext => ({
 			sessionId,
-			scratchpadPath: `${dir}/scratchpad`,
-			tasksPath: `${dir}/tasks`,
+			scratchpadPath: ws.scratchpadPath,
+			tasksPath: ws.tasksPath,
 			pendingEmission: null,
 			emissionOverwrites: [],
 		}),
@@ -214,13 +308,188 @@ export async function launchOrchestration(
 		mode: options?.mode ?? plugin.settings.mode,
 		sessionId,
 		abortSignal,
-		origin: options?.origin ?? "user",
-		parentSessionId: options?.parentSessionId ?? null,
+		origin,
+		parentSessionId,
+		// INT-003: query the session's task registry to gate FLOW_COMPLETE.
+		listOpenTasks: () => listOpenTaskKeys(plugin, ws.tasksPath),
 		onProgress: (status) => log.debug("orchestration progress", { status }),
 	});
 
-	log.info("Launching orchestration flow", { flow: flow.name, sessionId, origin: options?.origin });
-	return runner.start(flow, promptText);
+	log.info("Launching orchestration flow", { flow: flow.name, sessionId, origin });
+
+	let result: OrchestrationRunResult;
+	try {
+		result = await runner.start(flow, promptText);
+	} catch (e) {
+		// A crash before a terminal: mark the session interrupted so the recovery
+		// scan (INT-005) picks it up on next load.
+		await sessionManager
+			.updateStatus(sessionId, "interrupted")
+			.catch(() => undefined);
+		throw e;
+	}
+
+	// INT-001: reflect the terminal status into session.json (recovery entry
+	// point). `completed` → done; `cancelled`/`error` map to their statuses.
+	const finalStatus =
+		result.status === "completed"
+			? "completed"
+			: result.status === "cancelled"
+				? "cancelled"
+				: "error";
+	await sessionManager
+		.updateStatus(sessionId, finalStatus, { iteration: result.iterations })
+		.catch((e) => log.warn("Failed to finalize session.json status", { error: String(e) }));
+
+	return result;
+}
+
+// ---------------------------------------------------------------------------
+// Session recovery on reload (INT-005 / FR-125)
+// ---------------------------------------------------------------------------
+
+/**
+ * Load-time orchestration recovery scan. Gated on `orchestration_enabled` by the
+ * caller (main.ts). Scans `{notor_dir}/orchestrations/sessions/*` for recoverable
+ * roots (`user`/`hook` always; terminal-parent `chaining`), classifies each
+ * dangling tail, rebuilds budget + safety state, and resumes each on its own
+ * runner. Loud recovery errors (interior log corruption, absent/unexpected
+ * `origin`, missing files) are surfaced as Notices and the session is marked
+ * `error` — never silently skipped.
+ *
+ * Resume is offered, not forced: a "Resume orchestration?" Notice summarizes
+ * where each run left off. (The Phase-2 surface is a Notice + auto-resume of
+ * `user`/`hook` roots; a richer prompt is a later UX task.)
+ */
+export async function recoverOrchestrations(plugin: NotorPlugin): Promise<void> {
+	const fsVault = new VaultSessionFs(plugin.app);
+	const sessionManager = new OrchestrationSessionManager(plugin.settings.notor_dir, fsVault);
+	const sessionsRoot = `${sessionManager.rootPath}/sessions`;
+
+	const recoveryFs: RecoveryFs = {
+		listSessions: async () => {
+			if (!(await fsVault.exists(sessionsRoot))) return [];
+			const listing = await plugin.app.vault.adapter.list(normalizePath(sessionsRoot));
+			return listing.folders.map((f) => f.split("/").pop() ?? f);
+		},
+		readMeta: async (sessionId) => {
+			const path = `${sessionsRoot}/${sessionId}/session.json`;
+			if (!(await fsVault.exists(path))) return null;
+			return fsVault.read(path);
+		},
+		readLog: async (sessionId) => {
+			const path = `${sessionsRoot}/${sessionId}/session-log.jsonl`;
+			if (!(await fsVault.exists(path))) return null;
+			return fsVault.read(path);
+		},
+	};
+
+	// Resolve each flow's finite ceilings so the budget re-seeds from the real
+	// caps (not the engine defaults) when the flow is still discoverable.
+	let flowsByName = new Map<string, OrchestrationFlow>();
+	try {
+		const parser = new FlowDefinitionParser(
+			plugin.app.vault,
+			plugin.app.metadataCache,
+			plugin.settings.notor_dir,
+		);
+		const parsed = await parser.discoverFlows();
+		flowsByName = new Map(parsed.map((p) => [p.flow.name, p.flow]));
+	} catch (e) {
+		log.warn("Flow discovery during recovery failed; using engine-default ceilings", {
+			error: String(e),
+		});
+	}
+
+	const recovery = new SessionRecovery();
+	const scan = await recovery.scan(recoveryFs, {
+		resolveCeilings: (flowName) => {
+			const f = flowsByName.get(flowName);
+			return f ? { maxIterations: f.maxIterations, maxCostUsd: f.maxCostUsd } : null;
+		},
+	});
+
+	// Surface loud recovery errors and mark those sessions `error`.
+	for (const err of scan.errors) {
+		log.error("Orchestration recovery error", { sessionId: err.sessionId, reason: err.reason });
+		new Notice(`Orchestration recovery error (${err.sessionId}): ${err.reason}`);
+		await sessionManager.updateStatus(err.sessionId, "error").catch(() => undefined);
+	}
+
+	if (scan.recoverable.length === 0) return;
+
+	for (const recovered of scan.recoverable) {
+		const flow = flowsByName.get(recovered.meta.flow_name);
+		if (!flow) {
+			log.warn("Cannot resume — flow no longer discoverable", {
+				sessionId: recovered.sessionId,
+				flow: recovered.meta.flow_name,
+			});
+			new Notice(
+				`Cannot resume orchestration '${recovered.meta.flow_name}' — its flow definition is missing.`,
+			);
+			continue;
+		}
+		new Notice(`Resuming orchestration '${flow.name}' (${recovered.action.kind})…`);
+		resumeRecoveredSession(plugin, flow, recovered, sessionManager).catch((e) =>
+			log.error("Orchestration resume failed", {
+				sessionId: recovered.sessionId,
+				error: String(e),
+			}),
+		);
+	}
+}
+
+/** Resume one recovered session on a freshly-wired runner. */
+async function resumeRecoveredSession(
+	plugin: NotorPlugin,
+	flow: OrchestrationFlow,
+	recovered: RecoverableSession,
+	sessionManager: OrchestrationSessionManager,
+): Promise<void> {
+	const ws = sessionManager.resolveWorkspace(recovered.sessionId);
+	await sessionManager.updateStatus(recovered.sessionId, "active").catch(() => undefined);
+
+	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(plugin.app));
+	const executor = buildExecutor(plugin, sessionLog);
+	const abortSignal = new AbortController().signal;
+
+	const runner = new OrchestrationRunner({
+		executor,
+		sessionLog,
+		makeOrchestrationContext: (): OrchestrationToolContext => ({
+			sessionId: recovered.sessionId,
+			scratchpadPath: ws.scratchpadPath,
+			tasksPath: ws.tasksPath,
+			pendingEmission: null,
+			emissionOverwrites: [],
+		}),
+		makeConversationId: () => crypto.randomUUID(),
+		mode: plugin.settings.mode,
+		sessionId: recovered.sessionId,
+		abortSignal,
+		origin: recovered.meta.origin,
+		parentSessionId: recovered.meta.parent_session_id,
+		listOpenTasks: () => listOpenTaskKeys(plugin, ws.tasksPath),
+		onProgress: (status) => log.debug("orchestration resume progress", { status }),
+	});
+
+	let result: OrchestrationRunResult;
+	try {
+		result = await runner.resume(flow, recovered);
+	} catch (e) {
+		await sessionManager.updateStatus(recovered.sessionId, "interrupted").catch(() => undefined);
+		throw e;
+	}
+	const finalStatus =
+		result.status === "completed"
+			? "completed"
+			: result.status === "cancelled"
+				? "cancelled"
+				: "error";
+	await sessionManager
+		.updateStatus(recovered.sessionId, finalStatus, { iteration: result.iterations })
+		.catch((e) => log.warn("Failed to finalize resumed session.json status", { error: String(e) }));
 }
 
 // ---------------------------------------------------------------------------

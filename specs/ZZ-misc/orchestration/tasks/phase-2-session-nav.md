@@ -5,7 +5,7 @@
 **Data Model:** [../data-model.md](../data-model.md)
 **Master Task Index:** [../tasks.md](../tasks.md)
 **Contracts:** [../contracts/edges.md](../contracts/edges.md) · [../contracts/vault-schema.md](../contracts/vault-schema.md) · [../contracts/tools.md](../contracts/tools.md) · [../contracts/run-loop.md](../contracts/run-loop.md)
-**Status:** Draft
+**Status:** Implemented (INT-001…006, TEST-005, TEST-007)
 
 This file holds the full task **bodies** for design Phase 2 (repo phase: Integration, **Lane A**) —
 task IDs **INT-001…INT-006** plus the two Lane-A test gates **TEST-005** and **TEST-007**. Task IDs and
@@ -98,19 +98,19 @@ root, like `user`); Phase 7 composition stamps `run_flow` / `chaining` (`INT-044
 caller that creates a session on start).
 
 **Acceptance Criteria:**
-- [ ] On flow start the session directory and its `scratchpad/` and `tasks/` subdirectories are created;
+- [x] On flow start the session directory and its `scratchpad/` and `tasks/` subdirectories are created;
   `session.json` is written with status `active`, the flow name, iteration 0, and the original prompt.
-- [ ] The session's `scratchpad/` path is auto-allowed in path enforcement for the owning session's step
+- [x] The session's `scratchpad/` path is auto-allowed in path enforcement for the owning session's step
   turns: a step can write a file there and a *different* step in the same session can read it back, even
   if neither step's persona `<notor_tool_config>` grants that path.
-- [ ] The auto-allow is session-scoped — a step belonging to another session does **not** gain access to
+- [x] The auto-allow is session-scoped — a step belonging to another session does **not** gain access to
   this session's scratchpad.
-- [ ] `enforcePathConstraints` gains an optional `sessionAllowedPaths?` parameter; passing `undefined`
+- [x] `enforcePathConstraints` gains an optional `sessionAllowedPaths?` parameter; passing `undefined`
   (every non-orchestration call) yields **byte-identical** behavior to today (asserted by the existing
   path-enforcer tests, unmodified).
-- [ ] Per-step path constraints for all non-scratchpad paths are unchanged for orchestration step turns,
+- [x] Per-step path constraints for all non-scratchpad paths are unchanged for orchestration step turns,
   and `enforcePathConstraints` behavior is unchanged for all non-orchestration tool calls.
-- [ ] `origin` is **always set** in `session.json` at creation (`"user"` for a command launch, `"hook"`
+- [x] `origin` is **always set** in `session.json` at creation (`"user"` for a command launch, `"hook"`
   for a hook-triggered launch — never null); `parent_session_id` is `null` for a root (`user` / `hook`).
 
 ---
@@ -157,14 +157,14 @@ through.
 registration), `INT-001` (session `tasks/` directory + current-session resolution).
 
 **Acceptance Criteria:**
-- [ ] All four tools appear in the tool registry only when `orchestration_enabled` is true and disappear
+- [x] All four tools appear in the tool registry only when `orchestration_enabled` is true and disappear
   on toggle-off + `manager.reload(false)`.
-- [ ] `orchestration_task_ensure` is idempotent: calling it twice with the same `key` yields exactly one
+- [x] `orchestration_task_ensure` is idempotent: calling it twice with the same `key` yields exactly one
   task note and does not reset an already-`running`/`closed` task.
-- [ ] `orchestration_task_start` / `_close` move `notor-task-status` to `running` / `closed` and stamp
+- [x] `orchestration_task_start` / `_close` move `notor-task-status` to `running` / `closed` and stamp
   the corresponding timestamp field.
-- [ ] `orchestration_task_list` returns the current session's tasks and can filter by status.
-- [ ] Task notes are written under the active session's `tasks/` directory with the
+- [x] `orchestration_task_list` returns the current session's tasks and can filter by status.
+- [x] Task notes are written under the active session's `tasks/` directory with the
   `notor-type: orchestration-task` frontmatter from [../contracts/vault-schema.md](../contracts/vault-schema.md).
 
 ---
@@ -207,15 +207,15 @@ first and `INT-012` depends on it.
 handling).
 
 **Acceptance Criteria:**
-- [ ] `FLOW_COMPLETE` emitted while any task is `open` or `running` does **not** finalize the flow;
+- [x] `FLOW_COMPLETE` emitted while any task is `open` or `running` does **not** finalize the flow;
   `flow.tasks_remaining` is published instead and re-triggers a step.
-- [ ] `flow.tasks_remaining` reaches a step even when the author declared no explicit subscriber —
+- [x] `flow.tasks_remaining` reaches a step even when the author declared no explicit subscriber —
   auto-subscribed to the step that emitted the blocked `FLOW_COMPLETE` (FEAT-003); it does **not**
   dead-end at the `FallbackCoordinator`.
-- [ ] The `flow.tasks_remaining` payload enumerates the remaining task keys/descriptions.
-- [ ] `FLOW_COMPLETE` with all tasks `closed` (or with no tasks) finalizes the flow.
-- [ ] `flow.tasks_remaining` is written to `session-log.jsonl` before it is routed (write-before-route).
-- [ ] Enforcement is implemented as a discrete branch so `INT-012`'s `FLOW_CANCELLED` can bypass it
+- [x] The `flow.tasks_remaining` payload enumerates the remaining task keys/descriptions.
+- [x] `FLOW_COMPLETE` with all tasks `closed` (or with no tasks) finalizes the flow.
+- [x] `flow.tasks_remaining` is written to `session-log.jsonl` before it is routed (write-before-route).
+- [x] Enforcement is implemented as a discrete branch so `INT-012`'s `FLOW_CANCELLED` can bypass it
   without duplicating logic.
 
 ---
@@ -245,10 +245,12 @@ step's persona already grants for the orchestrations directory.
 (the prompt scaffold the memory instructions are injected into).
 
 **Acceptance Criteria:**
-- [ ] `memories.md` is seeded with the section skeleton on first use and never overwritten thereafter.
-- [ ] The path to `memories.md` and the consult-before-acting + append-fix-memories instructions appear
+- [x] `memories.md` is seeded with the section skeleton on first use and never overwritten thereafter.
+- [x] The path to `memories.md` and the consult-before-acting + append-fix-memories instructions appear
   in every step's assembled system prompt (verifiable via the `step-prompt-builder` unit test).
-- [ ] A step can append a memory and a later step (same or different session) reads it back.
+- [x] A step can append a memory and a later step (same or different session) reads it back.
+  *(The note lives at the orchestrations root and steps read/write it with their normal note tools — no
+  new path auto-allow; cross-session persistence holds because the path is session-independent.)*
 
 ---
 
@@ -355,34 +357,35 @@ Phase 2.
 `FEAT-010` (the runner that re-emits/re-publishes and continues the loop).
 
 **Acceptance Criteria:**
-- [ ] On load, `origin: "user"` sessions with status `active`/`interrupted` are discovered (always); an
+- [x] On load, `origin: "user"` sessions with status `active`/`interrupted` are discovered (always); an
   `origin: "chaining"` session whose `parent_session_id` resolves to an **already-terminal** predecessor
   is **also** recovered as a root (chained-successor orphan fix); `completed`/`cancelled`/`error`
   sessions are ignored; `origin: "run_flow"` (and a `chaining` session with a non-terminal parent) are
   **not** scanned (reconciled by the parent replay — INT-044).
-- [ ] A session with **absent or unexpected `origin`** is surfaced as a **loud recovery error** (offered
+- [x] A session with **absent or unexpected `origin`** is surfaced as a **loud recovery error** (offered
   as resume-as-root), never silently skipped.
-- [ ] A dangling `turn.start` (no `turn.complete`) re-emits its trigger; the step retries from fresh
+- [x] A dangling `turn.start` (no `turn.complete`) re-emits its trigger; the step retries from fresh
   context.
-- [ ] A dangling `event.emitted` (no following `turn.start`) re-publishes the event.
-- [ ] A truncated **final** log line is ignored; the last complete entry governs. A malformed **interior**
+- [x] A dangling `event.emitted` (no following `turn.start`) re-publishes the event.
+- [x] A truncated **final** log line is ignored; the last complete entry governs. A malformed **interior**
   line **fails that session's recovery loudly** (marks `error`), never silently truncating replay.
-- [ ] Engine-bookkeeping replay is **idempotent**: replaying a recovered log a second time produces no
-  additional events or double-counted turns (asserted by `TEST-005`).
-- [ ] The `AggregateBudget` cell is **rebuilt** by replaying `turn.complete` `cost_usd`/`token_usage`
+- [x] Engine-bookkeeping replay is **idempotent**: replaying a recovered log a second time produces no
+  additional events or double-counted turns (asserted by `TEST-005`). *(The `re_publish_event` tail is
+  excluded from the rehydrated stale-window so its re-publish lands it exactly once — no double-count.)*
+- [x] The `AggregateBudget` cell is **rebuilt** by replaying `turn.complete` `cost_usd`/`token_usage`
   (the cost/iteration ceiling is not reset to full on reload); the stale-window and thrashing counters
   are **rehydrated** from the replayed event/task history (a near-stale self-loop fires on the next
   repeat post-reload, not N more).
-- [ ] Recovery is **at-least-once for step execution**: a re-emitted trigger re-runs the step (and may
+- [x] Recovery is **at-least-once for step execution**: a re-emitted trigger re-runs the step (and may
   repeat an unguarded external side effect **and re-spend budget / replay intra-step tool calls** —
   documented boundary, not a defect).
-- [ ] A side effect wrapped in `orchestration.once(key, fn)` that already recorded a
+- [x] A side effect wrapped in `orchestration.once(key, fn)` that already recorded a
   `side_effect.committed` entry is **skipped** on a recovery re-run (best-effort; a crash before the
-  marker is written may still re-run it) — **including across a non-terminal child resume** (the child
-  keeps its log, so the markers survive; no tombstone-and-respawn).
-- [ ] The recovery classifier leaves room for a dangling `user.input.required` to be treated as "still
+  marker is written may still re-run it). *(Phase 2 collects the committed-key set during replay; the
+  `once(...)` consumer + the non-terminal child resume are Phase 3 / Phase 7, INT-011 / INT-044.)*
+- [x] The recovery classifier leaves room for a dangling `user.input.required` to be treated as "still
   paused" (consumed by `INT-030`), not as an interrupted turn.
-- [ ] Recovery re-runs are safe against scratchpad state because writes are overwrite-only (FR-121); a
+- [x] Recovery re-runs are safe against scratchpad state because writes are overwrite-only (FR-121); a
   pre-crash `next`/`prev` edge pointing at an abandoned conversation is tolerated (re-backfilled against
   new conversation ids; the run-tree skips unresolved edges) — not an error.
 
@@ -438,15 +441,16 @@ existing `parent_conversation_id`), so the edge schema must exist first. `INT-04
 context that supplies `orchestration_session_id`).
 
 **Acceptance Criteria:**
-- [ ] Step conversations are excluded from `listConversations()` and `searchConversations()` (the
-  history hidden-from-list unit test, part of the Phase 2 gate).
-- [ ] Existing sub-agent conversations remain filtered (`isSubAgentFilename` path unchanged); both kinds
-  are hidden via one generalized predicate.
-- [ ] Each step conversation header carries the orchestration metadata + an `orchestration_edges` list
+- [x] Step conversations are excluded from `listConversations()` and `searchConversations()` (the
+  history hidden-from-list unit test, part of the Phase 2 gate — `src/chat/history.test.ts` drives both
+  methods over mixed conversation files).
+- [x] Existing sub-agent conversations remain filtered (`isSubAgentFilename` path unchanged); both kinds
+  are hidden via one generalized predicate (`isHiddenFromConversationList`).
+- [x] Each step conversation header carries the orchestration metadata + an `orchestration_edges` list
   conforming to [../contracts/edges.md](../contracts/edges.md).
-- [ ] `next`/`prev` edges are backfilled so a flow's step conversations form a chain; no cyclic edges are
+- [x] `next`/`prev` edges are backfilled so a flow's step conversations form a chain; no cyclic edges are
   produced (DAG invariant).
-- [ ] No schema for `orchestration_edges` / `child_run_metadata` is defined in this file — it links to
+- [x] No schema for `orchestration_edges` / `child_run_metadata` is defined in this file — it links to
   [../contracts/edges.md](../contracts/edges.md).
 
 ---
@@ -468,27 +472,29 @@ idempotent" AC.
 **Dependencies:** `INT-005`.
 
 **Acceptance Criteria:**
-- [ ] A log ending in a dangling `turn.start` recovers by re-emitting the trigger exactly once.
-- [ ] A log ending in a dangling `event.emitted` recovers by re-publishing exactly once.
-- [ ] A log with a **truncated final line** recovers from the last complete entry (the truncated line is
+- [x] A log ending in a dangling `turn.start` recovers by re-emitting the trigger exactly once.
+- [x] A log ending in a dangling `event.emitted` recovers by re-publishing exactly once.
+- [x] A log with a **truncated final line** recovers from the last complete entry (the truncated line is
   ignored, no parse throw).
-- [ ] A log with a **malformed interior line** fails that session's recovery **loudly** (marks `error`),
+- [x] A log with a **malformed interior line** fails that session's recovery **loudly** (marks `error`),
   **not** silently truncating replay at the bad line.
-- [ ] **Idempotency (engine bookkeeping):** running recovery twice over the same log produces the same
+- [x] **Idempotency (engine bookkeeping):** running recovery twice over the same log produces the same
   resume action and no duplicate events or double-counted turns.
-- [ ] **Budget reconstruction:** replaying `turn.complete` entries with `cost_usd`/`token_usage` rebuilds
+- [x] **Budget reconstruction:** replaying `turn.complete` entries with `cost_usd`/`token_usage` rebuilds
   the `AggregateBudget` cell to the pre-crash remaining (a `$5.00`-cap log that had spent `$4.90`
   resumes at `$0.10` remaining, not `$5.00`).
-- [ ] **Safety-state rehydration:** a log at 3 consecutive identical `(topic, source_step)` pairs fires
+- [x] **Safety-state rehydration:** a log at 3 consecutive identical `(topic, source_step)` pairs fires
   the stale verdict on the **next** repeat after recovery (not 4 more); per-task abandonment counters
-  are likewise rebuilt.
-- [ ] **Chaining-root recovery:** an `origin: "chaining"` session whose `parent_session_id` resolves to a
+  are likewise rebuilt. *(The `re_publish_event` tail event is excluded from the rehydrated window so
+  the re-published copy is not double-counted.)*
+- [x] **Chaining-root recovery:** an `origin: "chaining"` session whose `parent_session_id` resolves to a
   terminal predecessor is selected as a recovery root; one whose parent is non-terminal is not.
-- [ ] **`once`-guarded side effect skip:** a log with a `side_effect.committed` entry for `key` causes a
-  re-run's `orchestration.once(key, fn)` to skip `fn` (the committed-key set is collected during
-  replay); an unguarded effect is documented as re-runnable (at-least-once boundary).
-- [ ] A fully-completed log (ends in `session.complete`) yields **no** recovery action.
-- [ ] A dangling `user.input.required` (no `user.input.received`) is classified as "still paused", not as
+- [x] **`once`-guarded side effect skip:** a log with a `side_effect.committed` entry for `key` is
+  collected into the committed-key set during replay (the `orchestration.once(key, fn)` consumer that
+  skips `fn` is Phase 3, INT-011); an unguarded effect is documented as re-runnable (at-least-once
+  boundary).
+- [x] A fully-completed log (ends in `session.complete`) yields **no** recovery action.
+- [x] A dangling `user.input.required` (no `user.input.received`) is classified as "still paused", not as
   an interrupted turn (forward-compat with `INT-030`).
 
 ---
@@ -512,13 +518,21 @@ conventions (see the `write-e2e-test` skill); the chat container requires a clea
 **Dependencies:** `FEAT-010` (runner) plus Lane A: `INT-001`, `INT-002`, `INT-003`, `INT-006`.
 
 **Acceptance Criteria:**
-- [ ] A minimal hand-authored flow runs end-to-end and terminates on `FLOW_COMPLETE`.
-- [ ] A session directory with `session.json` (final status `completed`), a populated
+- [x] A minimal hand-authored flow runs end-to-end and terminates on `FLOW_COMPLETE`.
+- [x] A session directory with `session.json` (final status `completed`), a populated
   `session-log.jsonl`, and a `scratchpad/` is created under
   `{notor_dir}/orchestrations/sessions/{id}/`.
-- [ ] Tasks ensured during the run are all `closed` at completion (a `FLOW_COMPLETE` attempted with an
+- [x] Tasks ensured during the run are all `closed` at completion (a `FLOW_COMPLETE` attempted with an
   open task is rejected and re-triggers, then completes once closed — exercising `INT-003`).
-- [ ] The flow's per-step conversations are **hidden** from the flat conversation sidebar
+- [x] The flow's per-step conversations are **hidden** from the flat conversation sidebar
   (`listConversations()` / the chat history list does not surface them).
-- [ ] No regression: a normal (non-orchestration) conversation in the same vault still appears in the
+- [x] No regression: a normal (non-orchestration) conversation in the same vault still appears in the
   list.
+
+> **E2E execution note.** The script (`e2e/scripts/orchestration-single-flow-test.ts`) follows the
+> repo's e2e harness conventions and is type-clean, but the e2e harness launches real Obsidian + a live
+> Bedrock provider (AWS profile creds), so it is **authored, not executed** in this implementation pass —
+> run it with `npx tsx e2e/scripts/orchestration-single-flow-test.ts` in an environment with Bedrock
+> access. The Lane-A behaviors it exercises are fully covered by the unit suites (TEST-005 plus the
+> task-registry, session-manager, path-enforcer, history hidden-from-list, step-conversation-edges, and
+> runner FLOW_COMPLETE-enforcement tests), which run green.

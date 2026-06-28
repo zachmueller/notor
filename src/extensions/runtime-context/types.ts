@@ -349,6 +349,33 @@ export interface ExtensionUtils {
 	 * @internal
 	 */
 	orchestrationContext?: import("../../run-loop/types").OrchestrationToolContext;
+	/**
+	 * Runtime task-registry bridge for the four `orchestration_task_*` tool
+	 * scaffolds (INT-002). Each method takes the active session's `tasksPath`
+	 * (read off {@link orchestrationContext}); the registry resolves nothing
+	 * globally, so a step can only touch its own session's tasks. Always present
+	 * (the bridge is cheap); the tools that use it are feature-gated. Shapes:
+	 * `TaskNote` / `TaskStatus` (`src/orchestration/task-registry.ts`).
+	 */
+	orchestrationTasks: {
+		ensure: (
+			tasksDir: string,
+			key: string,
+			description: string,
+		) => Promise<import("../../orchestration/task-registry").EnsureResult>;
+		start: (
+			tasksDir: string,
+			key: string,
+		) => Promise<import("../../orchestration/task-registry").MutateResult>;
+		close: (
+			tasksDir: string,
+			key: string,
+		) => Promise<import("../../orchestration/task-registry").MutateResult>;
+		list: (
+			tasksDir: string,
+			filter?: { status?: import("../../orchestration/task-registry").TaskStatus },
+		) => Promise<import("../../orchestration/task-registry").TaskNote[]>;
+	};
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */

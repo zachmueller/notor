@@ -36,6 +36,10 @@ import { WEBVIEW } from "./webview";
 import { READ_NOTOR_SETTINGS } from "./read-notor-settings";
 import { EDIT_NOTOR_SETTINGS } from "./edit-notor-settings";
 import { EMIT_EVENT } from "./emit-event";
+import { ORCHESTRATION_TASK_ENSURE } from "./orchestration-task-ensure";
+import { ORCHESTRATION_TASK_START } from "./orchestration-task-start";
+import { ORCHESTRATION_TASK_CLOSE } from "./orchestration-task-close";
+import { ORCHESTRATION_TASK_LIST } from "./orchestration-task-list";
 
 /**
  * All built-in tool scaffolds, keyed by tool name.
@@ -81,6 +85,10 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[READ_NOTOR_SETTINGS.name, READ_NOTOR_SETTINGS],
 		[EDIT_NOTOR_SETTINGS.name, EDIT_NOTOR_SETTINGS],
 		[EMIT_EVENT.name, EMIT_EVENT],
+		[ORCHESTRATION_TASK_ENSURE.name, ORCHESTRATION_TASK_ENSURE],
+		[ORCHESTRATION_TASK_START.name, ORCHESTRATION_TASK_START],
+		[ORCHESTRATION_TASK_CLOSE.name, ORCHESTRATION_TASK_CLOSE],
+		[ORCHESTRATION_TASK_LIST.name, ORCHESTRATION_TASK_LIST],
 	]);
 
 /**

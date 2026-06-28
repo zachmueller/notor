@@ -46,6 +46,14 @@ export interface StepPromptBuildArgs {
 	/** Current engine iteration (turn number). */
 	iteration: number;
 	/**
+	 * Vault-relative path to the persistent cross-session `memories.md` note
+	 * (INT-004 / FR-124). When provided, a `### MEMORY` section is injected on
+	 * **every** step turn telling the step where it lives, to consult it before
+	 * acting in unfamiliar territory, and to append a fix-memory when blocked and
+	 * recovered. Omitted (e.g. in unit tests) → the section is skipped.
+	 */
+	memoriesPath?: string;
+	/**
 	 * The step body with `<include_note>` tags already resolved (the caller
 	 * reuses the existing include-resolution path). When omitted, the step's raw
 	 * `bodyContent` is embedded verbatim (tags preserved).
@@ -101,10 +109,32 @@ export class StepPromptBuilder {
 		// --- Scratchpad / tasks (overwrite-only rule) ------------------------
 		sections.push(this.buildScratchpadSection(scratchpadPath, tasksPath));
 
+		// --- Persistent memory (INT-004 / FR-124), injected every turn -------
+		if (args.memoriesPath) {
+			sections.push(this.buildMemorySection(args.memoriesPath));
+		}
+
 		// --- Guardrails (injected every turn) --------------------------------
 		sections.push(this.buildGuardrailsSection(flow));
 
 		return sections.join("\n\n");
+	}
+
+	/**
+	 * The persistent-memory section (FR-124). Always present when a `memoriesPath`
+	 * is supplied — tells the step where cross-session memory lives, to consult it
+	 * before acting in unfamiliar territory, and to append a fix-memory when it
+	 * gets blocked and recovers. The note is free-form Markdown read/appended
+	 * through the step's normal note tools.
+	 */
+	private buildMemorySection(memoriesPath: string): string {
+		return (
+			`### MEMORY\n` +
+			`Persistent cross-session memory: ${memoriesPath}\n` +
+			`CONSULT it before acting in unfamiliar territory (Patterns / Decisions / Fixes / Context). ` +
+			`When you get BLOCKED and then recover, APPEND a concise fix-memory under ## Fixes so a future ` +
+			`run avoids the same dead-end. Read/append it with your normal note tools.`
+		);
 	}
 
 	private buildHistorySection(eventHistory: OrchestrationEvent[]): string {

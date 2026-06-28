@@ -114,6 +114,46 @@ export interface StepDefinition {
 }
 
 // ---------------------------------------------------------------------------
+// OrchestrationSessionMeta — persisted session.json
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-session metadata note (`sessions/{id}/session.json`), owned by the
+ * `OrchestrationSessionManager` (INT-001). `status` is the recovery entry point
+ * (the scan filters on `active`/`interrupted`); the authoritative replay source
+ * is `session-log.jsonl`.
+ *
+ * **`origin` is always set at creation and is never null** — it is the
+ * load-bearing recovery discriminator (Issue-4b): a command / `Run Orchestration`
+ * launch stamps `"user"`, a hook-triggered launch (FR-119b) stamps `"hook"`, and
+ * Phase-7 composition stamps `"run_flow"` / `"chaining"`. `parent_session_id` is
+ * `null` for a root (`user` / `hook`) and set for a composition child.
+ *
+ * @see specs/ZZ-misc/orchestration/data-model.md — OrchestrationSessionMeta
+ * @see specs/ZZ-misc/orchestration/contracts/vault-schema.md — session.json
+ */
+export interface OrchestrationSessionMeta {
+	/** Matches the session directory name. */
+	session_id: string;
+	/** The flow's `notor-flow-name`. */
+	flow_name: string;
+	/** Recovery scans for `active`/`interrupted`. */
+	status: "active" | "interrupted" | "completed" | "cancelled" | "error";
+	/** Current step-turn / hop count (display/sequence; includes code steps). */
+	iteration: number;
+	/** Step currently executing (or last, on crash). */
+	active_step: string | null;
+	/** ISO timestamp at creation. */
+	started_at: string;
+	/** The original user objective (injected into every step turn). */
+	prompt: string;
+	/** Composition linkage (`null` for a root). */
+	parent_session_id: string | null;
+	/** Always set at creation — the recovery discriminator. */
+	origin: "user" | "hook" | "run_flow" | "chaining";
+}
+
+// ---------------------------------------------------------------------------
 // OrchestrationEvent
 // ---------------------------------------------------------------------------
 

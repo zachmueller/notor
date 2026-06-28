@@ -629,12 +629,27 @@ export class ToolDispatcher {
 			if (this.effectiveToolConfig) {
 				const toolEntry = this.effectiveToolConfig.tools[toolName];
 				if (toolEntry) {
+					// INT-001 / FR-121: while an orchestration step turn runs, the
+					// owning session's scratchpad (and a `shared`-handoff child's
+					// parent scratchpad) is auto-allowed IN ADDITION to the tool's
+					// configured allowed_paths — sourced from the per-step carriage,
+					// without mutating the shared/global tool config. Undefined for
+					// non-orchestration calls → byte-identical to today.
+					const sessionAllowedPaths = orchestrationContext
+						? [
+								orchestrationContext.scratchpadPath,
+								...(orchestrationContext.parentScratchpadPath
+									? [orchestrationContext.parentScratchpadPath]
+									: []),
+							]
+						: undefined;
 					const pathError = enforcePathConstraints(
 						toolName,
 						parameters,
 						toolEntry,
 						this.vaultRootPath ?? "",
 						this.resolveVaultPath,
+						sessionAllowedPaths,
 					);
 					if (pathError) {
 						toolCall.status = "error";

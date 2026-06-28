@@ -368,4 +368,95 @@ describe("enforcePathConstraints", () => {
 			expect(resolver).not.toHaveBeenCalled();
 		});
 	});
+
+	// -- INT-001: per-session auto-allow (FR-121) -----------------------------
+	describe("sessionAllowedPaths (orchestration scratchpad auto-allow, FR-121)", () => {
+		const SCRATCHPAD = "notor/orchestrations/sessions/sess-A/scratchpad";
+
+		it("allows a scratchpad path OUTSIDE allowed_paths when it is session-allowed", () => {
+			const entry = makeEntry({ allowed_paths: ["notes/"] });
+			// Without session-allow → blocked.
+			expect(
+				enforcePathConstraints("write_note", { path: `${SCRATCHPAD}/plan.md` }, entry, VAULT_ROOT),
+			).not.toBeNull();
+			// With session-allow → permitted, in addition to allowed_paths.
+			expect(
+				enforcePathConstraints(
+					"write_note",
+					{ path: `${SCRATCHPAD}/plan.md` },
+					entry,
+					VAULT_ROOT,
+					undefined,
+					[SCRATCHPAD],
+				),
+			).toBeNull();
+		});
+
+		it("still allows the tool's configured allowed_paths (auto-allow is additive)", () => {
+			const entry = makeEntry({ allowed_paths: ["notes/"] });
+			expect(
+				enforcePathConstraints(
+					"write_note",
+					{ path: "notes/daily.md" },
+					entry,
+					VAULT_ROOT,
+					undefined,
+					[SCRATCHPAD],
+				),
+			).toBeNull();
+		});
+
+		it("is session-scoped — session A's scratchpad does NOT admit session B's", () => {
+			const entry = makeEntry({ allowed_paths: ["notes/"] });
+			const sessionBPath = "notor/orchestrations/sessions/sess-B/scratchpad/plan.md";
+			expect(
+				enforcePathConstraints(
+					"write_note",
+					{ path: sessionBPath },
+					entry,
+					VAULT_ROOT,
+					undefined,
+					[SCRATCHPAD], // only session A's prefix
+				),
+			).not.toBeNull();
+		});
+
+		it("blocked_paths still take precedence over a session-allowed path", () => {
+			const entry = makeEntry({ allowed_paths: [], blocked_paths: [SCRATCHPAD] });
+			expect(
+				enforcePathConstraints(
+					"write_note",
+					{ path: `${SCRATCHPAD}/secret.md` },
+					entry,
+					VAULT_ROOT,
+					undefined,
+					[SCRATCHPAD],
+				),
+			).not.toBeNull();
+		});
+
+		it("passing undefined sessionAllowedPaths yields identical behavior to omitting it", () => {
+			const entry = makeEntry({ allowed_paths: ["notes/"] });
+			const withUndefined = enforcePathConstraints(
+				"read_note", { path: "journal/x.md" }, entry, VAULT_ROOT, undefined, undefined,
+			);
+			const without = enforcePathConstraints("read_note", { path: "journal/x.md" }, entry, VAULT_ROOT);
+			expect(withUndefined).toBe(without);
+		});
+
+		it("auto-allows a filesystem-namespace path under a session prefix", () => {
+			const entry = makeEntry({ allowed_paths: ["/Users/test/vault/docs"] });
+			const fsScratch = "/Users/test/vault/notor/orchestrations/sessions/sess-A/scratchpad";
+			expect(
+				enforcePathConstraints(
+					"read_file",
+					{ path: `${fsScratch}/out.txt` },
+					entry,
+					VAULT_ROOT,
+					undefined,
+					[fsScratch],
+				),
+			).toBeNull();
+		});
+	});
 });

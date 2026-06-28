@@ -35,11 +35,21 @@ export const TOOL_PATH_PARAMS: Record<string, ToolPathParam[]> = {};
  * Check whether a tool call's path arguments satisfy the effective
  * `allowed_paths` / `blocked_paths` constraints.
  *
- * @param toolName         - The tool being called.
- * @param parameters       - The tool call parameters (from the LLM).
- * @param entry            - The resolved tool config entry for this tool.
- * @param vaultRootPath    - Absolute path to the vault root directory.
- * @param resolveVaultPath - Optional resolver for vault note paths. Returns canonical path or null.
+ * @param toolName            - The tool being called.
+ * @param parameters          - The tool call parameters (from the LLM).
+ * @param entry               - The resolved tool config entry for this tool.
+ * @param vaultRootPath       - Absolute path to the vault root directory.
+ * @param resolveVaultPath    - Optional resolver for vault note paths. Returns canonical path or null.
+ * @param sessionAllowedPaths - Optional per-session prefixes auto-allowed **in
+ *   addition to** `entry.allowed_paths` (INT-001 / FR-121). A path under any such
+ *   prefix is allowed without mutating the shared/global tool config — the seam
+ *   the orchestration engine uses to auto-allow the active session's
+ *   `scratchpad/` (and a `shared`-handoff child's parent scratchpad). The active
+ *   session sources these from `OrchestrationToolContext` at the single
+ *   `ToolDispatcher.dispatch()` assembly site. **Non-orchestration callers pass
+ *   `undefined` and behave exactly as today** (byte-identical). `blocked_paths`
+ *   still takes precedence — a session-allowed path that also matches a blocked
+ *   prefix is blocked.
  * @returns `null` if the call is allowed, or an error message string if blocked.
  */
 export function enforcePathConstraints(
@@ -48,6 +58,7 @@ export function enforcePathConstraints(
 	entry: ResolvedToolConfigEntry,
 	vaultRootPath: string,
 	resolveVaultPath?: (path: string) => string | null,
+	sessionAllowedPaths?: string[],
 ): string | null {
 	// Tools not in the descriptor table (e.g., MCP tools) → exempt
 	const pathParams = TOOL_PATH_PARAMS[toolName];
@@ -74,7 +85,13 @@ export function enforcePathConstraints(
 			}
 		}
 
-		const error = checkPath(effectivePath, param.namespace, entry, vaultRootPath);
+		const error = checkPath(
+			effectivePath,
+			param.namespace,
+			entry,
+			vaultRootPath,
+			sessionAllowedPaths,
+		);
 		if (error) {
 			return `Tool "${toolName}" path constraint violation: ${error}`;
 		}
@@ -95,30 +112,45 @@ function checkPath(
 	namespace: PathNamespace,
 	entry: ResolvedToolConfigEntry,
 	vaultRootPath: string,
+	sessionAllowedPaths?: string[],
 ): string | null {
 	if (namespace === "vault") {
-		return checkVaultPath(pathValue, entry);
+		return checkVaultPath(pathValue, entry, sessionAllowedPaths);
 	} else {
-		return checkFilesystemPath(pathValue, entry, vaultRootPath);
+		return checkFilesystemPath(pathValue, entry, vaultRootPath, sessionAllowedPaths);
 	}
 }
 
 /**
  * Vault-namespace: string prefix matching on vault-relative path.
+ *
+ * `sessionAllowedPaths` (INT-001) are treated as additional allowed prefixes
+ * (vault-relative), so the active session's scratchpad passes even when it is
+ * outside the tool's configured `allowed_paths`. `blocked_paths` still wins.
  */
 function checkVaultPath(
 	vaultPath: string,
 	entry: ResolvedToolConfigEntry,
+	sessionAllowedPaths?: string[],
 ): string | null {
 	const normalized = normalizePath(vaultPath);
 
-	// blocked_paths takes precedence over allowed_paths
+	// blocked_paths takes precedence over allowed_paths (and over session-allow)
 	if (entry.blocked_paths.length > 0) {
 		for (const blocked of entry.blocked_paths) {
 			if (vaultPathMatchesPrefix(normalized, blocked)) {
 				return `Path "${vaultPath}" is blocked by path constraint "${blocked}".`;
 			}
 		}
+	}
+
+	// Per-session auto-allow (FR-121): a path under any session prefix is allowed
+	// IN ADDITION to entry.allowed_paths.
+	if (sessionAllowedPaths && sessionAllowedPaths.length > 0) {
+		const sessionAllowed = sessionAllowedPaths.some((prefix) =>
+			vaultPathMatchesPrefix(normalized, prefix),
+		);
+		if (sessionAllowed) return null;
 	}
 
 	// allowed_paths: empty means no restriction
@@ -136,11 +168,16 @@ function checkVaultPath(
 
 /**
  * Filesystem-namespace: resolve to absolute path, then compare.
+ *
+ * `sessionAllowedPaths` (INT-001) are resolved the same way as `allowed_paths`
+ * (absolute or vault-root-relative) and treated as additional allowed prefixes.
+ * `blocked_paths` still takes precedence.
  */
 function checkFilesystemPath(
 	rawPath: string,
 	entry: ResolvedToolConfigEntry,
 	vaultRootPath: string,
+	sessionAllowedPaths?: string[],
 ): string | null {
 	const expandedPath = expandTilde(rawPath);
 	const absolutePath = isAbsolute(expandedPath)
@@ -158,6 +195,18 @@ function checkFilesystemPath(
 				return `Path "${rawPath}" is blocked by path constraint "${blocked}".`;
 			}
 		}
+	}
+
+	// Per-session auto-allow (FR-121): allowed in addition to entry.allowed_paths.
+	if (sessionAllowedPaths && sessionAllowedPaths.length > 0) {
+		const sessionAllowed = sessionAllowedPaths.some((prefix) => {
+			const expandedPrefix = expandTilde(prefix);
+			const absAllowed = isAbsolute(expandedPrefix)
+				? normalize(expandedPrefix)
+				: normalize(resolve(vaultRootPath, expandedPrefix));
+			return isPathWithin(absolutePath, absAllowed);
+		});
+		if (sessionAllowed) return null;
 	}
 
 	// allowed_paths: empty means no restriction

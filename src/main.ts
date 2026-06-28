@@ -684,6 +684,15 @@ export default class NotorPlugin extends Plugin {
 			this.getHistoryManager().enforceRetention().catch((e) => {
 				log.warn("History retention enforcement failed", { error: String(e) });
 			});
+
+			// INT-005 (FR-125): scan for interrupted orchestration sessions and
+			// resume them. Gated on orchestration_enabled; fire-and-forget so it
+			// never blocks load. Loud recovery errors surface as Notices.
+			if (this.settings.orchestration_enabled) {
+				import("./orchestration/launch")
+					.then(({ recoverOrchestrations }) => recoverOrchestrations(this))
+					.catch((e) => log.warn("Orchestration recovery scan failed", { error: String(e) }));
+			}
 		});
 
 		log.info("Plugin loaded");
