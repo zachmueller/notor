@@ -143,6 +143,22 @@ export interface OrchestrationToolContext {
 	/** Present for `shared`-handoff children (auto-allowed too; FR-174). */
 	parentScratchpadPath?: string;
 	/**
+	 * The calling step's conversation id for this turn (INT-043). `run_flow` reads
+	 * it to write the `child` edge (calling step → child flow's entry conversation)
+	 * and to pass the reciprocal `parent` back-link into the child session.
+	 * `undefined` for code-step turns (a code step has no conversation) and for any
+	 * non-orchestration carriage.
+	 */
+	conversationId?: string;
+	/**
+	 * Child-flow edges this turn produced (INT-043 / FR-178). `run_flow` appends a
+	 * `{ kind: "child", conversation_id, session_id, via_tool_call_id }` edge here;
+	 * `StepTurnExecutor` merges them into the persisted step conversation's
+	 * `orchestration_edges` header so the run-tree can descend into the child flow.
+	 * Optional — `undefined` for sub-agents and any non-orchestration carriage.
+	 */
+	childEdges?: import("../types").OrchestrationEdge[];
+	/**
 	 * Mutable capture slot — `emit_event` writes here during `execute()`; the
 	 * executor reads it post-turn (last-write-wins within a turn).
 	 */
@@ -169,6 +185,26 @@ export interface OrchestrationToolContext {
 	 * @see specs/ZZ-misc/orchestration/contracts/tools.md — run_flow vs step→workflow
 	 */
 	workflowInvocations?: Array<{ costUsd: number; iterations: number }>;
+	/**
+	 * Child-flow subtree rollup accumulator (INT-043/047 / FR-177). The `run_flow`
+	 * tool pushes each settled child flow's per-subtree totals here during a step
+	 * turn; `OrchestrationRunner` drains it **after** the turn and folds them into
+	 * the run-level `subtreeConsumed` + token totals so the parent's
+	 * `child_run_metadata` (and the root run-tree header rollup) reflects the
+	 * **whole** descendant subtree — not just its own turns. This is *attribution
+	 * only*: the child's turns already decremented the **shared** `AggregateBudget`
+	 * cell by reference (tree-wide ceiling), so the fold must NOT re-decrement the
+	 * budget. Optional — `undefined` for sub-agents and any non-orchestration
+	 * carriage; the tool no-ops the rollup when it is absent.
+	 *
+	 * @see specs/ZZ-misc/orchestration/contracts/edges.md — §5 (subtreeConsumed fold)
+	 */
+	childRunResults?: Array<{
+		costUsd: number;
+		iterations: number;
+		maxDepthReached: number;
+		tokenUsage: { input: number; output: number };
+	}>;
 }
 
 // ---------------------------------------------------------------------------

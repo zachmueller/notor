@@ -539,16 +539,18 @@ function renderToolResultHtml(msg: Message, subAgentConversations?: SubAgentConv
 		}
 	}
 
-	// Phase 6.3: Expandable sub-agent conversation detail
+	// Phase 6.3: Expandable sub-agent conversation detail. Reads the shared
+	// child_run_metadata, tolerating the legacy sub_agent_metadata key (INT-047).
 	let subAgentDetail = "";
+	const subMeta = tr.child_run_metadata ?? tr.sub_agent_metadata;
 	if (
 		tr.tool_name === USE_SUBAGENT_TOOL_NAME &&
-		tr.sub_agent_metadata?.jsonl_filename &&
+		subMeta?.jsonl_filename &&
 		subAgentConversations
 	) {
-		const subMessages = subAgentConversations.get(tr.sub_agent_metadata.jsonl_filename);
+		const subMessages = subAgentConversations.get(subMeta.jsonl_filename);
 		if (subMessages && subMessages.length > 0) {
-			subAgentDetail = renderSubAgentDetail(tr.sub_agent_metadata, subMessages);
+			subAgentDetail = renderSubAgentDetail(subMeta, subMessages);
 		}
 	}
 
@@ -583,10 +585,10 @@ function renderExtensionBlockHtml(msg: Message): string {
  * @see specs/ZZ-misc/sub-agents-design.md — Section 5.3
  */
 function renderSubAgentDetail(
-	metadata: NonNullable<ToolResult["sub_agent_metadata"]>,
+	metadata: NonNullable<ToolResult["child_run_metadata"]>,
 	messages: Message[],
 ): string {
-	const profileLabel = escapeHtml(metadata.profile_name);
+	const profileLabel = escapeHtml(metadata.name ?? metadata.profile_name ?? "sub-agent");
 	const tokenInfo = `${metadata.token_usage.input.toLocaleString()} in / ${metadata.token_usage.output.toLocaleString()} out`;
 	const iterInfo = `${metadata.iteration_count} turn${metadata.iteration_count !== 1 ? "s" : ""}`;
 	const capWarning = metadata.stop_reason !== "completed"

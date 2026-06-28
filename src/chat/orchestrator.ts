@@ -10,6 +10,7 @@
 
 import { type App, Notice } from "obsidian";
 import type { Conversation, ConversationMode, Message, Persona, TaskItem, ToolResult, WorkflowExecution, WorkflowAssemblyResult, ExecutionChain } from "../types";
+import { readChildRunMetadata } from "../types";
 import type { SendMessageOptions } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
@@ -1642,12 +1643,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 				tool_result: toolResult,
 			});
 
-			// Roll up sub-agent tokens into conversation totals without
-			// inflating per-message estimates (which would cause premature
-			// compaction/truncation).
-			const subAgentTokens = toolResult.sub_agent_metadata?.token_usage;
-			if (subAgentTokens) {
-				convManager.addTokens(subAgentTokens.input, subAgentTokens.output);
+			// Roll up child-run tokens (sub-agent OR run_flow child subtree) into
+			// conversation totals without inflating per-message estimates (which would
+			// cause premature compaction/truncation). The single rollup path (INT-047);
+			// reads the shared child_run_metadata, tolerating the legacy key.
+			const childTokens = readChildRunMetadata(toolResult)?.token_usage;
+			if (childTokens) {
+				convManager.addTokens(childTokens.input, childTokens.output);
 			}
 
 			this.getViewForSession(session)?.renderToolResult(toolResultMessage);

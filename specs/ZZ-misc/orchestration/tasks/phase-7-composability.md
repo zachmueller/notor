@@ -218,18 +218,18 @@ copies the final shape (depth-gate consumption + dynamic schema), not a transiti
 registration — Risk #6).
 
 **Acceptance Criteria:**
-- [ ] `run_flow` is a single tool; its `flow` enum reflects the **currently discovered** invocable flows,
+- [x] `run_flow` is a single tool; its `flow` enum reflects the **currently discovered** invocable flows,
   rebuilt at registration and at the start of each `execute()` (hot-reload).
-- [ ] `get description()` surfaces each invocable flow's `notor-flow-inputs` so the LLM can shape `payload`.
-- [ ] The caller can pre-bind `{flow, payload}` statically in a `definition.md`, have the LLM fill them
+- [x] `get description()` surfaces each invocable flow's `notor-flow-inputs` so the LLM can shape `payload`.
+- [x] The caller can pre-bind `{flow, payload}` statically in a `definition.md`, have the LLM fill them
   dynamically, or mix.
-- [ ] The tool appears only when `orchestration_enabled` is true and disappears on toggle-off +
+- [x] The tool appears only when `orchestration_enabled` is true and disappears on toggle-off +
   `manager.reload(false)`.
-- [ ] **Orchestration-context-only (Issue-4):** with **no** `orchestrationContext` on
+- [x] **Orchestration-context-only (Issue-4):** with **no** `orchestrationContext` on
   `ToolExecuteOptions` (foreground chat / non-orchestration caller), `run_flow` returns `success: false`
   with a clear message and does **not** spawn — so an unrecoverable parentless child flow cannot exist.
-- [ ] An unknown / no-longer-invocable `flow` returns a `ToolResult` `success: false` (not a throw).
-- [ ] Flow names are enum **values**, not tool names — no cross-flow namespace collision is possible.
+- [x] An unknown / no-longer-invocable `flow` returns a `ToolResult` `success: false` (not a throw).
+- [x] Flow names are enum **values**, not tool names — no cross-flow namespace collision is possible.
 
 ---
 
@@ -310,22 +310,22 @@ on), `ARCH-005` (the two-layer budget helpers / per-turn cost), `INT-046` (casca
 `max_depth` on `RunContext` — `INT-043 → INT-046`).
 
 **Acceptance Criteria:**
-- [ ] `run_flow` returns `success: false` when `orchestrationContext` is absent (Issue-4) — no parentless
+- [x] `run_flow` returns `success: false` when `orchestrationContext` is absent (Issue-4) — no parentless
   child flow is spawned.
-- [ ] The selected flow runs on a **child `RunLoop`** (depth + 1, inheriting the parent's shared
+- [x] The selected flow runs on a **child `RunLoop`** (depth + 1, inheriting the parent's shared
   `AggregateBudget` cell **by reference** and a **fresh per-node `subtreeConsumed`** — Issue-12) to its
   terminal event in a child session.
-- [ ] The parent writes **`child.spawned`** (before launch) and **`child.result`** (on return, before
+- [x] The parent writes **`child.spawned`** (before launch) and **`child.result`** (on return, before
   continuing) to its own `session-log.jsonl` (Issue-1 — the reuse-on-recovery ledger).
-- [ ] The tool result **prefers `structured`** — populated **only** by a terminal code step's
+- [x] The tool result **prefers `structured`** — populated **only** by a terminal code step's
   `emit(topic, payload?, structured?)` lifted onto `RunResult.structured` — and **falls back to `text`**
   (from a final conversation step instructed via `notor-flow-returns`).
-- [ ] The spawn is gated on the `RunContext` decision rule over the **shared budget cell**
+- [x] The spawn is gated on the `RunContext` decision rule over the **shared budget cell**
   ([../contracts/run-loop.md](../contracts/run-loop.md)); a blocked spawn returns control with a clear
   tool error, not a throw.
-- [ ] The child flow's step turns dispatch through `executeToolBatches` (batched/parallel intra-turn
+- [x] The child flow's step turns dispatch through `executeToolBatches` (batched/parallel intra-turn
   dispatch inherited).
-- [ ] On return, a `child` edge is written to the child flow's entry conversation and a
+- [x] On return, a `child` edge is written to the child flow's entry conversation and a
   `child_run_metadata` block is attached (per-subtree numbers from `subtreeConsumed`, Issue-12), both
   conforming to [../contracts/edges.md](../contracts/edges.md) (the schemas are referenced, not redefined).
 
@@ -400,17 +400,17 @@ to sibling or unrelated sessions' scratchpads.
 `INT-043` (the flow-as-tool execution that spawns the child session).
 
 **Acceptance Criteria:**
-- [ ] A `run_flow`-spawned child runs in its own session with `parent_session_id` = the caller's session
+- [x] A `run_flow`-spawned child runs in its own session with `parent_session_id` = the caller's session
   and `origin: "run_flow"` recorded in `session.json`.
-- [ ] `isolated` (default) gives the child a **fresh** scratchpad/tasks with no access to the parent's.
-- [ ] `shared` auto-allows the **parent** session's scratchpad path in the child's path enforcement; the
+- [x] `isolated` (default) gives the child a **fresh** scratchpad/tasks with no access to the parent's.
+- [x] `shared` auto-allows the **parent** session's scratchpad path in the child's path enforcement; the
   child can read/write the parent scratchpad, and the parent's steps can read what the child wrote.
-- [ ] The auto-allow remains scoped — a `shared` child gains the parent scratchpad only, not unrelated
+- [x] The auto-allow remains scoped — a `shared` child gains the parent scratchpad only, not unrelated
   sessions'.
-- [ ] A `run_flow`-spawned child's `session.json` `origin` is **always set** (`"run_flow"`) at creation,
+- [x] A `run_flow`-spawned child's `session.json` `origin` is **always set** (`"run_flow"`) at creation,
   never null (Issue-4b); recovery treats an absent/unexpected origin as a loud diagnostic.
-- [ ] The child session links into the parent's recovery tree so `INT-005` resumes the whole tree.
-- [ ] A crash mid-`run_flow` does **not** produce a duplicate child: the replayed parent **reuses** a
+- [x] The child session links into the parent's recovery tree so `INT-005` resumes the whole tree.
+- [x] A crash mid-`run_flow` does **not** produce a duplicate child: the replayed parent **reuses** a
   terminal child's recorded `child.result` (no re-spawn), or **resumes the non-terminal child in place**
   (it replays its own log) — never tombstone-and-respawn, so the child's `once()`
   `side_effect.committed` markers survive and external effects are not double-run (no
@@ -572,19 +572,19 @@ construction (decrementing an `Infinity` cell changes nothing observable).
 spawn point the gate guards — `INT-043 → INT-046`).
 
 **Acceptance Criteria:**
-- [ ] A child-flow / sub-agent spawn is gated on `depth < maxDepth` **AND**
+- [x] A child-flow / sub-agent spawn is gated on `depth < maxDepth` **AND**
   `budget.iterationsRemaining > 0` **AND** `budget.costRemainingUsd > 0` over the **shared** cell (the
   rule referenced from [../contracts/run-loop.md](../contracts/run-loop.md), not restated).
-- [ ] `notor-max-depth` (or `Infinity` when unset) seeds `RunContext.maxDepth`; `notor-max-iterations` /
+- [x] `notor-max-depth` (or `Infinity` when unset) seeds `RunContext.maxDepth`; `notor-max-iterations` /
   `notor-max-cost-usd` seed the **one shared `AggregateBudget` cell**; a child inherits that cell **by
   reference** (not a copy) and `depth + 1`, so a deep/wide subtree collectively respects one ceiling.
-- [ ] Exhausting the ceiling **blocks new child spawns** while **in-flight runs finish their current
+- [x] Exhausting the ceiling **blocks new child spawns** while **in-flight runs finish their current
   turn** (no hard-abort); the overshoot is **at most one full turn per in-flight runner, even serially**
   (decrement-after / check-before), **not** "concurrency × one turn" — there is no `run_flow` concurrency
   semaphore in v1 (write-tool serialization within a turn).
-- [ ] A blocked spawn **returns control** (flow-as-tool, `success: false`) or **terminates the chain**
+- [x] A blocked spawn **returns control** (flow-as-tool, `success: false`) or **terminates the chain**
   (chaining); the notional child `stopReason` is `depth_cap` / `cost_cap`.
-- [ ] Sub-agent behavior is unchanged: `maxDepth = 0`, a fresh both-`Infinity` `budget` cell (per-run cap is the
+- [x] Sub-agent behavior is unchanged: `maxDepth = 0`, a fresh both-`Infinity` `budget` cell (per-run cap is the
   only effective limit).
 
 ---
@@ -644,17 +644,17 @@ contract; it does not define the field shape here.
 `INT-043` (the flow-as-tool path that produces a child subtree to roll up).
 
 **Acceptance Criteria:**
-- [ ] One shared `child_run_metadata` shape (per [../contracts/edges.md](../contracts/edges.md)) is
+- [x] One shared `child_run_metadata` shape (per [../contracts/edges.md](../contracts/edges.md)) is
   emitted by both `use_subagent` and `run_flow`.
-- [ ] A legacy `sub_agent_metadata` record (`jsonl_filename`, `token_usage`, `iteration_count`,
+- [x] A legacy `sub_agent_metadata` record (`jsonl_filename`, `token_usage`, `iteration_count`,
   `stop_reason`, `profile_name`) **parses unchanged** through the shared reader (`TEST-006` back-compat).
-- [ ] For flows the rollup numbers are **aggregate subtree** totals sourced from the child run's
+- [x] For flows the rollup numbers are **aggregate subtree** totals sourced from the child run's
   **`RunContext.subtreeConsumed`** accumulator (Issue-12) — **not** a delta of the shared `AggregateBudget`
   cell (which would absorb concurrent siblings' spend); for sub-agents they are single-run totals (also
   via `subtreeConsumed`).
-- [ ] The token rollup happens at exactly **one** site (`src/chat/orchestrator.ts:1635`, generalized);
+- [x] The token rollup happens at exactly **one** site (`src/chat/orchestrator.ts:1635`, generalized);
   no second rollup site is introduced.
-- [ ] The shape is referenced, not redefined: this file links to
+- [x] The shape is referenced, not redefined: this file links to
   [../contracts/edges.md](../contracts/edges.md).
 
 ---

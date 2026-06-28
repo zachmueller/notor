@@ -10,6 +10,7 @@
  */
 
 import type { Conversation, ConversationMode, Message, MessageRole, TaskItem, ToolCall, ToolResult } from "../types";
+import { readChildRunMetadata } from "../types";
 import { logger } from "../utils/logger";
 import type { ContentBlock } from "../media/types";
 import { getTextContent } from "../media/types";
@@ -315,11 +316,15 @@ export class ConversationManager {
 		for (const m of slicedMessages) {
 			if (m.input_tokens) totalInput += m.input_tokens;
 			if (m.output_tokens) totalOutput += m.output_tokens;
-			// Include sub-agent token usage (not stored on input_tokens/output_tokens)
-			const subTokens = m.tool_result?.sub_agent_metadata?.token_usage;
-			if (subTokens) {
-				totalInput += subTokens.input;
-				totalOutput += subTokens.output;
+			// Include child-run token usage (sub-agent OR run_flow child subtree),
+			// not stored on input_tokens/output_tokens. Tolerates the legacy
+			// sub_agent_metadata key on already-persisted results (INT-047).
+			const childTokens = m.tool_result
+				? readChildRunMetadata(m.tool_result)?.token_usage
+				: undefined;
+			if (childTokens) {
+				totalInput += childTokens.input;
+				totalOutput += childTokens.output;
 			}
 			if (m.cost_estimate != null) {
 				estimatedCost = (estimatedCost ?? 0) + m.cost_estimate;

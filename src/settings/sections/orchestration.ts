@@ -62,6 +62,11 @@ export function renderOrchestrationSection(
 					const manager = ctx.plugin.getExtensionManager();
 					await manager.reload(false);
 
+					// run_flow (INT-042) is a hand-written Tool, not a scaffold, so the
+					// manager reload above does not (un)register it — re-gate it here so
+					// it appears/disappears with the feature group like the scaffolds.
+					ctx.plugin.syncRunFlowToolRegistration();
+
 					ctx.redisplay();
 				}),
 		);

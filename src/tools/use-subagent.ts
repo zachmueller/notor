@@ -477,11 +477,16 @@ export class UseSubagentTool implements Tool {
 			tool_name: USE_SUBAGENT_TOOL_NAME,
 			success: true,
 			result: result.text,
-			sub_agent_metadata: jsonlFilename ? {
+			// INT-047: the shared child_run_metadata block (single-run totals for a
+			// sub-agent). `name` is the generalized label; `profile_name` is retained
+			// as the legacy alias so already-persisted readers still resolve it.
+			child_run_metadata: jsonlFilename ? {
 				jsonl_filename: jsonlFilename,
 				token_usage: result.tokenUsage,
 				iteration_count: result.iterationCount,
+				depth: options?.runContext?.depth ?? 0,
 				stop_reason: result.stopReason,
+				name: profile.name,
 				profile_name: profile.name,
 			} : null,
 		};

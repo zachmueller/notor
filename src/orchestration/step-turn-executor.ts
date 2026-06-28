@@ -381,6 +381,9 @@ export class StepTurnExecutor {
 				providerId: this.deps.providerLabel?.providerId ?? "",
 				modelId: this.deps.providerLabel?.modelId ?? modelId,
 				messages,
+				// INT-043: merge any `child` edges a run_flow call wrote onto the
+				// carriage this turn so the run-tree can descend into the child flow.
+				extraEdges: req.orchestrationContext.childEdges,
 			});
 			this.lastStepConversationId = req.conversationId;
 		} catch (e) {

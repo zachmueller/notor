@@ -27,12 +27,18 @@ import type { ConversationMode } from "../types";
 import type { ToolDefinition } from "../providers/provider";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { Tool } from "../tools/tool";
-import type { OrchestrationToolContext } from "../run-loop/types";
+import type { AggregateBudget, OrchestrationToolContext } from "../run-loop/types";
 import { buildUtils, buildLibs, buildObsidianExports } from "../extensions/runtime-context";
 import { resolveNote } from "../utils/resolve-note";
 import { resolveIncludeNotes } from "../include-note/resolver";
 import { logger } from "../utils/logger";
 import { FlowDefinitionParser } from "./flow-parser";
+import { FlowCompositionManager } from "./flow-composition-manager";
+import type {
+	SpawnChildFlow,
+	SpawnChildFlowRequest,
+	SpawnChildFlowResult,
+} from "./child-flow";
 import { StepPromptBuilder } from "./step-prompt-builder";
 import { StepTurnExecutor, type StepRuntime, type StepRuntimeFactory } from "./step-turn-executor";
 import { CodeStepExecutor, type CodeStepRuntime, type CodeStepRuntimeFactory } from "./code-step-executor";
@@ -432,11 +438,37 @@ export async function launchOrchestration(
 		parentSessionId?: string | null;
 		mode?: ConversationMode;
 		abortSignal?: AbortSignal;
+		/**
+		 * Pre-allocated child session id (INT-044). When omitted a fresh one is
+		 * minted. A child / chaining launch supplies it so the parent's
+		 * `child.spawned` ledger entry can record the id **before** the run starts.
+		 */
+		sessionId?: string;
+		/**
+		 * Inherited cascade context for a child / chaining run (INT-043/045/046):
+		 * the SHARED budget cell + the parent's depth (the child runs at `depth+1`).
+		 * Omitted for a root run, which seeds a fresh cell from the flow's ceilings.
+		 */
+		inheritedContext?: { budget: AggregateBudget; depth: number };
+		/**
+		 * The parent session's scratchpad path, auto-allowed for a `shared`-handoff
+		 * child's step turns (FR-174). Only consulted when the callee flow's
+		 * `notor-handoff-isolation` is `shared`.
+		 */
+		parentScratchpadPath?: string;
+		/**
+		 * The caller's step conversation id (INT-043). Written as the child entry
+		 * conversation's `parent` back-link edge so the run-tree can ascend.
+		 */
+		parentConversationId?: string;
 	},
 ): Promise<OrchestrationRunResult> {
-	const sessionId = newSessionId();
+	const sessionId = options?.sessionId ?? newSessionId();
 	const origin = options?.origin ?? "user";
 	const parentSessionId = options?.parentSessionId ?? null;
+	// `shared` handoff: auto-allow the parent scratchpad for this child's turns.
+	const sharedParentScratchpad =
+		flow.handoffIsolation === "shared" ? options?.parentScratchpadPath : undefined;
 
 	// INT-001: create the session workspace (dir + scratchpad/ + tasks/ +
 	// session.json status `active`) before the first turn runs.
@@ -472,9 +504,14 @@ export async function launchOrchestration(
 			sessionId,
 			scratchpadPath: ws.scratchpadPath,
 			tasksPath: ws.tasksPath,
+			// `shared` handoff: the parent scratchpad is auto-allowed for this
+			// child's step turns (FR-174 / INT-044).
+			parentScratchpadPath: sharedParentScratchpad,
 			pendingEmission: null,
 			emissionOverwrites: [],
 			workflowInvocations: [],
+			childRunResults: [],
+			childEdges: [],
 		}),
 		makeConversationId: () => crypto.randomUUID(),
 		mode: options?.mode ?? plugin.settings.mode,
@@ -482,6 +519,9 @@ export async function launchOrchestration(
 		abortSignal,
 		origin,
 		parentSessionId,
+		// INT-046: a child / chaining run inherits the parent's SHARED budget cell
+		// + depth (so the whole tree respects one ceiling). Omitted ⇒ root run.
+		inheritedContext: options?.inheritedContext,
 		// INT-003: query the session's task registry to gate FLOW_COMPLETE.
 		listOpenTasks: () => listOpenTaskKeys(plugin, ws.tasksPath),
 		// INT-030: interactive pause. The runner writes user.input.required,
@@ -524,8 +564,339 @@ export async function launchOrchestration(
 }
 
 // ---------------------------------------------------------------------------
+// Child-flow spawn (INT-043 / INT-044) — the run_flow execution body
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the {@link SpawnChildFlow} callback injected into {@link RunFlowTool}.
+ * Closes over the plugin; for each `run_flow` call it:
+ *  1. resolves the parent session's depth (from the parent's `RunContext` cascade,
+ *     passed by the tool) and writes a **`child.spawned`** ledger entry on the
+ *     **parent** session log (the recovery anchor — FR-125);
+ *  2. runs the child flow to its terminal event on a child session + child runner
+ *     inheriting the parent's SHARED budget cell + `depth + 1` (INT-046);
+ *  3. writes **`child.result`** on the parent log (the reuse-on-recovery artifact);
+ *  4. backfills the reciprocal `parent` edge on the child entry conversation;
+ *  5. returns the child's `structured`/`text` + the aggregate-subtree rollup.
+ *
+ * **Recovery reuse/resume (INT-044 / FR-125).** Before spawning, it scans the
+ * parent log for a `child.spawned` with this `via_tool_call_id`:
+ *  - a matching **`child.result`** (terminal child) ⇒ **reuse** the recorded result
+ *    (no re-spawn) — the parent's replay must not double-execute the child;
+ *  - a `child.spawned` with **no** `child.result` (non-terminal child) ⇒ **resume**
+ *    that child session in place (replay its own log) and await it — never
+ *    tombstone-and-respawn, so the child's `once()` markers survive.
+ *
+ * The match is by `via_tool_call_id`; a re-run parent mints the SAME id only if the
+ * tool re-issues an identical call. To make reuse deterministic across a crash the
+ * parent's replay re-runs the step from fresh context, so it re-dispatches the same
+ * `run_flow` — the ledger is matched by occurrence order within the step (v1 runs
+ * `run_flow` serially, so order is stable).
+ */
+export function makeChildFlowSpawner(plugin: NotorPlugin): SpawnChildFlow {
+	const sessionManager = new OrchestrationSessionManager(
+		plugin.settings.notor_dir,
+		new VaultSessionFs(plugin.app),
+	);
+
+	return async (req: SpawnChildFlowRequest): Promise<SpawnChildFlowResult> => {
+		// Resolve the callee flow (the tool already validated it is invocable, but
+		// re-resolve so the spawner is self-contained / testable).
+		const composition = new FlowCompositionManager(
+			plugin.app.vault,
+			plugin.app.metadataCache,
+			plugin.settings.notor_dir,
+		);
+		const flow = await composition.resolveFlow(req.flowName);
+		if (!flow) {
+			return childErrorResult(req, `Flow '${req.flowName}' is not invocable.`);
+		}
+
+		const parentWs = sessionManager.resolveWorkspace(req.parentSessionId);
+		const parentLog = new SessionLog(parentWs.logPath, new VaultSessionLogWriter(plugin.app));
+
+		// --- Recovery reuse/resume (INT-044) -------------------------------------
+		const reconciled = await reconcileChildLedger(plugin, req);
+		if (reconciled) return reconciled;
+
+		// --- Fresh spawn ---------------------------------------------------------
+		const childSessionId = newSessionId();
+
+		// child.spawned BEFORE launch (the recovery anchor).
+		await parentLog
+			.appendChildSpawned({
+				turn: 0,
+				step: req.parentConversationId ?? "",
+				via_tool_call_id: req.viaToolCallId,
+				child_session_id: childSessionId,
+			})
+			.catch((e) => log.warn("child.spawned append failed", { error: String(e) }));
+
+		let result: OrchestrationRunResult;
+		try {
+			result = await launchOrchestration(plugin, flow, req.payload, {
+				origin: "run_flow",
+				parentSessionId: req.parentSessionId,
+				sessionId: childSessionId,
+				inheritedContext: req.cascade,
+				parentScratchpadPath: req.parentScratchpadPath,
+				parentConversationId: req.parentConversationId,
+				abortSignal: req.cascade.abort,
+			});
+		} catch (e) {
+			log.error("Child flow run threw", { flow: flow.name, error: String(e) });
+			return childErrorResult(req, e instanceof Error ? e.message : String(e), childSessionId);
+		}
+
+		// child.result AFTER the child returns, BEFORE the parent turn continues.
+		await parentLog
+			.appendChildResult({
+				turn: 0,
+				child_session_id: childSessionId,
+				structured: result.structured ?? undefined,
+				text: result.text,
+				stop_reason: result.terminal.topic,
+			})
+			.catch((e) => log.warn("child.result append failed", { error: String(e) }));
+
+		const entryConversationId = await resolveChildEntryConversationId(plugin, childSessionId);
+		// Backfill the reciprocal `parent` edge on the child entry conversation.
+		if (entryConversationId && req.parentConversationId) {
+			await backfillParentEdge(
+				plugin,
+				entryConversationId,
+				req.parentConversationId,
+				req.parentSessionId,
+			);
+		}
+
+		return {
+			status: result.status,
+			structured: result.structured,
+			text: result.text,
+			stopReason: result.terminal.topic,
+			childSessionId,
+			entryConversationId,
+			rollup: {
+				costUsd: result.subtreeConsumed.costUsd,
+				iterations: result.subtreeConsumed.iterations,
+				maxDepthReached: result.subtreeConsumed.maxDepthReached,
+				tokenUsage: result.tokenUsage,
+			},
+		};
+	};
+}
+
+/**
+ * Reconcile a `run_flow` child against the parent's durable ledger on a recovery
+ * re-run (INT-044). Returns a reuse/resume result when the parent already has a
+ * `child.spawned` for this `via_tool_call_id`; `null` for a fresh spawn (the
+ * common live case).
+ */
+async function reconcileChildLedger(
+	plugin: NotorPlugin,
+	req: SpawnChildFlowRequest,
+): Promise<SpawnChildFlowResult | null> {
+	const sessionManager = new OrchestrationSessionManager(
+		plugin.settings.notor_dir,
+		new VaultSessionFs(plugin.app),
+	);
+	const parentWs = sessionManager.resolveWorkspace(req.parentSessionId);
+	let raw: string;
+	try {
+		if (!(await plugin.app.vault.adapter.exists(normalizePath(parentWs.logPath)))) return null;
+		raw = await plugin.app.vault.adapter.read(normalizePath(parentWs.logPath));
+	} catch {
+		return null;
+	}
+
+	const entries = raw
+		.split("\n")
+		.filter((l) => l.trim().length > 0)
+		.map((l) => {
+			try {
+				return JSON.parse(l) as { type: string; [k: string]: unknown };
+			} catch {
+				return null;
+			}
+		})
+		.filter((e): e is { type: string; [k: string]: unknown } => e !== null);
+
+	const spawned = entries.find(
+		(e) => e.type === "child.spawned" && e["via_tool_call_id"] === req.viaToolCallId,
+	);
+	if (!spawned) return null; // fresh spawn
+
+	const childSessionId = String(spawned["child_session_id"] ?? "");
+	const childResult = entries.find(
+		(e) => e.type === "child.result" && e["child_session_id"] === childSessionId,
+	);
+
+	if (childResult) {
+		// Terminal child → REUSE the recorded result (no re-spawn).
+		log.info("run_flow recovery: reusing terminal child result", { childSessionId });
+		const text = String(childResult["text"] ?? "");
+		const entryConversationId = await resolveChildEntryConversationId(plugin, childSessionId);
+		return {
+			status: childResult["stop_reason"] === "FLOW_CANCELLED" ? "cancelled" : "completed",
+			structured: "structured" in childResult ? childResult["structured"] : null,
+			text,
+			stopReason: String(childResult["stop_reason"] ?? "completed"),
+			childSessionId,
+			entryConversationId,
+			rollup: { costUsd: 0, iterations: 0, maxDepthReached: req.cascade.depth + 1, tokenUsage: { input: 0, output: 0 } },
+		};
+	}
+
+	// Non-terminal child → RESUME it in place (replay its own log), never respawn.
+	log.info("run_flow recovery: resuming non-terminal child in place", { childSessionId });
+	const composition = new FlowCompositionManager(
+		plugin.app.vault,
+		plugin.app.metadataCache,
+		plugin.settings.notor_dir,
+	);
+	const flow = await composition.resolveFlow(req.flowName);
+	if (!flow) return childErrorResult(req, `Flow '${req.flowName}' is no longer invocable.`, childSessionId);
+
+	const recovery = new SessionRecovery();
+	const recoveryFs = makeRecoveryFs(plugin, sessionManager);
+	const logRaw = await recoveryFs.readLog(childSessionId);
+	const metaRaw = await recoveryFs.readMeta(childSessionId);
+	if (!logRaw || !metaRaw) {
+		return childErrorResult(req, "Child session log/meta missing on resume.", childSessionId);
+	}
+	const recovered = recovery.replay(JSON.parse(metaRaw), logRaw, {
+		resolveCeilings: () => ({ maxIterations: flow.maxIterations, maxCostUsd: flow.maxCostUsd }),
+	});
+	const result = await resumeChildSession(plugin, flow, recovered, sessionManager, req.cascade);
+	const entryConversationId = await resolveChildEntryConversationId(plugin, childSessionId);
+	return {
+		status: result.status,
+		structured: result.structured,
+		text: result.text,
+		stopReason: result.terminal.topic,
+		childSessionId,
+		entryConversationId,
+		rollup: {
+			costUsd: result.subtreeConsumed.costUsd,
+			iterations: result.subtreeConsumed.iterations,
+			maxDepthReached: result.subtreeConsumed.maxDepthReached,
+			tokenUsage: result.tokenUsage,
+		},
+	};
+}
+
+/** A child-run error result (no usable child output). */
+function childErrorResult(
+	req: SpawnChildFlowRequest,
+	message: string,
+	childSessionId = "",
+): SpawnChildFlowResult {
+	return {
+		status: "error",
+		structured: null,
+		text: message,
+		stopReason: "error",
+		childSessionId,
+		entryConversationId: null,
+		rollup: { costUsd: 0, iterations: 0, maxDepthReached: req.cascade.depth + 1, tokenUsage: { input: 0, output: 0 } },
+	};
+}
+
+/**
+ * Resolve the **entry** (first) step conversation id of a child session from its
+ * log — the `turn.start` `conversation_id` of the first conversation turn (the
+ * `child` edge target). `null` when the child ran only code steps (no conversation).
+ */
+async function resolveChildEntryConversationId(
+	plugin: NotorPlugin,
+	childSessionId: string,
+): Promise<string | null> {
+	const sessionManager = new OrchestrationSessionManager(
+		plugin.settings.notor_dir,
+		new VaultSessionFs(plugin.app),
+	);
+	const ws = sessionManager.resolveWorkspace(childSessionId);
+	try {
+		if (!(await plugin.app.vault.adapter.exists(normalizePath(ws.logPath)))) return null;
+		const raw = await plugin.app.vault.adapter.read(normalizePath(ws.logPath));
+		for (const line of raw.split("\n")) {
+			if (!line.trim()) continue;
+			try {
+				const e = JSON.parse(line) as { type?: string; conversation_id?: string | null };
+				if (e.type === "turn.start" && e.conversation_id) return e.conversation_id;
+			} catch {
+				// tolerate a malformed/truncated line
+			}
+		}
+	} catch {
+		// no log / unreadable — no entry conversation
+	}
+	return null;
+}
+
+/** Add a `parent` back-link edge on the child entry conversation's header. */
+async function backfillParentEdge(
+	plugin: NotorPlugin,
+	childEntryConversationId: string,
+	parentConversationId: string,
+	parentSessionId: string,
+): Promise<void> {
+	const path = `${plugin.settings.history_path.replace(/\/+$/, "")}/orchestration_step_${childEntryConversationId}.jsonl`;
+	try {
+		const norm = normalizePath(path);
+		if (!(await plugin.app.vault.adapter.exists(norm))) return;
+		const content = await plugin.app.vault.adapter.read(norm);
+		const nl = content.indexOf("\n");
+		const headerLine = nl >= 0 ? content.slice(0, nl) : content;
+		const rest = nl >= 0 ? content.slice(nl) : "";
+		const header = JSON.parse(headerLine) as Record<string, unknown>;
+		const edges = Array.isArray(header.orchestration_edges)
+			? (header.orchestration_edges as Array<Record<string, unknown>>)
+			: [];
+		if (!edges.some((e) => e.kind === "parent" && e.conversation_id === parentConversationId)) {
+			edges.push({
+				kind: "parent",
+				conversation_id: parentConversationId,
+				session_id: parentSessionId,
+			});
+		}
+		header.orchestration_edges = edges;
+		await plugin.app.vault.adapter.write(norm, JSON.stringify(header) + rest);
+	} catch (e) {
+		log.warn("Failed to backfill parent edge on child entry", { error: String(e) });
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Session recovery on reload (INT-005 / FR-125)
 // ---------------------------------------------------------------------------
+
+/** Build the {@link RecoveryFs} the scan + child-resume read sessions through. */
+function makeRecoveryFs(
+	plugin: NotorPlugin,
+	sessionManager: OrchestrationSessionManager,
+): RecoveryFs {
+	const fsVault = new VaultSessionFs(plugin.app);
+	const sessionsRoot = `${sessionManager.rootPath}/sessions`;
+	return {
+		listSessions: async () => {
+			if (!(await fsVault.exists(sessionsRoot))) return [];
+			const listing = await plugin.app.vault.adapter.list(normalizePath(sessionsRoot));
+			return listing.folders.map((f) => f.split("/").pop() ?? f);
+		},
+		readMeta: async (sessionId) => {
+			const path = `${sessionsRoot}/${sessionId}/session.json`;
+			if (!(await fsVault.exists(path))) return null;
+			return fsVault.read(path);
+		},
+		readLog: async (sessionId) => {
+			const path = `${sessionsRoot}/${sessionId}/session-log.jsonl`;
+			if (!(await fsVault.exists(path))) return null;
+			return fsVault.read(path);
+		},
+	};
+}
 
 /**
  * Load-time orchestration recovery scan. Gated on `orchestration_enabled` by the
@@ -543,25 +914,7 @@ export async function launchOrchestration(
 export async function recoverOrchestrations(plugin: NotorPlugin): Promise<void> {
 	const fsVault = new VaultSessionFs(plugin.app);
 	const sessionManager = new OrchestrationSessionManager(plugin.settings.notor_dir, fsVault);
-	const sessionsRoot = `${sessionManager.rootPath}/sessions`;
-
-	const recoveryFs: RecoveryFs = {
-		listSessions: async () => {
-			if (!(await fsVault.exists(sessionsRoot))) return [];
-			const listing = await plugin.app.vault.adapter.list(normalizePath(sessionsRoot));
-			return listing.folders.map((f) => f.split("/").pop() ?? f);
-		},
-		readMeta: async (sessionId) => {
-			const path = `${sessionsRoot}/${sessionId}/session.json`;
-			if (!(await fsVault.exists(path))) return null;
-			return fsVault.read(path);
-		},
-		readLog: async (sessionId) => {
-			const path = `${sessionsRoot}/${sessionId}/session-log.jsonl`;
-			if (!(await fsVault.exists(path))) return null;
-			return fsVault.read(path);
-		},
-	};
+	const recoveryFs = makeRecoveryFs(plugin, sessionManager);
 
 	// Resolve each flow's finite ceilings so the budget re-seeds from the real
 	// caps (not the engine defaults) when the flow is still discoverable.
@@ -619,13 +972,19 @@ export async function recoverOrchestrations(plugin: NotorPlugin): Promise<void> 
 	}
 }
 
-/** Resume one recovered session on a freshly-wired runner. */
+/**
+ * Resume one recovered session on a freshly-wired runner. Returns the terminal
+ * result (used by a `run_flow` parent reconciling a non-terminal child in place,
+ * INT-044). `inheritedContext` is set only for a child resume — a root resume
+ * re-seeds its budget from the rehydrated state.
+ */
 async function resumeRecoveredSession(
 	plugin: NotorPlugin,
 	flow: OrchestrationFlow,
 	recovered: RecoverableSession,
 	sessionManager: OrchestrationSessionManager,
-): Promise<void> {
+	inheritedContext?: { budget: AggregateBudget; depth: number; abort?: AbortSignal },
+): Promise<OrchestrationRunResult> {
 	const ws = sessionManager.resolveWorkspace(recovered.sessionId);
 	await sessionManager.updateStatus(recovered.sessionId, "active").catch(() => undefined);
 
@@ -633,7 +992,7 @@ async function resumeRecoveredSession(
 	// Resume: seed the once() skip set from the recovered log so an
 	// already-committed external effect is not re-run (FR-125 / INT-010).
 	const executor = buildExecutor(plugin, sessionLog, new Set(recovered.committedKeys));
-	const abortSignal = new AbortController().signal;
+	const abortSignal = inheritedContext?.abort ?? new AbortController().signal;
 
 	const runner = new OrchestrationRunner({
 		executor,
@@ -645,6 +1004,8 @@ async function resumeRecoveredSession(
 			pendingEmission: null,
 			emissionOverwrites: [],
 			workflowInvocations: [],
+			childRunResults: [],
+			childEdges: [],
 		}),
 		makeConversationId: () => crypto.randomUUID(),
 		mode: plugin.settings.mode,
@@ -652,6 +1013,12 @@ async function resumeRecoveredSession(
 		abortSignal,
 		origin: recovered.meta.origin,
 		parentSessionId: recovered.meta.parent_session_id,
+		// INT-044: a resumed child inherits the parent's shared budget cell + depth
+		// so its turns keep drawing down the tree-wide ceiling. A root resume omits
+		// this (its budget is re-seeded from the rehydrated decrements in resume()).
+		inheritedContext: inheritedContext
+			? { budget: inheritedContext.budget, depth: inheritedContext.depth }
+			: undefined,
 		listOpenTasks: () => listOpenTaskKeys(plugin, ws.tasksPath),
 		// INT-030: a recovered paused session re-surfaces its prompt through the
 		// same modal; supplying input resumes the loop, dismissing cancels it.
@@ -676,6 +1043,28 @@ async function resumeRecoveredSession(
 	await sessionManager
 		.updateStatus(recovered.sessionId, finalStatus, { iteration: result.iterations })
 		.catch((e) => log.warn("Failed to finalize resumed session.json status", { error: String(e) }));
+	return result;
+}
+
+/**
+ * Resume a non-terminal `run_flow` child in place (INT-044). The parent's replay
+ * (via {@link makeChildFlowSpawner}'s reconciliation) calls this to replay the
+ * child's own log and await its terminal result, inheriting the parent's shared
+ * budget cell + `depth + 1` — never tombstone-and-respawn, so the child's `once()`
+ * markers survive.
+ */
+async function resumeChildSession(
+	plugin: NotorPlugin,
+	flow: OrchestrationFlow,
+	recovered: RecoverableSession,
+	sessionManager: OrchestrationSessionManager,
+	cascade: { budget: AggregateBudget; depth: number; abort: AbortSignal },
+): Promise<OrchestrationRunResult> {
+	return resumeRecoveredSession(plugin, flow, recovered, sessionManager, {
+		budget: cascade.budget,
+		depth: cascade.depth,
+		abort: cascade.abort,
+	});
 }
 
 // ---------------------------------------------------------------------------

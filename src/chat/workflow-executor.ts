@@ -20,6 +20,7 @@ import type {
 	WorkflowAssemblyResult,
 	ExecutionChain,
 } from "../types";
+import { readChildRunMetadata } from "../types";
 import type { ProviderRegistry } from "../providers/index";
 import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher, ApprovalCallback, InteractionCallback } from "./dispatcher";
@@ -1153,12 +1154,13 @@ export class WorkflowExecutor {
 					tool_result: toolResult,
 				});
 
-				// Roll up sub-agent tokens into conversation totals without
-				// inflating per-message estimates (which would cause premature
-				// compaction/truncation).
-				const bgSubAgentTokens = toolResult.sub_agent_metadata?.token_usage;
-				if (bgSubAgentTokens) {
-					bgConvManager.addTokens(bgSubAgentTokens.input, bgSubAgentTokens.output);
+				// Roll up child-run tokens (sub-agent OR run_flow child subtree) into
+				// conversation totals without inflating per-message estimates (which
+				// would cause premature compaction/truncation). Tolerates the legacy
+				// sub_agent_metadata key (INT-047).
+				const bgChildTokens = readChildRunMetadata(toolResult)?.token_usage;
+				if (bgChildTokens) {
+					bgConvManager.addTokens(bgChildTokens.input, bgChildTokens.output);
 				}
 
 				// Add token tracking message if available

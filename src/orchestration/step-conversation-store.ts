@@ -45,6 +45,13 @@ export interface StepConversationRecord {
 	providerId: string;
 	modelId: string;
 	messages: ChatMessage[];
+	/**
+	 * Additional edges to merge into this conversation's header (INT-043). A
+	 * `run_flow` call during the turn produces a `child` edge (→ the child flow's
+	 * entry conversation, carrying `session_id` + `via_tool_call_id`); composition
+	 * appends them here so the run-tree can descend. Omitted for a plain step turn.
+	 */
+	extraEdges?: OrchestrationEdge[];
 }
 
 /** The persistence seam the executor calls (optional — unit tests omit it). */
@@ -70,6 +77,10 @@ export function buildStepConversationHeader(record: StepConversationRecord): Rec
 	const edges: OrchestrationEdge[] = [];
 	if (record.prevConversationId) {
 		edges.push({ kind: "prev", conversation_id: record.prevConversationId });
+	}
+	// INT-043: `child` edges from any run_flow call this turn made.
+	if (record.extraEdges) {
+		edges.push(...record.extraEdges);
 	}
 	const isoCreated = new Date(record.createdAtMs).toISOString();
 	return {

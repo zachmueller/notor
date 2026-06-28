@@ -84,6 +84,9 @@ import { PersonaManager } from "./personas/persona-manager";
 import { SubAgentManager } from "./sub-agents/manager";
 import { UseSubagentTool } from "./tools/use-subagent";
 import { UpdateTasksTool } from "./tools/update-tasks";
+import { RunFlowTool, RUN_FLOW_TOOL_NAME } from "./tools/run-flow";
+import { FlowCompositionManager } from "./orchestration/flow-composition-manager";
+import { makeChildFlowSpawner } from "./orchestration/launch";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
@@ -1580,11 +1583,56 @@ export default class NotorPlugin extends Plugin {
 			const updateTasksTool = new UpdateTasksTool();
 			this._toolRegistry.register(updateTasksTool);
 
+			// run_flow (INT-042) — a hand-written Tool (it needs the dynamic flow
+			// enum, mirroring use_subagent), gated on `orchestration_enabled`. Unlike
+			// the orchestration *scaffolds* (auto-gated by the ExtensionManager), this
+			// class-based tool is gated by its registration here + the settings toggle
+			// (see syncRunFlowToolRegistration). Skipped entirely when the group is off.
+			if (this.settings.orchestration_enabled) {
+				this.registerRunFlowTool(this._toolRegistry);
+			}
+
 			log.debug("Tool registry initialized", {
 				tools: this._toolRegistry.getNames(),
 			});
 		}
 		return this._toolRegistry;
+	}
+
+	/** Construct + register `run_flow` into the registry (INT-042). */
+	private registerRunFlowTool(registry: ToolRegistry): void {
+		const composition = new FlowCompositionManager(
+			this.app.vault,
+			this.app.metadataCache,
+			this.settings.notor_dir,
+		);
+		const runFlowTool = new RunFlowTool(composition, makeChildFlowSpawner(this));
+		registry.register(runFlowTool);
+		// Prime the invocable-flow cache (hot-reloaded again at each execute()).
+		runFlowTool.refreshInvocableFlows().catch((e) =>
+			log.warn("Failed to prime run_flow invocable flows", { error: String(e) }),
+		);
+	}
+
+	/**
+	 * Re-gate `run_flow` when `orchestration_enabled` toggles (INT-042). On enable
+	 * it registers the tool into both the registry and the live dispatcher; on
+	 * disable it unregisters from both, so the tool appears/disappears with the
+	 * feature group exactly like the orchestration scaffolds.
+	 */
+	syncRunFlowToolRegistration(): void {
+		const registry = this.getToolRegistry();
+		const present = registry.get(RUN_FLOW_TOOL_NAME) !== undefined;
+		if (this.settings.orchestration_enabled && !present) {
+			this.registerRunFlowTool(registry);
+			const tool = registry.get(RUN_FLOW_TOOL_NAME);
+			if (tool && this._toolDispatcher && !this._toolDispatcher.hasTool(RUN_FLOW_TOOL_NAME)) {
+				this._toolDispatcher.registerTool(tool);
+			}
+		} else if (!this.settings.orchestration_enabled && present) {
+			registry.unregister(RUN_FLOW_TOOL_NAME);
+			this._toolDispatcher?.unregisterTool(RUN_FLOW_TOOL_NAME);
+		}
 	}
 
 	/** Tool dispatcher. */
@@ -2723,12 +2771,15 @@ export default class NotorPlugin extends Plugin {
 		const historyManager = this.getHistoryManager();
 
 		for (const msg of messages) {
+			const childMeta = msg.tool_result
+				? (msg.tool_result.child_run_metadata ?? msg.tool_result.sub_agent_metadata)
+				: null;
 			if (
 				msg.role === "tool_result" &&
 				msg.tool_result?.tool_name === USE_SUBAGENT_TOOL_NAME &&
-				msg.tool_result.sub_agent_metadata?.jsonl_filename
+				childMeta?.jsonl_filename
 			) {
-				const filename = msg.tool_result.sub_agent_metadata.jsonl_filename;
+				const filename = childMeta.jsonl_filename;
 				try {
 					const subMessages = await historyManager.loadSubAgentMessages(filename);
 					map.set(filename, subMessages);

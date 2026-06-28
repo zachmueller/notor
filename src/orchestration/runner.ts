@@ -30,7 +30,12 @@
  */
 
 import type { ConversationMode } from "../types";
-import type { AggregateBudget, OrchestrationToolContext, RunContext } from "../run-loop/types";
+import type {
+	AggregateBudget,
+	OrchestrationToolContext,
+	RunContext,
+	SubtreeConsumed,
+} from "../run-loop/types";
 import { newRootBudget } from "../run-loop/budget";
 import { logger } from "../utils/logger";
 import { FallbackCoordinator } from "./fallback-coordinator";
@@ -67,10 +72,27 @@ export interface OrchestrationRunResult {
 	 * `orchestration.emit(topic, payload?, structured?)` third arg (FR-104/173);
 	 * `null` when no terminal emit carried one (a conversation step or a
 	 * non-terminal emit never sets it). This is the only producer of
-	 * `RunResult.structured` for flow-as-tool — the full `run_flow` return wiring
-	 * is INT-043 (Phase 7), which consumes this.
+	 * `RunResult.structured` for flow-as-tool — `run_flow` (INT-043) consumes this,
+	 * preferring it over `text`.
 	 */
 	structured: unknown | null;
+	/**
+	 * The closing text of the run — the terminal event's payload (the loose
+	 * fallback a `run_flow` caller receives when no terminal code step supplied
+	 * `structured`, shaped by the callee's `notor-flow-returns`).
+	 */
+	text: string;
+	/**
+	 * Aggregate **subtree** rollup for this run (INT-047 / FR-177): this run's own
+	 * LLM turns + every settled descendant child flow's subtree, sourced from the
+	 * run-level `subtreeConsumed` accumulator — **not** a delta of the shared
+	 * `AggregateBudget` cell (which would absorb concurrent siblings' spend). The
+	 * `run_flow` tool surfaces these on its `child_run_metadata` block; the
+	 * run-tree header reads the root run's totals.
+	 */
+	subtreeConsumed: SubtreeConsumed;
+	/** Aggregate token usage across this run's own turns + settled descendant subtrees. */
+	tokenUsage: { input: number; output: number };
 }
 
 /** A queued routing job: an event to deliver to a specific subscriber step. */
@@ -93,6 +115,19 @@ export interface OrchestrationRunnerDeps {
 	/** Session origin for the session.start log entry. */
 	origin: "user" | "hook" | "run_flow" | "chaining";
 	parentSessionId?: string | null;
+	/**
+	 * Inherited cascade context for a **child** run (INT-043/045/046). When set,
+	 * the runner does NOT seed a fresh root `AggregateBudget` cell — it inherits
+	 * the parent's **shared** cell **by reference** and the parent's `depth + 1`,
+	 * so every child/successor turn draws down the same tree-wide ceiling and an
+	 * `A → B → A` chaining cycle terminates at `max_depth` / the shared budget.
+	 * Omitted for a root run (`origin: "user"`/`"hook"`), which seeds a fresh root
+	 * cell from the flow's finite ceilings. The flow's own `maxDepth` still caps
+	 * nesting *below* this run (the effective gate is `min(inherited, flow)`).
+	 *
+	 * @see specs/ZZ-misc/orchestration/contracts/run-loop.md — Spawn gate
+	 */
+	inheritedContext?: { budget: AggregateBudget; depth: number };
 	/**
 	 * Query the session's still-open/running tasks for `FLOW_COMPLETE` enforcement
 	 * (INT-003). Returns each remaining task's key + description so the synthesized
@@ -137,6 +172,19 @@ export class OrchestrationRunner {
 	private startedAtMs = 0;
 	/** The shared tree-wide budget cell, seeded from the flow's finite ceilings. */
 	private budget!: AggregateBudget;
+	/** This run's depth in the flow tree (0 = root; child/chaining runs inherit `parent + 1`). */
+	private baseDepth = 0;
+	/**
+	 * Run-level subtree rollup (INT-047 / FR-177): this run's own turns + every
+	 * settled descendant child flow's subtree. Accumulated per turn from the step
+	 * result + drained `childRunResults`; surfaced on the terminal `RunResult` so
+	 * a `run_flow` caller's `child_run_metadata` reflects the whole subtree.
+	 */
+	private readonly subtree: SubtreeConsumed = { costUsd: 0, iterations: 0, maxDepthReached: 0 };
+	/** Aggregate token usage across this run's turns + settled descendant subtrees. */
+	private readonly tokenUsage = { input: 0, output: 0 };
+	/** The closing text of the most recent turn (the loose `run_flow` fallback return). */
+	private lastText = "";
 
 	constructor(private readonly deps: OrchestrationRunnerDeps) {}
 
@@ -146,7 +194,16 @@ export class OrchestrationRunner {
 	 */
 	async start(flow: OrchestrationFlow, promptText: string): Promise<OrchestrationRunResult> {
 		this.startedAtMs = Date.now();
-		this.budget = newRootBudget(flow.maxIterations, flow.maxCostUsd);
+		// A child / chaining run inherits the parent's SHARED budget cell by
+		// reference and its depth + 1 (so the whole tree respects one ceiling); a
+		// root run seeds a fresh cell from the flow's finite ceilings (INT-046).
+		if (this.deps.inheritedContext) {
+			this.budget = this.deps.inheritedContext.budget;
+			this.baseDepth = this.deps.inheritedContext.depth;
+		} else {
+			this.budget = newRootBudget(flow.maxIterations, flow.maxCostUsd);
+			this.baseDepth = 0;
+		}
 
 		this.wireSubscriptions(flow);
 
@@ -320,6 +377,10 @@ export class OrchestrationRunner {
 			// Run the step turn.
 			const conversationId = this.deps.makeConversationId();
 			const ctx = this.deps.makeOrchestrationContext(conversationId);
+			// INT-043: expose the calling step's conversation id so a `run_flow` call
+			// can write the `child` edge (calling step → child entry conversation)
+			// onto this turn's carriage; conversation steps persist it.
+			ctx.conversationId = conversationId;
 			const runContext = this.makeRunContext(flow);
 
 			this.deps.onProgress?.(`${flow.name}: ${job.step.name} (iteration ${turn})`);
@@ -339,6 +400,22 @@ export class OrchestrationRunner {
 			});
 
 			if (job.step.mode === "conversation") this.llmTurns += 1;
+
+			// INT-047: fold this turn into the run-level subtree rollup. The turn's
+			// own cost/iteration is what RunLoop accrued into runContext.subtreeConsumed
+			// (a fresh per-turn accumulator); plus the per-turn cost/tokens the executor
+			// surfaced. Then drain any child flows this turn spawned (run_flow) and fold
+			// their whole subtrees in — attribution only (their turns already drew down
+			// the SHARED budget cell, so we never re-decrement it here).
+			this.subtree.costUsd += turnResult.costUsd;
+			this.subtree.iterations += job.step.mode === "conversation" ? 1 : 0;
+			this.tokenUsage.input += turnResult.tokenUsage.input;
+			this.tokenUsage.output += turnResult.tokenUsage.output;
+			if (runContext.subtreeConsumed.maxDepthReached > this.subtree.maxDepthReached) {
+				this.subtree.maxDepthReached = runContext.subtreeConsumed.maxDepthReached;
+			}
+			this.foldChildRunResults(ctx);
+			this.lastText = turnResult.emission.payload;
 
 			// Publish the captured/synthesized emission (write-before-route).
 			this.engine.setEmissionContext(turn, job.step.name);
@@ -650,12 +727,45 @@ export class OrchestrationRunner {
 
 	private makeRunContext(flow: OrchestrationFlow): RunContext {
 		return {
-			depth: 0,
-			maxDepth: flow.maxDepth ?? Infinity,
+			depth: this.baseDepth,
+			// The effective spawn ceiling below this run is the tighter of the
+			// inherited tree depth budget and the flow's own `notor-max-depth`
+			// (offset by where this run sits in the tree), so a callee can only
+			// *narrow* nesting, never widen it past an ancestor's `max_depth`.
+			maxDepth:
+				flow.maxDepth !== null && flow.maxDepth !== undefined
+					? this.baseDepth + flow.maxDepth
+					: Infinity,
 			budget: this.budget,
-			subtreeConsumed: { costUsd: 0, iterations: 0, maxDepthReached: 0 },
+			// A fresh per-turn accumulator: the step turn (and any child it spawns
+			// via run_flow) folds its spend here; the runner then folds it into the
+			// run-level `subtree` rollup after the turn.
+			subtreeConsumed: { costUsd: 0, iterations: 0, maxDepthReached: this.baseDepth },
 			abort: this.deps.abortSignal,
 		};
+	}
+
+	/**
+	 * Drain a turn's `childRunResults` carriage and fold each settled child flow's
+	 * subtree into the run-level rollup (INT-047 / FR-177). Attribution only — the
+	 * child's turns already decremented the shared `AggregateBudget` cell by
+	 * reference, so this must NOT re-decrement the budget. `maxDepthReached` takes
+	 * the deepest child subtree.
+	 */
+	private foldChildRunResults(ctx: OrchestrationToolContext): void {
+		const children = ctx.childRunResults;
+		if (!children || children.length === 0) return;
+		for (const child of children) {
+			this.subtree.costUsd += child.costUsd;
+			this.subtree.iterations += child.iterations;
+			this.tokenUsage.input += child.tokenUsage.input;
+			this.tokenUsage.output += child.tokenUsage.output;
+			if (child.maxDepthReached > this.subtree.maxDepthReached) {
+				this.subtree.maxDepthReached = child.maxDepthReached;
+			}
+		}
+		// Drained — never folded twice (mirrors the workflowInvocations drain).
+		ctx.childRunResults = [];
 	}
 
 	private synthTerminal(topic: string, payload: string): OrchestrationEvent {
@@ -672,7 +782,17 @@ export class OrchestrationRunner {
 		status: OrchestrationRunStatus,
 		terminal: OrchestrationEvent,
 	): OrchestrationRunResult {
-		return { status, terminal, iterations: this.iteration, structured: null };
+		return {
+			status,
+			terminal,
+			iterations: this.iteration,
+			structured: null,
+			// The loose `run_flow` fallback return: prefer the terminal event's own
+			// payload, else the most recent turn's closing text.
+			text: terminal.payload || this.lastText,
+			subtreeConsumed: { ...this.subtree },
+			tokenUsage: { ...this.tokenUsage },
+		};
 	}
 
 	/**

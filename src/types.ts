@@ -310,26 +310,74 @@ export interface ToolResult {
 	 */
 	tool_call_id?: string;
 	/**
-	 * Metadata from a sub-agent execution (Phase 6).
+	 * Shared cross-run rollup block (INT-047 / FR-177), used by **both**
+	 * `use_subagent` (single-run totals) and `run_flow` (aggregate-subtree totals).
+	 * Generalizes the legacy `sub_agent_metadata` into one block with **one
+	 * rendering path** (the inline peek card, POL-003) and **one token-rollup path**
+	 * (`src/chat/orchestrator.ts`).
 	 *
-	 * Present only on `use_subagent` tool results. Contains the JSONL
-	 * filename for the sub-agent's conversation history and token usage
-	 * for roll-up into the parent conversation totals.
+	 * **Back-compat superset, not a breaking rename.** A `ToolResult` persisted
+	 * before INT-047 carries `sub_agent_metadata` with `{ jsonl_filename,
+	 * token_usage, iteration_count, stop_reason, profile_name }`; those five fields
+	 * stay readable here (`profile_name` is the legacy alias of the generalized
+	 * `name`). New fields (`entry_conversation_id`, `session_id`, `cost_usd`,
+	 * `depth`, `name`) are optional and simply absent on legacy records. Readers use
+	 * {@link readChildRunMetadata} so a record carrying either key parses.
 	 *
-	 * @see specs/ZZ-misc/sub-agents-design.md — Section 5.1, 9.2
+	 * **Single authority for the shape:** specs/ZZ-misc/orchestration/contracts/edges.md §5.
 	 */
-	sub_agent_metadata?: {
-		/** JSONL filename (relative to history directory) for the sub-agent conversation. */
-		jsonl_filename: string;
-		/** Token usage from the sub-agent execution. */
-		token_usage: { input: number; output: number };
-		/** Number of LLM turns the sub-agent executed. */
-		iteration_count: number;
-		/** Why the sub-agent stopped (e.g. "completed", "iteration_cap", "token_limit"). */
-		stop_reason: string;
-		/** Name of the sub-agent profile used. */
-		profile_name: string;
-	} | null;
+	child_run_metadata?: ChildRunMetadata | null;
+	/**
+	 * @deprecated Legacy alias of {@link child_run_metadata} (kept so already-persisted
+	 * `use_subagent` results still parse — INT-047 back-compat). New code reads via
+	 * {@link readChildRunMetadata}; do not write both.
+	 */
+	sub_agent_metadata?: ChildRunMetadata | null;
+}
+
+/**
+ * The shared `use_subagent` / `run_flow` rollup block (INT-047 / FR-177). For
+ * flows the rollup numbers are **aggregate subtree** totals (from the child run's
+ * `RunContext.subtreeConsumed`); for sub-agents they are single-run totals.
+ *
+ * **Single authority:** specs/ZZ-misc/orchestration/contracts/edges.md §5 — this
+ * declaration must remain byte-consistent with it.
+ */
+export interface ChildRunMetadata {
+	// --- identity / structure ---
+	/** Back-compat: sub-agent conversation filename (relative to history dir). */
+	jsonl_filename?: string;
+	/** Flow: the child flow's entry conversation id (pairs with the `child` edge). */
+	entry_conversation_id?: string;
+	/** Flow: the child session id (absent for sub-agents). */
+	session_id?: string;
+
+	// --- rollup (AGGREGATE SUBTREE for flows; SINGLE-RUN for sub-agents) ---
+	token_usage: { input: number; output: number };
+	/** New; per-turn `calculateCost` accumulation over the subtree. */
+	cost_usd?: number;
+	iteration_count: number;
+	/** New; subtree max depth (sub-agents = own depth). */
+	depth?: number;
+
+	// --- outcome / label ---
+	/** `RunResult.stopReason` / terminal status. */
+	stop_reason: string;
+	/** Generalized label: flow name (`run_flow`) OR profile name (sub-agent). */
+	name?: string;
+
+	// --- back-compat alias (kept readable for persisted sub-agent conversations) ---
+	/** @deprecated Legacy sub-agent field; `name` is the generalized form. */
+	profile_name?: string;
+}
+
+/**
+ * Read the shared {@link ChildRunMetadata} off a `ToolResult`, tolerating the
+ * legacy `sub_agent_metadata` key on already-persisted records (INT-047
+ * back-compat). Returns `null` when neither is present.
+ */
+export function readChildRunMetadata(result: ToolResult): ChildRunMetadata | null {
+	return result.child_run_metadata ?? result.sub_agent_metadata ?? null;
 }
 
 // ---------------------------------------------------------------------------
