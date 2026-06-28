@@ -107,15 +107,15 @@ the group is off. Parsing must not throw on absent fields (they all have default
 **Dependencies:** `FEAT-002` (the flow/step parser this extends).
 
 **Acceptance Criteria:**
-- [ ] All seven composition fields parse onto `OrchestrationFlow` with the
+- [x] All seven composition fields parse onto `OrchestrationFlow` with the
   [../contracts/vault-schema.md](../contracts/vault-schema.md) defaults applied when absent.
-- [ ] A `definition.md` with no composition fields parses unchanged (`invocable: false`,
+- [x] A `definition.md` with no composition fields parses unchanged (`invocable: false`,
   `handoffIsolation: "isolated"`, the rest `null`) — non-composable flows are not regressed.
-- [ ] The fields are inert when `orchestration_enabled` is false (no `run_flow` registration, no chaining
+- [x] The fields are inert when `orchestration_enabled` is false (no `run_flow` registration, no chaining
   evaluation, no guardrail consultation).
-- [ ] `notor-handoff-isolation` rejects values other than `isolated` / `shared` with a clear load error;
+- [x] `notor-handoff-isolation` rejects values other than `isolated` / `shared` with a clear load error;
   `notor-max-depth` / `notor-max-cost-usd` parse as numbers or `null`.
-- [ ] The schema is referenced, not redefined: this file links to
+- [x] The schema is referenced, not redefined: this file links to
   [../contracts/vault-schema.md](../contracts/vault-schema.md).
 
 ---
@@ -147,12 +147,12 @@ discover profiles. Discovery uses the same scan pattern as `discoverWorkflows()`
 **Dependencies:** `INT-040` (composition frontmatter parsing).
 
 **Acceptance Criteria:**
-- [ ] `listInvocableFlows()` returns only flows with `notor-flow-invocable: true`, each carrying its
+- [x] `listInvocableFlows()` returns only flows with `notor-flow-invocable: true`, each carrying its
   `notor-flow-inputs` / `notor-flow-returns`.
-- [ ] The manager holds **no active state**: a flow toggled (un)invocable on disk is reflected on the next
+- [x] The manager holds **no active state**: a flow toggled (un)invocable on disk is reflected on the next
   scan without any explicit cache invalidation (verified by the `SubAgentManager`-mirroring re-scan test).
-- [ ] `resolveFlow(name)` returns the matching invocable flow or `null` for an unknown / non-invocable name.
-- [ ] Discovery excludes `sessions/`, `steps/`, and `memories.md` (same exclusions as flow discovery).
+- [x] `resolveFlow(name)` returns the matching invocable flow or `null` for an unknown / non-invocable name.
+- [x] Discovery excludes `sessions/`, `steps/`, and `memories.md` (same exclusions as flow discovery).
 
 ---
 

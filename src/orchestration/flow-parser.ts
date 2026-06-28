@@ -162,6 +162,21 @@ function parseMaxDepth(value: unknown): number | null {
 	return null;
 }
 
+/**
+ * Parse `notor-handoff-isolation` (INT-040). Absent → the `isolated` default; an
+ * explicit `isolated` / `shared` is honored; **any other value is a hard load
+ * error** (FR-174 AC) rather than a silent coercion — a typo'd isolation mode
+ * must surface at author time, not quietly run isolated.
+ */
+function parseHandoffIsolation(value: unknown, flowName: string): "isolated" | "shared" {
+	const raw = parseStringOrNull(value);
+	if (raw === null) return "isolated";
+	if (raw === "isolated" || raw === "shared") return raw;
+	throw new FlowParseError(
+		`Flow '${flowName}': invalid 'notor-handoff-isolation: ${raw}' — must be 'isolated' or 'shared'.`,
+	);
+}
+
 function parseBool(value: unknown, fallback: boolean): boolean {
 	if (typeof value === "boolean") return value;
 	if (value === "true") return true;
@@ -379,7 +394,7 @@ export class FlowDefinitionParser {
 				const raw = parseStringOrNull(fm["notor-on-complete-flow"]);
 				return raw ? stripWikilink(raw) : null;
 			})(),
-			handoffIsolation: fm["notor-handoff-isolation"] === "shared" ? "shared" : "isolated",
+			handoffIsolation: parseHandoffIsolation(fm["notor-handoff-isolation"], name),
 			maxDepth: parseMaxDepth(fm["notor-max-depth"]),
 			maxCostUsd: parseFiniteNumberOrDefault(fm["notor-max-cost-usd"], DEFAULT_MAX_COST_USD),
 		};

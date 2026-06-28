@@ -308,6 +308,13 @@ describe("FlowDefinitionParser", () => {
 		expect(flow.maxDepth).toBe(3);
 	});
 
+	it("rejects an invalid notor-handoff-isolation with a clear load error (INT-040)", async () => {
+		const files = validFlowFiles({ "notor-handoff-isolation": "sandboxed" });
+		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(
+			/notor-handoff-isolation.*isolated.*shared/i,
+		);
+	});
+
 	it("throws a FlowParseError (not a generic Error) on a missing flow name", async () => {
 		const files = validFlowFiles();
 		delete files[`${FLOW_DIR}/definition.md`]!.frontmatter!["notor-flow-name"];

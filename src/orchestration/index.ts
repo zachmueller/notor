@@ -42,6 +42,7 @@ export type {
 } from "./session-log";
 export { FlowDefinitionParser, StepNoteParser, FlowParseError } from "./flow-parser";
 export type { FlowParseResult, FlowParseWarning } from "./flow-parser";
+export { FlowCompositionManager } from "./flow-composition-manager";
 export { OrchestrationEventEngine } from "./event-engine";
 export { FallbackCoordinator } from "./fallback-coordinator";
 export { StepPromptBuilder } from "./step-prompt-builder";
