@@ -623,6 +623,13 @@ accomplished and what's next.
   turns only**), so an author watching the Notice climb toward `max-iterations` is not misled in a
   code-step-heavy flow.
 
+Note (scaling, deferred — not v1): because a Notice fires once per turn (`onTurnComplete`,
+[contracts/run-loop.md](contracts/run-loop.md)), high-iteration batch/corpus flows — e.g. a per-source
+or per-chunk loop raised well above the 100-turn default — can emit hundreds of progress Notices over a
+single run. v1 ships the simple one-Notice-per-turn behavior unchanged; **coalescing/throttling**
+progress Notices for such flows is a **future improvement** (see [Out of Scope (v1)](#out-of-scope-v1))
+and is intentionally **not designed here** — this note adds no v1 acceptance criterion.
+
 **FR-141: Right-click Notice jump-in.** On desktop, right-clicking a progress Notice opens the step's
 conversation (reusing the `oncontextmenu` Notice pattern + `switchToConversationById`).
 
@@ -823,6 +830,8 @@ See [data-model.md](data-model.md) for full schemas. Summary:
 - A dedicated "Runs" history surface for aged-out completed runs (reachability is via spawning
   block / activity indicator / Notice in v1).
 - Migrating existing `notor-workflow: true` notes to the `notor-type` discriminator (separate change).
+- Coalescing/throttling per-turn progress Notices (FR-140) for high-iteration batch flows — v1 emits one
+  Notice per turn; rate-limiting is a future improvement.
 
 ---
 
