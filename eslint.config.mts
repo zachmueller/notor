@@ -104,6 +104,7 @@ export default tseslint.config(
 		"dist",
 		"specs",
 		"e2e",
+		".claude",             // agent tooling scripts, outside the plugin tsconfig
 		"**/*.test.ts",        // sibling test files
 		"src/**/__tests__/**", // test files + fixtures (excluded from tsconfig)
 		"esbuild.config.mjs",

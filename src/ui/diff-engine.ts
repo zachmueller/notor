@@ -278,7 +278,7 @@ function computeLCS(a: string[], b: string[]): number[][] {
 
 	// Initialise a (m+1) × (n+1) table filled with zeros.
 	// Using a flat array for performance.
-	const dp: number[] = new Array((m + 1) * (n + 1)).fill(0);
+	const dp: number[] = new Array<number>((m + 1) * (n + 1)).fill(0);
 
 	const idx = (i: number, j: number) => i * (n + 1) + j;
 

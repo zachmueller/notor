@@ -1,6 +1,7 @@
-import type { BuilderContext, ExtensionUtils } from "./types";
+import type { BuilderContext, ExtensionUtils, WebviewElement } from "./types";
 import { logger } from "../../utils/logger";
 import { Notice, Platform, normalizePath } from "obsidian";
+import type { WorkspaceLeaf } from "obsidian";
 
 function getAvailableKeys(root: unknown, pathParts: string[]): string {
 	let target: unknown = root;
@@ -28,7 +29,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 		const leafCache = plugin.getWebviewLeafCache();
 
 		function resolveWebViewerType(): string | null {
-			const registry = (plugin.app as any).viewRegistry?.viewByType;
+			const registry = plugin.app.viewRegistry?.viewByType;
 			if (!registry) return null;
 			for (const candidate of WEB_VIEWER_TYPE_CANDIDATES) {
 				if (candidate in registry) return candidate;
@@ -36,15 +37,22 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 			return null;
 		}
 
-		function findWebviewEl(leaf: any): any {
-			const view = leaf.view;
+		function hasExecuteJavaScript(candidate: unknown): candidate is WebviewElement {
+			return (
+				typeof candidate === "object" &&
+				candidate !== null &&
+				typeof (candidate as { executeJavaScript?: unknown }).executeJavaScript === "function"
+			);
+		}
+
+		function findWebviewEl(leaf: WorkspaceLeaf): WebviewElement | null {
+			const view = leaf.view as unknown as Record<string, unknown>;
 			for (const prop of WEBVIEW_PROP_CANDIDATES) {
-				if (view?.[prop] && typeof view[prop].executeJavaScript === "function") {
-					return view[prop];
-				}
+				const candidate = view[prop];
+				if (hasExecuteJavaScript(candidate)) return candidate;
 			}
-			const el = leaf.containerEl?.querySelector?.("webview");
-			if (el && typeof el.executeJavaScript === "function") return el;
+			const el = leaf.view.containerEl.querySelector("webview");
+			if (hasExecuteJavaScript(el)) return el;
 			return null;
 		}
 
@@ -56,7 +64,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				if (!viewType) return null;
 				const leaves = plugin.app.workspace.getLeavesOfType(viewType);
 				const activeLeaf = plugin.app.workspace.getMostRecentLeaf();
-				const targetLeaf = leaves.find((l: any) => l === activeLeaf) ?? null;
+				const targetLeaf = leaves.find((l) => l === activeLeaf) ?? null;
 				if (!targetLeaf) return null;
 				const webviewEl = findWebviewEl(targetLeaf);
 				if (!webviewEl) return null;
@@ -93,7 +101,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 					leafCache.set(convId, leaf);
 				}
 
-				let webviewEl: any = null;
+				let webviewEl: WebviewElement | null = null;
 				for (let attempt = 0; attempt < 10; attempt++) {
 					webviewEl = findWebviewEl(leaf);
 					if (webviewEl) break;
@@ -109,9 +117,10 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 					try {
 						webviewEl.getWebContentsId();
 					} catch {
+						const el = webviewEl;
 						await Promise.race([
 							new Promise<void>(resolve => {
-								webviewEl.addEventListener("dom-ready", () => resolve(), { once: true });
+								el.addEventListener("dom-ready", () => resolve(), { once: true });
 							}),
 							new Promise<void>(resolve => setTimeout(resolve, 5000)),
 						]);
@@ -121,7 +130,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				return { leaf, webviewEl };
 			},
 
-			waitForReady: async (webviewEl: any, revealLeaf = false, leaf?: any) => {
+			waitForReady: async (webviewEl: WebviewElement, revealLeaf = false, leaf?: WorkspaceLeaf) => {
 				if (revealLeaf && leaf) {
 					void plugin.app.workspace.revealLeaf(leaf);
 				}
@@ -160,7 +169,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				);
 				try {
 					const raw = await plugin.app.vault.adapter.read(sidecarPath);
-					const parsed = JSON.parse(raw);
+					const parsed = JSON.parse(raw) as { url?: unknown };
 					return typeof parsed.url === "string" ? parsed.url : null;
 				} catch {
 					return null;

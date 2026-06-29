@@ -122,10 +122,24 @@ async function extractPdfText(
 /**
  * Normalize whitespace and strip control characters from extracted PDF text.
  */
+// Control characters to strip from extracted PDF text (everything in the C0
+// range plus DEL, except the whitespace we keep: \n \r \t). Built at runtime so
+// the source contains no control-char literals in a regex (no-control-regex).
+const CONTROL_CHARS_TO_STRIP = (() => {
+	const keep = new Set([0x09, 0x0a, 0x0d]); // \t \n \r
+	let chars = "";
+	for (let code = 0x00; code <= 0x1f; code++) {
+		if (!keep.has(code)) chars += String.fromCharCode(code);
+	}
+	chars += String.fromCharCode(0x7f); // DEL
+	return chars;
+})();
+const CONTROL_CHAR_REGEX = new RegExp(`[${CONTROL_CHARS_TO_STRIP}]`, "g");
+
 function cleanText(raw: string): string {
 	return raw
 		// Strip control chars except \n \r \t
-		.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+		.replace(CONTROL_CHAR_REGEX, "")
 		// Normalize multiple blank lines to at most two newlines
 		.replace(/\n{3,}/g, "\n\n")
 		.trim();

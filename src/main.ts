@@ -856,7 +856,8 @@ export default class NotorPlugin extends Plugin {
 
 	async loadSettings() {
 		const defaults = createDefaultSettings(this.app.vault.configDir);
-		const loaded = Object.assign({}, defaults, await this.loadData());
+		const saved = await this.loadData() as Partial<NotorSettings> | null;
+		const loaded: NotorSettings = Object.assign({}, defaults, saved);
 
 		// Deep-merge keyed records so new default entries survive
 		// when the saved object replaces defaults via Object.assign.

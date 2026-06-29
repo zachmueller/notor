@@ -398,7 +398,7 @@ export class VaultRuleManager {
 		if (!cache) return false;
 
 		// Check frontmatter tags
-		const frontmatterTags: unknown[] = cache.frontmatter?.["tags"] ?? [];
+		const frontmatterTags: unknown = cache.frontmatter?.["tags"] ?? [];
 		const tagsArray = Array.isArray(frontmatterTags) ? frontmatterTags : [frontmatterTags];
 
 		// Normalise the search tag (strip leading #)

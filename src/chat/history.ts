@@ -58,6 +58,9 @@ import { getTextContent } from "../media/types";
 
 const log = logger("HistoryManager");
 
+/** A parsed JSONL line: a `_type`-discriminated record plus arbitrary payload. */
+type JsonlLine = { _type?: string } & Record<string, unknown>;
+
 /** Metadata about a persisted conversation for listing purposes. */
 export interface ConversationListEntry {
 	id: string;
@@ -253,9 +256,9 @@ export class HistoryManager {
 			const line = lines[i];
 			if (!line?.trim()) continue;
 			try {
-				const obj = JSON.parse(line);
+				const obj = JSON.parse(line) as { _type?: string; entries?: Array<{ note_path: string; body_hash: string; timestamp: string }> };
 				if (obj._type === "stale_state") {
-					return obj.entries;
+					return obj.entries ?? null;
 				}
 			} catch {
 				// skip
@@ -485,10 +488,10 @@ export class HistoryManager {
 			const line = lines[i];
 			if (!line) continue;
 			try {
-				const obj = JSON.parse(line);
+				const obj = JSON.parse(line) as JsonlLine;
 				if (obj._type && obj._type !== "message") continue;
 				const { _type: _msgType, ...messageData } = obj;
-				messages.push(messageData as Message);
+				messages.push(messageData as unknown as Message);
 			} catch (e) {
 				log.warn("Failed to parse sub-agent message line", {
 					file: filename,
@@ -535,13 +538,13 @@ export class HistoryManager {
 		}
 
 		// Parse header (first line)
-		const headerObj = JSON.parse(firstLine);
+		const headerObj = JSON.parse(firstLine) as JsonlLine;
 		if (headerObj._type !== "conversation") {
 			throw new Error(`Invalid conversation header in: ${path}`);
 		}
 
 		const { _type: _headerType, ...conversationData } = headerObj;
-		const conversation = conversationData as Conversation;
+		const conversation = conversationData as unknown as Conversation;
 
 		// Parse messages (remaining lines — skip non-message line types like stale_state)
 		const messages: Message[] = [];
@@ -549,10 +552,10 @@ export class HistoryManager {
 			const line = lines[i];
 			if (!line) continue;
 			try {
-				const obj = JSON.parse(line);
+				const obj = JSON.parse(line) as JsonlLine;
 				if (obj._type && obj._type !== "message") continue;
 				const { _type: _msgType, ...messageData } = obj;
-				messages.push(messageData as Message);
+				messages.push(messageData as unknown as Message);
 			} catch (e) {
 				log.warn("Failed to parse message line", {
 					file: filename,
@@ -603,9 +606,9 @@ export class HistoryManager {
 		if (message.role !== "system") return null;
 		if (typeof message.content !== "string") return null;
 		try {
-			const parsed = JSON.parse(message.content);
+			const parsed = JSON.parse(message.content) as { type?: string };
 			if (parsed && parsed.type === "compaction") {
-				return parsed as CompactionRecord;
+				return parsed as unknown as CompactionRecord;
 			}
 		} catch {
 			// Not JSON or not a compaction record

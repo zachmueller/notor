@@ -40,7 +40,7 @@ export function extractJsonlFromHtml(
 	// First line must be the conversation header
 	let headerObj: Record<string, unknown>;
 	try {
-		headerObj = JSON.parse(lines[0]!);
+		headerObj = JSON.parse(lines[0]!) as Record<string, unknown>;
 	} catch {
 		return null;
 	}
@@ -54,9 +54,9 @@ export function extractJsonlFromHtml(
 	const messages: Message[] = [];
 	for (let i = 1; i < lines.length; i++) {
 		try {
-			const obj = JSON.parse(lines[i]!);
+			const obj = JSON.parse(lines[i]!) as Record<string, unknown>;
 			const { _type: _mt, ...messageData } = obj;
-			messages.push(messageData as Message);
+			messages.push(messageData as unknown as Message);
 		} catch {
 			// Skip malformed lines
 		}

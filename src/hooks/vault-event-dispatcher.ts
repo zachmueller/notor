@@ -389,7 +389,7 @@ export async function executeRunWorkflowAction(
 	// by reading its frontmatter via metadataCache.
 	const workflowFile = abstractFile;
 	const cache = deps.metadataCache.getFileCache(workflowFile);
-	let fm = cache?.frontmatter;
+	let fm = cache?.frontmatter as Record<string, unknown> | undefined;
 
 	// Validate it's a Notor workflow note — attempt auto-repair if missing
 	const isValidWorkflow = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";

@@ -6,7 +6,7 @@ import type { NoteOpener } from "../../tools/note-opener";
 import type { ShellExecuteOptions, ShellExecuteResult } from "../../shell/shell-executor";
 import type { TempOutputSpiller } from "../../shell/temp-output-spiller";
 import type { ResolvedToolConfigEntry } from "../../tool-config/types";
-import type { TFile } from "obsidian";
+import type { TFile, WorkspaceLeaf } from "obsidian";
 import type { ContentBlock, ImageMediaType } from "../../media/types";
 import type { DocxImageData } from "../../tools/docx-image-utils";
 import type { RawComment, Comment } from "../../tools/docx-comment-parser";
@@ -78,6 +78,19 @@ export interface ChatHistoryConversation {
 	updated_at: string;
 	messages: Array<{ role: string; content: string; timestamp: string }>;
 	deep_link: string;
+}
+
+/**
+ * The Electron `<webview>` element exposed by Obsidian's Web Viewer, as used by
+ * the {@link ExtensionUtils.webview} facade. Only the members Notor calls are
+ * declared; there is no upstream type for it.
+ */
+export interface WebviewElement {
+	executeJavaScript: (code: string) => Promise<unknown>;
+	getWebContentsId?: () => number;
+	isLoading?: () => boolean;
+	addEventListener: (type: string, listener: () => void, options?: { once?: boolean }) => void;
+	src?: string;
 }
 
 /** Shape of the `utils` object injected into extension functions. */
@@ -332,9 +345,9 @@ export interface ExtensionUtils {
 	 * Null when not on desktop (Electron required).
 	 */
 	webview: {
-		getConversationWebview: () => Promise<{ leaf: any; webviewEl: any } | null>;
-		getActiveWebview: () => { leaf: any; webviewEl: any } | null;
-		waitForReady: (webviewEl: any, revealLeaf?: boolean, leaf?: any) => Promise<void>;
+		getConversationWebview: () => Promise<{ leaf: WorkspaceLeaf; webviewEl: WebviewElement } | null>;
+		getActiveWebview: () => { leaf: WorkspaceLeaf; webviewEl: WebviewElement } | null;
+		waitForReady: (webviewEl: WebviewElement, revealLeaf?: boolean, leaf?: WorkspaceLeaf) => Promise<void>;
 		getConversationId: () => string | null;
 		persistUrl: (conversationId: string, url: string) => Promise<void>;
 		readPersistedUrl: (conversationId: string) => Promise<string | null>;

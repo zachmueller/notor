@@ -303,7 +303,7 @@ export class ToolDispatcher {
 		let parameters: Record<string, unknown> = {};
 		try {
 			if (jsonAccumulator.trim()) {
-				parameters = JSON.parse(jsonAccumulator);
+				parameters = JSON.parse(jsonAccumulator) as Record<string, unknown>;
 			}
 		} catch (e) {
 			log.warn("Failed to parse tool call parameters", {

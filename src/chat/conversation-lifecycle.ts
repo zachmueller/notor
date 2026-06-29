@@ -438,7 +438,7 @@ export class ConversationLifecycleManager {
 				if (pending) {
 					promise
 						.then((response) => pending.resolve(response))
-						.catch((err) => pending.reject(err));
+						.catch((err: unknown) => pending.reject(err instanceof Error ? err : new Error(String(err))));
 				}
 			}
 		}

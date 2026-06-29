@@ -72,7 +72,7 @@ function buildNfcToOrigMap(original: string, nfc: string): number[] {
 	// Strategy: iterate original and NFC in tandem using codepoints.
 	const origCPs = [...original];
 	const nfcCPs = [...nfc];
-	const map: number[] = new Array(nfc.length);
+	const map: number[] = new Array<number>(nfc.length);
 
 	let oi = 0; // codepoint index into origCPs
 	let ni = 0; // codepoint index into nfcCPs
@@ -286,7 +286,7 @@ function lineBasedCandidates(
 	if (nT.length === 0 || nT.every((l) => l === "")) return [];
 
 	// Normalized-space start offset of each haystack line.
-	const hLineStart: number[] = new Array(hLines.length);
+	const hLineStart: number[] = new Array<number>(hLines.length);
 	let off = 0;
 	for (let i = 0; i < hLines.length; i++) {
 		hLineStart[i] = off;

@@ -585,7 +585,7 @@ class CheckpointModal extends Modal {
 	): Array<{ type: "unchanged" | "removed" | "added"; text: string }> {
 		const m = a.length;
 		const n = b.length;
-		const lcs: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+		const lcs: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
 
 		for (let i = 1; i <= m; i++) {
 			for (let j = 1; j <= n; j++) {

@@ -30,12 +30,27 @@ declare module "obsidian" {
 		/** Internal (non-community) plugins. Not in published types. */
 		internalPlugins: {
 			plugins: Record<string, { instance: unknown; enabled: boolean }>;
+			/** Look up a core plugin by id; `instance` is plugin-specific. */
+			getPluginById?: (id: string) => { instance?: unknown } | null;
+		};
+
+		/** Community plugin registry. Not in published types. */
+		plugins?: {
+			plugins?: Record<string, unknown>;
+		};
+
+		/**
+		 * View-type registry. Used to detect whether a Web Viewer view type is
+		 * registered. Not in published types.
+		 */
+		viewRegistry?: {
+			viewByType?: Record<string, unknown>;
 		};
 	}
 
 	interface View {
 		/** Component children array. Not in published types. */
-		_children: any[];
+		_children: unknown[];
 	}
 
 	/**

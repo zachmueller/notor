@@ -135,8 +135,9 @@ export function parseWorkflowHooks(
 
 		const validActions: WorkflowScopedHook[] = [];
 
-		for (let i = 0; i < rawActions.length; i++) {
-			const rawAction = rawActions[i];
+		const actionsArray: unknown[] = rawActions;
+		for (let i = 0; i < actionsArray.length; i++) {
+			const rawAction = actionsArray[i];
 
 			if (
 				typeof rawAction !== "object" ||

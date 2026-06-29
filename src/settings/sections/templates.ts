@@ -33,8 +33,9 @@ export function renderTemplatesSection(
 				.setValue(ctx.settings.templates_enabled)
 				.onChange(async (value) => {
 					if (value) {
-						const hasTemplater = !!(ctx.app as any).plugins?.plugins?.["templater-obsidian"];
-						const hasCoreTemplates = !!(ctx.app as any).internalPlugins?.getPluginById?.("templates")?.instance?.options?.folder;
+						const hasTemplater = !!ctx.app.plugins?.plugins?.["templater-obsidian"];
+						const coreTemplates = ctx.app.internalPlugins.getPluginById?.("templates")?.instance;
+						const hasCoreTemplates = !!(coreTemplates as { options?: { folder?: string } } | undefined)?.options?.folder;
 						if (!hasTemplater && !hasCoreTemplates) {
 							toggle.setValue(false);
 							new Notice(

@@ -39,6 +39,15 @@ import { MarkdownRenderer, type App, type Component } from "obsidian";
  * Result returned after the user interacts with a diff preview.
  * Tells the caller what content to actually write, or signals rejection.
  */
+/**
+ * The blocks container element, augmented with a transient array of rendered
+ * block bodies stashed on it during diff construction (read back when wiring up
+ * the per-block rendered Markdown previews).
+ */
+interface RenderedBlockHost extends HTMLElement {
+	_renderedBlockEls?: HTMLElement[];
+}
+
 export interface DiffDecision {
 	/** Whether any changes were accepted (false means fully rejected). */
 	accepted: boolean;
@@ -329,7 +338,7 @@ export function renderReplaceInNoteDiffPreview(
 			});
 
 			// Store rendered block containers as we create blocks below
-			(blocksContainerEl as any)._renderedBlockEls = renderedBlockEls;
+			(blocksContainerEl as RenderedBlockHost)._renderedBlockEls = renderedBlockEls;
 		}
 
 		// Track acceptance state per block (default: all accepted)
@@ -365,8 +374,7 @@ export function renderReplaceInNoteDiffPreview(
 				const renderedBlockBody = blockEl.createDiv({
 					cls: "notor-diff-rendered-block-body notor-hidden",
 				});
-				const renderedBlockEls = (blocksContainerEl as any)._renderedBlockEls as HTMLElement[];
-				renderedBlockEls.push(renderedBlockBody);
+				(blocksContainerEl as RenderedBlockHost)._renderedBlockEls?.push(renderedBlockBody);
 			}
 
 			// Wire up toggle

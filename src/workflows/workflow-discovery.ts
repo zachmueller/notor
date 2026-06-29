@@ -318,7 +318,7 @@ function parseWorkflowFile(
 ): Workflow | null {
 	// Get frontmatter from metadata cache
 	const fileCache = metadataCache.getFileCache(file);
-	const frontmatter = fileCache?.frontmatter;
+	const frontmatter = fileCache?.frontmatter as Record<string, unknown> | undefined;
 
 	// No frontmatter → not a workflow (silently ignore)
 	if (!frontmatter) {
@@ -337,7 +337,7 @@ function parseWorkflowFile(
 
 	// Check for fatal errors (missing/invalid trigger)
 	const triggerValue = frontmatter["notor-trigger"];
-	const triggerRaw = String(triggerValue ?? "");
+	const triggerRaw = typeof triggerValue === "string" ? triggerValue : "";
 	const hasTrigger =
 		triggerValue !== undefined &&
 		triggerValue !== null &&
@@ -378,12 +378,8 @@ function parseWorkflowFile(
 	let schedule: string | null = null;
 	if (trigger === "on-schedule") {
 		const rawSchedule = frontmatter["notor-schedule"];
-		if (
-			rawSchedule !== undefined &&
-			rawSchedule !== null &&
-			String(rawSchedule).trim() !== ""
-		) {
-			const scheduleStr = String(rawSchedule).trim();
+		const scheduleStr = parseStringOrNull(rawSchedule);
+		if (scheduleStr) {
 			const cronResult = validateCronExpression(scheduleStr);
 			if (cronResult.valid) {
 				schedule = scheduleStr;

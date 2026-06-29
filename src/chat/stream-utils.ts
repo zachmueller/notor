@@ -209,7 +209,7 @@ export async function* parseStreamEvents(
 					let parameters: Record<string, unknown> = {};
 					try {
 						if (toolCallJson.trim()) {
-							parameters = JSON.parse(toolCallJson);
+							parameters = JSON.parse(toolCallJson) as Record<string, unknown>;
 						}
 					} catch (e) {
 						// Truncated/malformed JSON — preserve the raw content before

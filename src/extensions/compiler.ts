@@ -12,7 +12,8 @@ import type { CompiledExtensionFn } from "./types";
 // AsyncFunction constructor
 // ---------------------------------------------------------------------------
 
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (
+const AsyncFunctionProto = Object.getPrototypeOf(async function () {}) as { constructor: unknown };
+const AsyncFunction = AsyncFunctionProto.constructor as new (
 	...args: string[]
 ) => CompiledExtensionFn;
 
