@@ -12,8 +12,18 @@ import { scaffold } from "./_scaffold-helper";
  *
  * Gated `featureGroup: "orchestration"`, so the `ExtensionManager` only
  * compiles/registers it when `orchestration_enabled` is true (ENV-002 wired the
- * `FEATURE_GROUP_TOGGLES` entry). Mode `write` (Act mode only). Built via
- * `_scaffold-helper.ts`, exactly as `capture-memory.ts`.
+ * `FEATURE_GROUP_TOGGLES` entry). Built via `_scaffold-helper.ts`, exactly as
+ * `capture-memory.ts`.
+ *
+ * Mode `read` (NOT `write`): a conversation step's ONLY output channel is this
+ * tool — the executor reads `pendingEmission` after the turn and routes it. The
+ * dispatcher blocks write-class tools in Plan mode (dispatcher.ts), and an
+ * orchestration inherits the global chat mode (default `plan`), so a `write`
+ * classification would reject the call before its body runs — `pendingEmission`
+ * stays null and the engine routes an EMPTY default-publish payload, silently
+ * stalling every flow whose step hands off a payload. emit_event is a
+ * capture-only control-flow primitive (it mutates nothing in the vault or the
+ * outside world), so it is classified `read` and works in any mode.
  *
  * Within-turn overwrite policy (Issue-13e):
  *  - **Non-terminal topics: last-write-wins** — a later non-terminal emission
@@ -33,7 +43,9 @@ import { scaffold } from "./_scaffold-helper";
 export const EMIT_EVENT = scaffold(
 	"emit_event",
 	"Publish an orchestration event to advance the flow to its next step.",
-	"write",
+	// `read`, not `write`: capture-only control-flow primitive that must run in
+	// any conversation mode (incl. Plan). See the file header for why.
+	"read",
 	`params:
   topic:
     type: string
