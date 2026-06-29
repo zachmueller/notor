@@ -48,6 +48,11 @@ const TEST_GENERATED_DIRS = [
 	"notor/personas/restrictive",
 	"notor/personas/permissive",
 	"notor/personas/test-persona",
+	// Orchestration run sessions accumulate across script runs. Without clearing
+	// them, a later script's `sessions.find(origin === "user")` can match a stale
+	// session left by an earlier script (cross-script contamination surfaced by
+	// the back-to-back regression sweep).
+	"notor/orchestrations/sessions",
 ];
 
 function rmSafe(targetPath: string): void {

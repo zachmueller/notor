@@ -174,25 +174,31 @@ function readFlowSession(vaultPath: string): SessionInfo | null {
  */
 async function installNoticeObserver(page: Page): Promise<void> {
 	await page.evaluate(() => {
-		(window as any).__notorNoticeTexts = [];
-		const record = (root: ParentNode) => {
-			root.querySelectorAll(".notice").forEach((n) => {
-				const text = (n as HTMLElement).innerText ?? (n as HTMLElement).textContent ?? "";
-				if (text.trim()) (window as any).__notorNoticeTexts.push(text.trim());
-			});
-		};
+		// NOTE: this whole callback is serialized and run inside the Obsidian
+		// page, so it must not reference module-scope helpers. In particular,
+		// avoid nested *named* functions (including arrows assigned to a const)
+		// — tsx/esbuild's `keepNames` rewrites them to call a `__name(...)`
+		// helper that does not exist in the page (→ "ReferenceError: __name is
+		// not defined"). Inline everything; only use anonymous callbacks.
+		const texts: string[] = [];
+		(window as any).__notorNoticeTexts = texts;
 		// Record any notices already present, then observe new additions.
-		record(document);
+		document.querySelectorAll(".notice").forEach((n) => {
+			const text = ((n as HTMLElement).innerText ?? (n as HTMLElement).textContent ?? "").trim();
+			if (text) texts.push(text);
+		});
 		const observer = new MutationObserver((mutations) => {
 			for (const m of mutations) {
 				m.addedNodes.forEach((node) => {
-					if (node instanceof HTMLElement) {
-						if (node.classList.contains("notice")) {
-							const text = node.innerText ?? node.textContent ?? "";
-							if (text.trim()) (window as any).__notorNoticeTexts.push(text.trim());
-						}
-						record(node);
+					if (!(node instanceof HTMLElement)) return;
+					if (node.classList.contains("notice")) {
+						const text = (node.innerText ?? node.textContent ?? "").trim();
+						if (text) texts.push(text);
 					}
+					node.querySelectorAll(".notice").forEach((n) => {
+						const text = ((n as HTMLElement).innerText ?? (n as HTMLElement).textContent ?? "").trim();
+						if (text) texts.push(text);
+					});
 				});
 			}
 		});
