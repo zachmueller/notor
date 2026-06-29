@@ -20,6 +20,8 @@ import type { VaultEventHookContext } from "./vault-event-hook-engine";
 import type { ExecutionChain } from "../types";
 import type { NotorSettings } from "../settings/types";
 import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
+import type { OrchestrationFlow } from "../orchestration/types";
+import { flowEnabledKey, flowJobKey } from "../orchestration/flow-enabled";
 import { logger } from "../utils/logger";
 
 const log = logger("VaultEventScheduler");
@@ -89,6 +91,20 @@ export class VaultEventScheduler {
 	 */
 	private extensionAutomationExecutor: ((automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>) | null = null;
 
+	/**
+	 * Accessor for currently discovered orchestration flows.
+	 * Used to collect flows with a `notor-schedule` cron expression.
+	 * Set via `setDiscoveredFlows()` during plugin initialization.
+	 */
+	private getDiscoveredFlows: (() => OrchestrationFlow[]) | null = null;
+
+	/**
+	 * Launcher for a scheduled orchestration flow. Encapsulates resolving the
+	 * runtime + calling `launchOrchestration(..., { origin: "schedule" })`.
+	 * Set via `setDiscoveredFlows()`.
+	 */
+	private flowLaunchExecutor: ((flow: OrchestrationFlow) => Promise<void>) | null = null;
+
 	// ---------------------------------------------------------------------------
 	// Initialization
 	// ---------------------------------------------------------------------------
@@ -134,6 +150,22 @@ export class VaultEventScheduler {
 		this.getSettings = getSettings;
 	}
 
+	/**
+	 * Inject the orchestration-flow accessor + launcher.
+	 *
+	 * Mirrors `setDispatch()` for flows: `getFlows` returns the currently
+	 * discovered flows (so `syncJobs()` can pick up those with `notor-schedule`),
+	 * and `launchFlow` launches one with `origin: "schedule"`. Must be called
+	 * before `syncJobs()` for scheduled flows to be registered.
+	 */
+	setDiscoveredFlows(
+		getFlows: () => OrchestrationFlow[],
+		launchFlow: (flow: OrchestrationFlow) => Promise<void>,
+	): void {
+		this.getDiscoveredFlows = getFlows;
+		this.flowLaunchExecutor = launchFlow;
+	}
+
 	// ---------------------------------------------------------------------------
 	// Job synchronization
 	// ---------------------------------------------------------------------------
@@ -152,8 +184,8 @@ export class VaultEventScheduler {
 	 * @param hooks - Current list of enabled `on_schedule` hooks from settings.
 	 */
 	syncJobs(hooks: VaultEventHook[]): void {
-		// Build the desired job set: settings hooks + scheduled workflow triggers + extension automations
-		const desiredJobs = new Map<string, { schedule: string; label: string; isWorkflow: boolean; hook?: VaultEventHook; workflow?: Workflow; automation?: UserAutomationDefinition }>();
+		// Build the desired job set: settings hooks + scheduled workflow triggers + extension automations + scheduled flows
+		const desiredJobs = new Map<string, { schedule: string; label: string; isWorkflow: boolean; hook?: VaultEventHook; workflow?: Workflow; automation?: UserAutomationDefinition; flow?: OrchestrationFlow }>();
 
 		// Settings-configured hooks
 		for (const hook of hooks) {
@@ -211,6 +243,24 @@ export class VaultEventScheduler {
 			}
 		}
 
+		// Scheduled orchestration flows (flows whose definition.md declares a valid
+		// `notor-schedule`). Each flow gets its own cron job keyed by `orch:{flowDir}`.
+		if (this.getDiscoveredFlows) {
+			const flowEnabled = this.getSettings?.()?.flow_enabled;
+			const scheduledFlows = this.getDiscoveredFlows().filter(
+				(f) => f.schedule && flowEnabled?.[flowEnabledKey(f.flowDir)] !== false,
+			);
+			for (const flow of scheduledFlows) {
+				const key = flowJobKey(flow.flowDir);
+				desiredJobs.set(key, {
+					schedule: flow.schedule!,
+					label: flow.name,
+					isWorkflow: false,
+					flow,
+				});
+			}
+		}
+
 		// Stop jobs that are no longer desired
 		for (const [id, job] of this.jobs) {
 			if (!desiredJobs.has(id)) {
@@ -221,7 +271,7 @@ export class VaultEventScheduler {
 		// Start jobs that are new
 		for (const [id, desired] of desiredJobs) {
 			if (!this.jobs.has(id)) {
-				this.startJob(id, desired.schedule, desired.label, desired.hook, desired.workflow, desired.automation);
+				this.startJob(id, desired.schedule, desired.label, desired.hook, desired.workflow, desired.automation, desired.flow);
 			}
 		}
 
@@ -310,6 +360,8 @@ export class VaultEventScheduler {
 		this.getDiscoveredWorkflows = null;
 		this.extensionAutomationsAccessor = null;
 		this.extensionAutomationExecutor = null;
+		this.getDiscoveredFlows = null;
+		this.flowLaunchExecutor = null;
 		log.debug("VaultEventScheduler destroyed");
 	}
 
@@ -324,11 +376,13 @@ export class VaultEventScheduler {
 	 * event context. No note path is provided (scheduled events are not
 	 * note-specific).
 	 *
-	 * @param id       - Unique job key (hook ID or `workflow:{filePath}`).
+	 * @param id       - Unique job key (hook ID, `workflow:{filePath}`, or `orch:{flowDir}`).
 	 * @param schedule - Cron expression.
 	 * @param label    - Human-readable label for logging.
 	 * @param hook     - Settings hook (if this is a settings-configured hook).
 	 * @param workflow - Discovered workflow (if this is a workflow trigger).
+	 * @param automation - Extension automation (if this is an automation trigger).
+	 * @param flow     - Orchestration flow (if this is a scheduled-flow trigger).
 	 */
 	private startJob(
 		id: string,
@@ -337,10 +391,11 @@ export class VaultEventScheduler {
 		hook?: VaultEventHook,
 		workflow?: Workflow,
 		automation?: UserAutomationDefinition,
+		flow?: OrchestrationFlow,
 	): void {
 		try {
 			const job = new Cron(schedule, () => {
-				this.onJobFire(id, label, hook, workflow, automation);
+				this.onJobFire(id, label, hook, workflow, automation, flow);
 			});
 
 			this.jobs.set(id, job);
@@ -383,6 +438,8 @@ export class VaultEventScheduler {
 	 * @param label    - Human-readable label (for logging).
 	 * @param hook     - Settings hook, if applicable.
 	 * @param workflow - Workflow trigger, if applicable.
+	 * @param automation - Extension automation, if applicable.
+	 * @param flow     - Scheduled orchestration flow, if applicable.
 	 */
 	private onJobFire(
 		id: string,
@@ -390,8 +447,28 @@ export class VaultEventScheduler {
 		hook?: VaultEventHook,
 		workflow?: Workflow,
 		automation?: UserAutomationDefinition,
+		flow?: OrchestrationFlow,
 	): void {
 		log.debug("on_schedule job fired", { id, label });
+
+		// Scheduled orchestration flow — launch directly via the flow executor.
+		if (flow) {
+			if (!this.flowLaunchExecutor) {
+				log.warn("on_schedule flow job fired but no flow launcher set — skipping", { id });
+				return;
+			}
+
+			void (async () => {
+				try {
+					await this.flowLaunchExecutor!(flow);
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e);
+					log.error("Scheduled orchestration launch failed", { id, error: msg });
+					new Notice(`Scheduled orchestration '${label}' failed to launch: ${msg}`);
+				}
+			})();
+			return;
+		}
 
 		// EXT-014: Extension automation — execute directly via the executor callback
 		if (automation) {

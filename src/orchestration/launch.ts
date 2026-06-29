@@ -476,7 +476,7 @@ export async function launchOrchestration(
 	flow: OrchestrationFlow,
 	promptText: string,
 	options?: {
-		origin?: "user" | "hook" | "run_flow" | "chaining";
+		origin?: "user" | "hook" | "schedule" | "run_flow" | "chaining";
 		parentSessionId?: string | null;
 		mode?: ConversationMode;
 		abortSignal?: AbortSignal;

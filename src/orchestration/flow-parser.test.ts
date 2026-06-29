@@ -332,4 +332,26 @@ describe("FlowDefinitionParser", () => {
 		expect(results).toHaveLength(1);
 		expect(results[0]!.flow.name).toBe("Demo");
 	});
+
+	// notor-schedule (direct flow scheduling) -------------------------------
+
+	it("defaults schedule to null when notor-schedule is absent", async () => {
+		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		expect(flow.schedule).toBeNull();
+	});
+
+	it("populates schedule with a valid notor-schedule cron expression", async () => {
+		const files = validFlowFiles({ "notor-schedule": "0 9 * * 1-5" });
+		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		expect(flow.schedule).toBe("0 9 * * 1-5");
+	});
+
+	it("drops an invalid notor-schedule to null (does not hard-error the flow)", async () => {
+		const files = validFlowFiles({ "notor-schedule": "not a cron" });
+		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		expect(flow.schedule).toBeNull();
+		// The rest of the flow still parses.
+		expect(flow.name).toBe("Demo");
+		expect(flow.steps).toHaveLength(2);
+	});
 });

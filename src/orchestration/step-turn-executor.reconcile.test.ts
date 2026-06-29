@@ -89,6 +89,7 @@ function flow(steps: StepDefinition[]): OrchestrationFlow {
 		fanoutTopics: [],
 		steps,
 		guardrails: [],
+		schedule: null,
 		invocable: false,
 		flowInputs: null,
 		flowReturns: null,

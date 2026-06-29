@@ -357,6 +357,7 @@ notor-steps:                                     # required; ordered step wikili
   - "[[finalizer]]"
 notor-guardrails:                                # injected into EVERY step prompt
   - "Verification is mandatory — tests must pass."
+notor-schedule: "0 9 * * 1-5"                    # optional 5-field cron; launches the flow on a schedule
 # --- Composition (inert unless the orchestration feature group is enabled) ---
 notor-flow-invocable: true                       # appears in the run_flow registry (default false)
 notor-flow-inputs: "A feature description + the target repo path."   # freeform NL input contract
@@ -369,6 +370,8 @@ notor-max-cost-usd: 5.00                         # aggregate USD ceiling (parser
 \`\`\`
 
 **All three runaway ceilings default to finite values** (\`max-iterations\` 100 / \`max-runtime-minutes\` 60 / \`max-cost-usd\` 5.00) — never \`Infinity\` — so a flow is always bounded even if the author sets nothing. \`notor-max-depth\` may be \`null\` (unlimited nesting depth, still bounded by the other three).
+
+**Scheduling a flow directly.** Add \`notor-schedule\` (a standard 5-field cron expression) to the flow definition and the flow launches itself on that schedule — no wrapper workflow or hook needed. It then appears in **Settings → Automations** under "Scheduled" (with a next-run time, an active/inactive dot, and an enable toggle), exactly like a scheduled workflow, and each run is stamped \`origin: schedule\`. Direct scheduling requires the orchestration feature group to be enabled. (You can also wire a flow to a vault event hook — including a scheduled one — via the "Run an orchestration" hook action in Settings → Vault Event Hooks; use that for event-driven triggers like on-tag-change.)
 
 ## Step note frontmatter
 

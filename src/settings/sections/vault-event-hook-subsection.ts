@@ -72,17 +72,20 @@ export function renderVaultEventHookSubsection(
 		if (!hook) continue;
 
 		// Determine display name and description
+		const resolvedActionType = hook.action_type ?? "execute_command";
 		const actionLabel =
-			(hook.action_type ?? "execute_command") === "run_workflow"
+			resolvedActionType === "run_workflow"
 				? `▶ ${hook.workflow_path ?? "(no path)"}`
-				: `$ ${hook.command ?? "(no command)"}`;
+				: resolvedActionType === "run_orchestration"
+					? `⛓ ${hook.orchestration_flow ?? "(no flow)"}`
+					: `$ ${hook.command ?? "(no command)"}`;
 		const hookName = hook.label || actionLabel.substring(0, 60);
 		const hookDesc = hook.label ? actionLabel.substring(0, 80) : "";
 
-		// Warn if run_workflow hook has an empty path
+		// Warn if a run_workflow / run_orchestration hook has an empty target
 		const isInvalidWorkflow =
-			(hook.action_type ?? "execute_command") === "run_workflow" &&
-			!hook.workflow_path?.trim();
+			(resolvedActionType === "run_workflow" && !hook.workflow_path?.trim()) ||
+			(resolvedActionType === "run_orchestration" && !hook.orchestration_flow?.trim());
 
 		const delayBadge = hook.delay_ms != null && hook.delay_ms > 0
 			? ` ⏱${hook.delay_ms}ms`
@@ -153,11 +156,22 @@ export function renderVaultEventHookSubsection(
 	}
 
 	// Add hook form (F-003 + F-004)
-	let newActionType: "execute_command" | "run_workflow" = "execute_command";
+	let newActionType: "execute_command" | "run_workflow" | "run_orchestration" = "execute_command";
 	let newCommandOrPath = "";
 	let newLabel = "";
 	let newSchedule = "";
 	let newDelayMs: number | null = null;
+
+	// Whether the "Run an orchestration" action is offered (gated on the feature group).
+	const orchestrationEnabled = ctx.settings.orchestration_enabled;
+
+	// Placeholder for the shared command/path/flow input, by action type.
+	const placeholderFor = (action: typeof newActionType): string =>
+		action === "run_workflow"
+			? "daily/review.md"
+			: action === "run_orchestration"
+				? "code-assist (flow name or directory)"
+				: "Shell command";
 
 	// Action type selector
 	const actionTypeSetting = new Setting(body)
@@ -171,16 +185,15 @@ export function renderVaultEventHookSubsection(
 	actionTypeSetting.addDropdown((dropdown) => {
 		dropdown.addOption("execute_command", "Execute shell command");
 		dropdown.addOption("run_workflow", "Run a workflow");
+		if (orchestrationEnabled) {
+			dropdown.addOption("run_orchestration", "Run an orchestration");
+		}
 		dropdown.setValue(newActionType);
 		dropdown.onChange((value) => {
-			newActionType = value as "execute_command" | "run_workflow";
+			newActionType = value as typeof newActionType;
 			// Update the placeholder on the command/path input
 			if (commandInput) {
-				commandInput.setPlaceholder(
-					newActionType === "run_workflow"
-						? "daily/review.md"
-						: "Shell command"
-				);
+				commandInput.setPlaceholder(placeholderFor(newActionType));
 			}
 		});
 	});
@@ -260,7 +273,9 @@ export function renderVaultEventHookSubsection(
 				new Notice(
 					newActionType === "run_workflow"
 						? "Enter a workflow path."
-						: "Enter a shell command."
+						: newActionType === "run_orchestration"
+							? "Enter an orchestration flow name or directory."
+							: "Enter a shell command."
 				);
 				return;
 			}

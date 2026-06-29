@@ -34,6 +34,7 @@ function flow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
 		fanoutTopics: [],
 		steps: [],
 		guardrails: [],
+		schedule: null,
 		invocable: false,
 		flowInputs: null,
 		flowReturns: null,

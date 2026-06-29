@@ -44,6 +44,7 @@ Steps communicate **only by publishing events**. A step is triggered by a topic,
 | `notor-fanout-topics` | string[] | no | `[]` | Topics explicitly allowed to route to **more than one** step (ordered). |
 | `notor-steps` | wikilink[] | yes | — | Ordered step references (`"[[planner]]"`), resolved under `steps/`. |
 | `notor-guardrails` | string[] | no | `[]` | Constraints injected into **every** step prompt. |
+| `notor-schedule` | string (cron) | no | `null` | Standard 5-field cron expression; launches the flow on a schedule (see below). Invalid expressions are ignored with a warning. |
 | `notor-flow-invocable` | boolean | no | `false` | The flow appears in the `run_flow` registry (callable by other flows). |
 | `notor-flow-inputs` | string | no | `null` | Freeform NL description of what the flow expects to begin. |
 | `notor-flow-returns` | string | no | `null` | Freeform NL description of what the flow hands back. |
@@ -53,6 +54,8 @@ Steps communicate **only by publishing events**. A step is triggered by a topic,
 | `notor-max-cost-usd` | number | no | `5.00` | Aggregate tree-wide USD cost ceiling. |
 
 > **Every flow is bounded by construction.** `notor-max-iterations`, `notor-max-runtime-minutes`, and `notor-max-cost-usd` are optional in frontmatter but **never absent at runtime** — the parser injects finite defaults (`100` / `60` / `5.00`, never `Infinity`). So even a hand-authored flow that sets nothing auto-terminates.
+
+> **Scheduling a flow.** A flow with a valid `notor-schedule` cron expression launches itself on that schedule (each run stamped `origin: schedule`) and appears in **Settings → Automations** under "Scheduled" — with a next-run time, an active/inactive status dot, and a per-flow enable toggle — exactly like a scheduled workflow. Direct scheduling requires the orchestration feature group to be enabled. For **event-driven** triggers (on-save, on-tag-change, …) wire a "Run an orchestration" action under **Settings → Vault Event Hooks** instead.
 
 ### Step note frontmatter
 

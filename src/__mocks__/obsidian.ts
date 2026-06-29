@@ -10,6 +10,22 @@ import { vi } from "vitest";
 export const requestUrl = vi.fn();
 
 /**
+ * Minimal `Notice` stub. Records the most recent message so a suite can assert on
+ * it, but is otherwise inert (no DOM). Construction is the side effect Obsidian
+ * code relies on; tests rarely need to inspect it.
+ */
+export class Notice {
+	static last: string | number | DocumentFragment | null = null;
+	constructor(message: string | number | DocumentFragment, _duration?: number) {
+		Notice.last = message;
+	}
+	setMessage(_message: string | DocumentFragment): this {
+		return this;
+	}
+	hide(): void {}
+}
+
+/**
  * Normalize a vault path the way Obsidian does: collapse backslashes to forward
  * slashes, collapse duplicate slashes, strip a leading slash. Pure utility —
  * safe to expose to every suite.

@@ -72,6 +72,7 @@ function flow(steps: StepDefinition[], over: Partial<OrchestrationFlow> = {}): O
 		fanoutTopics: [],
 		steps,
 		guardrails: [],
+		schedule: null,
 		invocable: false,
 		flowInputs: null,
 		flowReturns: null,

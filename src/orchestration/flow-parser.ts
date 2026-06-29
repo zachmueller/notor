@@ -39,6 +39,7 @@ import {
 	type Vault,
 } from "obsidian";
 import { logger } from "../utils/logger";
+import { validateCronExpression } from "../workflows/workflow-discovery";
 import {
 	DEFAULT_MAX_COST_USD,
 	DEFAULT_MAX_ITERATIONS,
@@ -182,6 +183,26 @@ function parseBool(value: unknown, fallback: boolean): boolean {
 	if (value === "true") return true;
 	if (value === "false") return false;
 	return fallback;
+}
+
+/**
+ * Parse `notor-schedule` into a validated cron expression (or `null`). Mirrors
+ * the workflow-discovery cron handling (`workflow-discovery.ts:378`): an invalid
+ * expression is dropped to `null` with a logged warning rather than a hard load
+ * error — a typo'd schedule must not make the whole flow unparseable.
+ */
+function parseSchedule(value: unknown, flowName: string): string | null {
+	const raw = parseStringOrNull(value);
+	if (raw === null) return null;
+	const result = validateCronExpression(raw);
+	if (!result.valid) {
+		log.warn(`Flow '${flowName}' has invalid 'notor-schedule' cron expression`, {
+			schedule: raw,
+			error: result.error,
+		});
+		return null;
+	}
+	return raw;
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +407,7 @@ export class FlowDefinitionParser {
 			fanoutTopics: parseStringArray(fm["notor-fanout-topics"]),
 			steps,
 			guardrails: parseStringArray(fm["notor-guardrails"]),
+			schedule: parseSchedule(fm["notor-schedule"], name),
 			// Composition (Phase 7; inert).
 			invocable: parseBool(fm["notor-flow-invocable"], false),
 			flowInputs: parseStringOrNull(fm["notor-flow-inputs"]),

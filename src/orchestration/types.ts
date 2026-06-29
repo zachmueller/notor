@@ -59,6 +59,13 @@ export interface OrchestrationFlow {
 	steps: StepDefinition[];
 	/** `notor-guardrails` (default `[]`) — injected into every step prompt. */
 	guardrails: string[];
+	/**
+	 * `notor-schedule` — validated 5-field cron expression (`null` when absent or
+	 * invalid). When set, the flow is launched on this schedule by the
+	 * `VaultEventScheduler` and surfaced in the Automation settings section under
+	 * "Scheduled", mirroring scheduled workflows.
+	 */
+	schedule: string | null;
 
 	// --- Composition (design Phase 7; inert unless the feature group is enabled) ---
 	/** `notor-flow-invocable` (default `false`). */
@@ -125,9 +132,10 @@ export interface StepDefinition {
  *
  * **`origin` is always set at creation and is never null** — it is the
  * load-bearing recovery discriminator (Issue-4b): a command / `Run Orchestration`
- * launch stamps `"user"`, a hook-triggered launch (FR-119b) stamps `"hook"`, and
- * Phase-7 composition stamps `"run_flow"` / `"chaining"`. `parent_session_id` is
- * `null` for a root (`user` / `hook`) and set for a composition child.
+ * launch stamps `"user"`, a hook-triggered launch (FR-119b) stamps `"hook"`, a
+ * scheduled launch (`notor-schedule` on the flow definition) stamps `"schedule"`,
+ * and Phase-7 composition stamps `"run_flow"` / `"chaining"`. `parent_session_id`
+ * is `null` for a root (`user` / `hook` / `schedule`) and set for a composition child.
  *
  * @see specs/ZZ-misc/orchestration/data-model.md — OrchestrationSessionMeta
  * @see specs/ZZ-misc/orchestration/contracts/vault-schema.md — session.json
@@ -150,7 +158,7 @@ export interface OrchestrationSessionMeta {
 	/** Composition linkage (`null` for a root). */
 	parent_session_id: string | null;
 	/** Always set at creation — the recovery discriminator. */
-	origin: "user" | "hook" | "run_flow" | "chaining";
+	origin: "user" | "hook" | "schedule" | "run_flow" | "chaining";
 }
 
 // ---------------------------------------------------------------------------

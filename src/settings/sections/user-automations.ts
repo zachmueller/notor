@@ -20,6 +20,8 @@ import type { UserAutomationDefinition } from "../../extensions/types";
 import type { Workflow } from "../../types";
 import { discoverWorkflows } from "../../workflows/workflow-discovery";
 import type { VaultEventScheduler } from "../../hooks/vault-event-scheduler";
+import type { OrchestrationFlow } from "../../orchestration/types";
+import { flowEnabledKey, flowJobKey } from "../../orchestration/flow-enabled";
 import { logger } from "../../utils/logger";
 
 const log = logger("UserAutomationsSection");
@@ -81,6 +83,12 @@ type AutomationItem = {
 	triggerKey: string;
 	isBuiltin: boolean;
 	scaffold?: BuiltinAutomationScaffold;
+} | {
+	kind: "flow";
+	flow: OrchestrationFlow;
+	name: string;
+	triggerKey: string;
+	isBuiltin: false;
 };
 
 // ---------------------------------------------------------------------------
@@ -115,6 +123,21 @@ function collectAllItems(ctx: SettingsContext): AutomationItem[] {
 			triggerKey: normalizeTriggerKey(workflow.trigger),
 			isBuiltin: false,
 		});
+	}
+
+	// 1b. Scheduled orchestration flows (flows with a valid `notor-schedule`).
+	// Only when orchestration is enabled — the cache is empty otherwise.
+	if (ctx.settings.orchestration_enabled) {
+		for (const flow of ctx.plugin.getDiscoveredFlows()) {
+			if (!flow.schedule) continue;
+			items.push({
+				kind: "flow",
+				flow,
+				name: flow.name,
+				triggerKey: "on-schedule",
+				isBuiltin: false,
+			});
+		}
 	}
 
 	// 2. Extension automations (built-in scaffolds + user-defined)
@@ -235,6 +258,75 @@ function renderWorkflowRow(
 			.setTooltip("Open workflow definition")
 			.onClick(async () => {
 				await ctx.app.workspace.openLinkText(workflow.file_path, "", true);
+			}),
+	);
+
+	// Invisible gear placeholder for column alignment
+	setting.addExtraButton((btn) => {
+		btn.extraSettingsEl.addClass("notor-tool-icon-placeholder");
+	});
+}
+
+function renderFlowRow(
+	containerEl: HTMLElement,
+	item: AutomationItem & { kind: "flow" },
+	scheduler: VaultEventScheduler | undefined,
+	ctx: SettingsContext,
+): void {
+	const flow = item.flow;
+	const enableKey = flowEnabledKey(flow.flowDir);
+	const isEnabled = ctx.settings.flow_enabled[enableKey] !== false;
+
+	// Description: schedule + next run (flows in this group always have a schedule).
+	let desc = `Schedule: ${flow.schedule}`;
+	const nextRun = flow.schedule ? scheduler?.getNextRun(flow.schedule) ?? null : null;
+	if (nextRun) {
+		desc += ` · Next: ${nextRun.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+	}
+
+	const setting = new Setting(containerEl)
+		.setName(item.name)
+		.setDesc(desc);
+
+	// "Orchestration" badge to distinguish flows from workflows in the list.
+	setting.nameEl.createSpan({
+		cls: "notor-automation-builtin-badge",
+		text: "orchestration",
+	});
+
+	// Status dot
+	const isActive = scheduler?.isJobActive(flowJobKey(flow.flowDir)) ?? false;
+	const dot = setting.nameEl.createSpan({
+		cls: `notor-schedule-status-dot ${isActive ? "notor-schedule-active" : "notor-schedule-inactive"}`,
+	});
+	dot.setAttribute("aria-label", isActive ? "Active" : "Inactive");
+	setting.nameEl.prepend(dot);
+
+	// Enabled toggle
+	setting.addToggle((toggle) =>
+		toggle
+			.setValue(isEnabled)
+			.setTooltip("Enabled")
+			.onChange(async (value) => {
+				ctx.settings.flow_enabled[enableKey] = value;
+				await ctx.saveSettings();
+				// Re-sync cron jobs so the schedule starts/stops immediately.
+				await ctx.plugin.rescanFlows();
+				ctx.redisplay();
+			}),
+	);
+
+	if (!isEnabled) {
+		setting.settingEl.addClass("notor-tool-row-disabled");
+	}
+
+	// Open-definition icon
+	setting.addExtraButton((btn) =>
+		btn
+			.setIcon("square-arrow-out-up-right")
+			.setTooltip("Open flow definition")
+			.onClick(async () => {
+				await ctx.app.workspace.openLinkText(`${flow.flowDir}/definition.md`, "", true);
 			}),
 	);
 
@@ -398,6 +490,8 @@ export function renderUserAutomationsSection(
 		for (const item of groupItems) {
 			if (item.kind === "workflow") {
 				renderWorkflowRow(containerEl, item, scheduler, ctx);
+			} else if (item.kind === "flow") {
+				renderFlowRow(containerEl, item, scheduler, ctx);
 			} else {
 				renderAutomationRow(containerEl, item, scheduler, ctx);
 			}
@@ -417,6 +511,8 @@ export function renderUserAutomationsSection(
 		for (const item of groupItems) {
 			if (item.kind === "workflow") {
 				renderWorkflowRow(containerEl, item, scheduler, ctx);
+			} else if (item.kind === "flow") {
+				renderFlowRow(containerEl, item, scheduler, ctx);
 			} else {
 				renderAutomationRow(containerEl, item, scheduler, ctx);
 			}

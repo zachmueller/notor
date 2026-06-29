@@ -82,6 +82,10 @@ export function renderOrchestrationSection(
 					// it appears/disappears with the feature group like the scaffolds.
 					ctx.plugin.syncRunFlowToolRegistration();
 
+					// Refresh the scheduled-flow cache + cron jobs: enabling discovers
+					// `notor-schedule` flows, disabling clears them.
+					await ctx.plugin.rescanFlows();
+
 					ctx.redisplay();
 				}),
 		);

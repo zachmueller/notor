@@ -45,7 +45,7 @@ function generateId(): string {
 export function addVaultEventHook(
 	config: VaultEventHookConfig,
 	event: VaultEventHookType,
-	actionType: "execute_command" | "run_workflow",
+	actionType: "execute_command" | "run_workflow" | "run_orchestration",
 	commandOrPath: string,
 	label = "",
 	schedule: string | null = null,
@@ -62,6 +62,11 @@ export function addVaultEventHook(
 			`action_type "run_workflow" requires a non-empty workflow path.`
 		);
 	}
+	if (actionType === "run_orchestration" && !commandOrPath.trim()) {
+		throw new Error(
+			`action_type "run_orchestration" requires a non-empty orchestration flow name or directory.`
+		);
+	}
 
 	// Validate schedule for on_schedule event
 	if (event === "on_schedule" && !schedule?.trim()) {
@@ -76,6 +81,7 @@ export function addVaultEventHook(
 		action_type: actionType,
 		command: actionType === "execute_command" ? commandOrPath.trim() : null,
 		workflow_path: actionType === "run_workflow" ? commandOrPath.trim() : null,
+		orchestration_flow: actionType === "run_orchestration" ? commandOrPath.trim() : null,
 		label,
 		enabled: true,
 		schedule: event === "on_schedule" ? (schedule?.trim() ?? null) : null,

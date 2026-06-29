@@ -39,7 +39,7 @@ export interface SessionStartEntry extends BaseEntry {
 	session_id: string;
 	flow: string;
 	prompt: string;
-	origin: "user" | "hook" | "run_flow" | "chaining";
+	origin: "user" | "hook" | "schedule" | "run_flow" | "chaining";
 	parent_session_id: string | null;
 }
 

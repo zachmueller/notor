@@ -31,6 +31,7 @@ function flow(name: string, over: Partial<OrchestrationFlow> = {}): Orchestratio
 		fanoutTopics: [],
 		steps: [],
 		guardrails: [],
+		schedule: null,
 		invocable: true,
 		flowInputs: "a question",
 		flowReturns: "a report",

@@ -100,6 +100,13 @@ export interface NotorSettings {
 	/** Per-workflow enabled/disabled state. Workflows default to enabled when absent. */
 	workflow_enabled: Record<string, boolean>;
 
+	/**
+	 * Per-flow scheduled-run enabled/disabled state, keyed by flow directory.
+	 * Scheduled orchestration flows default to enabled when absent. Kept separate
+	 * from `workflow_enabled` to avoid key collisions with workflow file paths.
+	 */
+	flow_enabled: Record<string, boolean>;
+
 	/** Current Plan/Act mode. */
 	mode: ConversationMode;
 

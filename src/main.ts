@@ -87,6 +87,7 @@ import { UpdateTasksTool } from "./tools/update-tasks";
 import { RunFlowTool, RUN_FLOW_TOOL_NAME } from "./tools/run-flow";
 import { FlowCompositionManager } from "./orchestration/flow-composition-manager";
 import { makeChildFlowSpawner } from "./orchestration/launch";
+import type { OrchestrationFlow } from "./orchestration/types";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
@@ -291,8 +292,19 @@ export default class NotorPlugin extends Plugin {
 	/** Cached workflow discovery results (C-008). In-memory only — always re-discovered from vault. */
 	private _discoveredWorkflows: Workflow[] = [];
 
+	/**
+	 * Cached orchestration-flow discovery results. In-memory only — re-discovered
+	 * from vault via `rescanFlows()`. Read synchronously by the `VaultEventScheduler`
+	 * (which is sync) to register `notor-schedule` cron jobs. Empty when
+	 * `orchestration_enabled` is off.
+	 */
+	private _discoveredFlows: OrchestrationFlow[] = [];
+
 	/** Debounce timer for vault-triggered workflow rescans. */
 	private _workflowRescanTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Debounce timer for vault-triggered orchestration-flow rescans. */
+	private _flowRescanTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/** Debounce timer for extension file change auto-reload (EXT-024). */
 	private _extensionChangeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1110,6 +1122,21 @@ export default class NotorPlugin extends Plugin {
 		);
 		vaultEventScheduler.setSettingsAccessor(() => this.settings);
 
+		// Wire the orchestration-flow accessor + launcher into the scheduler so
+		// flows with a `notor-schedule` get cron jobs. The launcher resolves a
+		// fresh definition from disk (the cached flow may be stale) and launches
+		// with `origin: "schedule"`. Gated on `orchestration_enabled` — when off,
+		// `_discoveredFlows` is already empty so no jobs are registered.
+		vaultEventScheduler.setDiscoveredFlows(
+			() => this._discoveredFlows,
+			async (flow) => {
+				if (!this.settings.orchestration_enabled) return;
+				const { launchOrchestration } = await import("./orchestration/launch");
+				const objective = `Scheduled run of orchestration flow '${flow.name}'.`;
+				await launchOrchestration(this, flow, objective, { origin: "schedule" });
+			},
+		);
+
 		// Register vault.on('delete') and vault.on('rename') for tag shadow cache maintenance (F-014)
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
@@ -1137,6 +1164,12 @@ export default class NotorPlugin extends Plugin {
 				(h) => h.enabled
 			);
 			vaultEventScheduler.syncJobs(enabledScheduleHooks);
+
+			// Discover scheduled orchestration flows and register their cron jobs
+			// (no-op + empty cache when orchestration_enabled is off). Fire-and-forget.
+			void this.rescanFlows().catch((e) =>
+				log.warn("Initial orchestration flow scan failed", { error: String(e) }),
+			);
 
 			log.info("Vault event hook listeners evaluated and scheduler synced");
 		});
@@ -2306,6 +2339,86 @@ export default class NotorPlugin extends Plugin {
 	}
 
 	/**
+	 * Synchronous accessor for the last discovered orchestration flows.
+	 *
+	 * Refreshed via `rescanFlows()`. Read by the Automation settings section and
+	 * the `VaultEventScheduler` to surface / register `notor-schedule` cron jobs.
+	 * Returns `[]` when `orchestration_enabled` is off.
+	 */
+	getDiscoveredFlows(): OrchestrationFlow[] {
+		return this._discoveredFlows;
+	}
+
+	/**
+	 * Re-discover orchestration flows and refresh the cache, then re-sync the
+	 * scheduler so flows with a `notor-schedule` get cron jobs. Mirrors
+	 * `rescanWorkflows()` but is async (flow discovery reads the vault).
+	 *
+	 * No-ops to an empty cache when `orchestration_enabled` is off — a disabled
+	 * feature must not register scheduled runs.
+	 */
+	async rescanFlows(): Promise<OrchestrationFlow[]> {
+		if (!this.settings.orchestration_enabled) {
+			this._discoveredFlows = [];
+			this._vaultEventScheduler?.syncJobs(
+				this.settings.vault_event_hooks.on_schedule.filter((h) => h.enabled),
+			);
+			return [];
+		}
+
+		try {
+			const { FlowDefinitionParser } = await import("./orchestration/flow-parser");
+			const parser = new FlowDefinitionParser(
+				this.app.vault,
+				this.app.metadataCache,
+				this.settings.notor_dir,
+			);
+			const parsed = await parser.discoverFlows();
+			this._discoveredFlows = parsed.map((p) => p.flow);
+			log.debug("Flow cache updated", {
+				count: this._discoveredFlows.length,
+				scheduled: this._discoveredFlows.filter((f) => f.schedule).map((f) => f.name),
+			});
+		} catch (e) {
+			log.warn("Orchestration flow rescan failed", { error: String(e) });
+			this._discoveredFlows = [];
+		}
+
+		if (this._vaultEventScheduler) {
+			this._vaultEventScheduler.syncJobs(
+				this.settings.vault_event_hooks.on_schedule.filter((h) => h.enabled),
+			);
+		}
+
+		return this._discoveredFlows;
+	}
+
+	/**
+	 * Debounced wrapper around `rescanFlows()` for vault event handlers.
+	 * Coalesces rapid bursts (e.g. bulk sync) into a single rescan.
+	 */
+	private scheduleFlowRescan(): void {
+		if (this._flowRescanTimer !== null) {
+			clearTimeout(this._flowRescanTimer);
+		}
+		this._flowRescanTimer = setTimeout(() => {
+			this._flowRescanTimer = null;
+			void this.rescanFlows().catch((e) =>
+				log.warn("Vault-triggered flow rescan failed", { error: String(e) }),
+			);
+		}, 300);
+	}
+
+	/**
+	 * Returns true if a vault-relative path points to a Markdown file inside the
+	 * orchestrations subdirectory (used to trigger a debounced flow rescan).
+	 */
+	private isOrchestrationPath(filePath: string): boolean {
+		const orchDir = normalizePath(`${this.settings.notor_dir}/orchestrations`);
+		return filePath.endsWith(".md") && filePath.startsWith(orchDir + "/");
+	}
+
+	/**
 	 * Returns true if `file` is a Markdown note inside the workflows
 	 * subdirectory of the configured notor directory.
 	 */
@@ -2374,6 +2487,31 @@ export default class NotorPlugin extends Plugin {
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (f) => {
 				if (this.isWorkflowFile(f)) this.scheduleWorkflowRescan();
+			})
+		);
+
+		// Orchestration flow definitions: keep the flow cache (and thus scheduled
+		// cron jobs) fresh when a definition.md under orchestrations/ changes.
+		this.registerEvent(
+			this.app.vault.on("create", (f) => {
+				if (this.isOrchestrationPath(f.path)) this.scheduleFlowRescan();
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("delete", (f) => {
+				if (this.isOrchestrationPath(f.path)) this.scheduleFlowRescan();
+			})
+		);
+		this.registerEvent(
+			this.app.vault.on("rename", (f, oldPath) => {
+				if (this.isOrchestrationPath(f.path) || this.isOrchestrationPath(oldPath)) {
+					this.scheduleFlowRescan();
+				}
+			})
+		);
+		this.registerEvent(
+			this.app.metadataCache.on("changed", (f) => {
+				if (this.isOrchestrationPath(f.path)) this.scheduleFlowRescan();
 			})
 		);
 	}
