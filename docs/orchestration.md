@@ -9,7 +9,7 @@ Orchestration flows are multi-step, event-driven pipelines that run a sequence o
 Toggle **Enable orchestration** under [Settings → Notor → Orchestration](notor-settings://Orchestration). When enabled, Notor:
 
 - creates `{notor_dir}/orchestrations/` and materializes the reference flows (`code-assist`, `research`, `review`) — preserving any edits you've made on subsequent enables;
-- registers the orchestration tool scaffolds (`emit_event`, `run_flow`, and the four `orchestration_task_*` tools) and the **Notor: Run Orchestration** command;
+- registers the orchestration tool scaffolds (`emit_event`, `run_flow`, and the four `orchestration_task_*` tools) and the **Notor: Run orchestration** command;
 - enables the unified **run-tree view** and the `flow-run` entries in the activity indicator.
 
 Toggling it off removes the command and all scaffolds after the extension reload. (Authoring a flow with the `orchestration-creator` persona works regardless — only *running* a flow needs the group on.)
@@ -158,7 +158,7 @@ The per-session `session.json` / `session-log.jsonl` are raw machine state — u
 
 ## Running a flow
 
-Open the command palette → **Notor: Run Orchestration**, pick a flow, and enter an objective. After each step turn a brief progress **Notice** names the flow, step, and iteration (right-click a Notice on desktop to jump into that step's conversation).
+Open the command palette → **Notor: Run orchestration**, pick a flow, and enter an objective. After each step turn a brief progress **Notice** names the flow, step, and iteration (right-click a Notice on desktop to jump into that step's conversation).
 
 > **Iteration counter.** The `iteration N` shown in Notices (and `session.json`'s `iteration`) is the **step-turn / hop counter, which includes code steps** — it is **not** the same unit as `notor-max-iterations`, which counts **LLM turns only**. A code-step-heavy flow's hop counter can climb well past `notor-max-iterations` without tripping it (such flows are bounded by `notor-max-runtime-minutes` + stale-loop detection instead).
 

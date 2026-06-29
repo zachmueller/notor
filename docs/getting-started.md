@@ -76,6 +76,7 @@ All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
 | **Notor: New conversation** | Creates a fresh conversation |
 | **Notor: Compact context** | Manually compacts the current conversation's context window |
 | **Notor: Run workflow** | Opens a workflow picker to select and run a workflow |
+| **Notor: Run orchestration** | Opens an orchestration picker to select a flow and run it (visible only when orchestration is enabled) |
 | **Notor: Export conversation** | Exports the active conversation to HTML or Markdown |
 | **Notor: Import conversation from HTML** | Imports a previously exported HTML conversation |
 | **Notor: Open tool config inspector** | Opens a debugging view showing the effective tool configuration |
@@ -178,6 +179,17 @@ Knowledge memory lets the AI build persistent context across conversations — r
 3. Start a conversation — the AI automatically searches for relevant memories and captures new insights after each turn
 
 > Memory requires the `tiny` and `large` presets because the memory sub-agents use different model tiers: lightweight models for search and capture, and a capable model for the Dream consolidation pipeline.
+
+## Set up orchestration
+
+Orchestration runs multi-step, event-driven flows — chaining LLM "conversation steps" and deterministic "code steps" to a terminal event, with cascading guardrails and crash recovery. The feature is gated behind a toggle and off by default. See [orchestration.md](orchestration.md) for the full reference.
+
+1. Open **Settings → Notor → Orchestration** and toggle **Enable orchestration**. This seeds `orchestrations/` with three reference flows (`code-assist`, `research`, `review`) and registers the orchestration command and tool scaffolds.
+2. Open the command palette → **Notor: Run orchestration**, pick a reference flow (e.g. `research`), and enter an objective.
+3. Watch the progress Notice after each step; open the run-tree view (from the activity indicator or a `run_flow` tool-call card) to navigate the run, and right-click a Notice to jump into a step's conversation.
+4. To author your own flow, switch to the built-in **`orchestration-creator`** persona — it guides you through the topology, writes the `definition.md` and step notes, and validates the flow. Authoring a flow doesn't require the feature group; running one does.
+
+> See [orchestration.md](orchestration.md) for flow anatomy, code steps, composition, and the run-tree view.
 
 ## Create your first extension
 

@@ -25,6 +25,7 @@ Notor gives you a full AI chat panel inside Obsidian with the ability to read, s
 
 - **[Personas](docs/personas.md)** — file-based AI personalities with custom system prompts, model preferences, and per-persona approval overrides
 - **[Workflows](docs/workflows.md)** — reusable step-by-step instruction sets stored as vault notes; run manually, via slash-command, or triggered by vault events and cron schedules
+- **[Orchestration](docs/orchestration.md)** — multi-step, event-driven flows that coordinate LLM "conversation steps" and deterministic "code steps" to a terminal event, with cascading guardrails (depth, iterations, cost, runtime), crash recovery, composition, and a unified run-tree view. Gated behind a feature toggle; off by default.
 - **[Rules](docs/rules.md)** — vault-level instruction files that inject context automatically based on note directory or tag
 - **[Hooks](docs/hooks.md)** — shell commands or workflows that fire at conversation lifecycle events (pre-send, on-tool-call, after-completion) and vault events (note open/save/create, tag changes, cron schedules)
 - **[`<include_note>` tag](docs/include-note.md)** — dynamically inject vault note content into workflow bodies, system prompts, and rule files
