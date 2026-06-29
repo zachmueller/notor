@@ -7,6 +7,11 @@ import type {
 	WebSearchResult,
 } from "./provider";
 
+/** Minimal shape of the Kagi search response (fields Notor reads). */
+interface KagiResponse {
+	data?: Array<{ title: string; url: string; snippet: string }>;
+}
+
 export class KagiSearchProvider implements SearchProvider {
 	readonly meta: SearchProviderMeta = {
 		type: "kagi",
@@ -83,10 +88,10 @@ export class KagiSearchProvider implements SearchProvider {
 			);
 		}
 
-		const json = JSON.parse(response.text);
+		const json = JSON.parse(response.text) as KagiResponse;
 		const data = json.data ?? [];
 		const results: WebSearchResult[] = data.map(
-			(r: { title: string; url: string; snippet: string }) => ({
+			(r) => ({
 				title: r.title,
 				url: r.url,
 				snippet: r.snippet,

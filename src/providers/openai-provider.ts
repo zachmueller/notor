@@ -21,6 +21,7 @@ import type {
 	ToolDefinition,
 } from "./provider";
 import { ProviderError } from "./provider";
+import type { OpenAIStreamChunk, OpenAIModelsResponse } from "./openai-wire";
 import { parseSSEStream } from "./sse";
 import { getSecret, secretIdForApiKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
@@ -297,7 +298,7 @@ export class OpenAIProvider implements LLMProvider {
 
 		for await (const data of parseSSEStream(response.body, options.abort_signal)) {
 			try {
-				const parsed = JSON.parse(data);
+				const parsed = JSON.parse(data) as OpenAIStreamChunk;
 
 				const choice = parsed.choices?.[0];
 				if (choice?.finish_reason) {
@@ -411,12 +412,12 @@ export class OpenAIProvider implements LLMProvider {
 			);
 		}
 
-		const json = await response.json();
+		const json = await response.json() as OpenAIModelsResponse;
 
 		// Client-side filtering: exclude embeddings, image, audio models
 		const models: ModelInfo[] = (json.data ?? [])
-			.filter((m: { id: string }) => isChatModel(m.id))
-			.map((m: { id: string; owned_by?: string }) => ({
+			.filter((m) => isChatModel(m.id))
+			.map((m) => ({
 				id: m.id,
 				display_name: m.id,
 				context_window: null,

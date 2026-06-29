@@ -7,6 +7,11 @@ import type {
 	WebSearchResult,
 } from "./provider";
 
+/** Minimal shape of the Tavily search response (fields Notor reads). */
+interface TavilyResponse {
+	results?: Array<{ title: string; url: string; content: string }>;
+}
+
 export class TavilyProvider implements SearchProvider {
 	readonly meta: SearchProviderMeta = {
 		type: "tavily",
@@ -82,9 +87,9 @@ export class TavilyProvider implements SearchProvider {
 			);
 		}
 
-		const json = JSON.parse(response.text);
+		const json = JSON.parse(response.text) as TavilyResponse;
 		const results: WebSearchResult[] = (json.results ?? []).map(
-			(r: { title: string; url: string; content: string }) => ({
+			(r) => ({
 				title: r.title,
 				url: r.url,
 				snippet: r.content,

@@ -7,6 +7,12 @@ import type {
 	WebSearchResult,
 } from "./provider";
 
+/** Minimal shape of the SerpApi search response (fields Notor reads). */
+interface SerpApiResponse {
+	error?: string;
+	organic_results?: Array<{ title: string; link: string; snippet: string }>;
+}
+
 export class SerpApiProvider implements SearchProvider {
 	readonly meta: SearchProviderMeta = {
 		type: "serpapi",
@@ -85,7 +91,7 @@ export class SerpApiProvider implements SearchProvider {
 			);
 		}
 
-		const json = JSON.parse(response.text);
+		const json = JSON.parse(response.text) as SerpApiResponse;
 
 		// SerpApi may also signal rate limiting via a JSON error field
 		if (
@@ -98,7 +104,7 @@ export class SerpApiProvider implements SearchProvider {
 
 		const organicResults = json.organic_results ?? [];
 		const results: WebSearchResult[] = organicResults.map(
-			(r: { title: string; link: string; snippet: string }) => ({
+			(r) => ({
 				title: r.title,
 				url: r.link,
 				snippet: r.snippet,

@@ -7,6 +7,11 @@ import type {
 	WebSearchResult,
 } from "./provider";
 
+/** Minimal shape of the Brave search response (fields Notor reads). */
+interface BraveResponse {
+	web?: { results?: Array<{ title: string; url: string; description: string }> };
+}
+
 export class BraveSearchProvider implements SearchProvider {
 	readonly meta: SearchProviderMeta = {
 		type: "brave",
@@ -83,10 +88,10 @@ export class BraveSearchProvider implements SearchProvider {
 			);
 		}
 
-		const json = JSON.parse(response.text);
+		const json = JSON.parse(response.text) as BraveResponse;
 		const webResults = json.web?.results ?? [];
 		const results: WebSearchResult[] = webResults.map(
-			(r: { title: string; url: string; description: string }) => ({
+			(r) => ({
 				title: r.title,
 				url: r.url,
 				snippet: r.description,

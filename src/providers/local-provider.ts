@@ -21,6 +21,7 @@ import type {
 	ToolDefinition,
 } from "./provider";
 import { ProviderError } from "./provider";
+import type { OpenAIStreamChunk, OpenAIModelsResponse } from "./openai-wire";
 import { parseSSEStream } from "./sse";
 import { getSecret, secretIdForApiKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
@@ -302,7 +303,7 @@ export class LocalProvider implements LLMProvider {
 
 		for await (const data of parseSSEStream(response.body, options.abort_signal)) {
 			try {
-				const parsed = JSON.parse(data);
+				const parsed = JSON.parse(data) as OpenAIStreamChunk;
 
 				const choice = parsed.choices?.[0];
 				if (choice?.finish_reason) {
@@ -409,9 +410,9 @@ export class LocalProvider implements LLMProvider {
 			);
 		}
 
-		const json = await response.json();
+		const json = await response.json() as OpenAIModelsResponse;
 		const models: ModelInfo[] = (json.data ?? []).map(
-			(m: { id: string; owned_by?: string }) => ({
+			(m) => ({
 				id: m.id,
 				display_name: m.id,
 				context_window: null,

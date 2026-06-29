@@ -40,6 +40,19 @@ interface AnthropicEventData {
 	error?: { message?: string };
 }
 
+/** One entry in the Anthropic `/v1/models` listing. */
+interface AnthropicModelEntry {
+	id: string;
+	display_name?: string;
+}
+
+/** The paginated Anthropic `/v1/models` listing response (fields Notor reads). */
+interface AnthropicModelsResponse {
+	data?: AnthropicModelEntry[];
+	has_more?: boolean;
+	last_id?: string;
+}
+
 /** Default Anthropic API endpoint. */
 const DEFAULT_ENDPOINT = "https://api.anthropic.com";
 
@@ -370,7 +383,7 @@ export class AnthropicProvider implements LLMProvider {
 					if (trimmed.startsWith("data: ")) {
 						const data = trimmed.slice(6);
 						try {
-							const parsed = JSON.parse(data);
+							const parsed = JSON.parse(data) as AnthropicEventData;
 							yield* this.handleAnthropicEvent(
 								currentEventType,
 								parsed,
@@ -537,9 +550,9 @@ export class AnthropicProvider implements LLMProvider {
 				);
 			}
 
-			const json = await response.json();
+			const json = await response.json() as AnthropicModelsResponse;
 			const models: ModelInfo[] = (json.data ?? []).map(
-				(m: { id: string; display_name?: string }) => ({
+				(m) => ({
 					id: m.id,
 					display_name: m.display_name || m.id,
 					context_window: null,
