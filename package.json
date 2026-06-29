@@ -15,6 +15,9 @@
 		"e2e:setup-vault": "npx tsx e2e/scripts/setup-vault.ts",
 		"e2e:tools": "npx tsx e2e/scripts/tool-interaction-test.ts",
 		"e2e:workflow-watcher": "npx tsx e2e/scripts/workflow-watcher-test.ts",
+		"e2e:orch:meeting-notes": "npx tsx e2e/scripts/orchestration-meeting-notes-test.ts",
+		"e2e:orch:draft-critique": "npx tsx e2e/scripts/orchestration-draft-critique-test.ts",
+		"e2e:orch:inbox-triage": "npx tsx e2e/scripts/orchestration-inbox-triage-test.ts",
 		"test": "vitest run",
 		"test:watch": "vitest"
 	},
