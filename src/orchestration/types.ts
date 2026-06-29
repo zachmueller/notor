@@ -82,6 +82,13 @@ export interface OrchestrationFlow {
 	maxDepth: number | null;
 	/** `notor-max-cost-usd` — aggregate USD ceiling. Parser default `5.00` when omitted (never `Infinity`). */
 	maxCostUsd: number;
+	/**
+	 * `notor-open-notes-in-editor` — whether notes this flow's steps read/write are
+	 * opened in the editor. `null` (default, when absent) inherits the global
+	 * `orchestration_open_notes_in_editor` setting; `true`/`false` force the
+	 * behavior for this flow regardless of the setting.
+	 */
+	openNotesInEditor: boolean | null;
 }
 
 // ---------------------------------------------------------------------------

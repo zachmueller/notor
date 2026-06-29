@@ -107,4 +107,26 @@ export function renderOrchestrationSection(
 					await ctx.saveSettings();
 				}),
 		);
+
+	// Whether orchestration reads/writes open notes in the editor. Read at launch
+	// time, so toggling needs no extension reload — just persist. Independent of
+	// the General "Open notes on access" setting; a flow can override it per-run
+	// via the `notor-open-notes-in-editor` frontmatter key.
+	new Setting(containerEl)
+		.setName("Open notes in editor")
+		.setDesc(
+			"When a flow's steps read or write notes, open each one in the editor so " +
+				"you can follow along. Off by default so a flow that touches many notes " +
+				"doesn't spray tabs across your workspace. A flow can override this with " +
+				"'notor-open-notes-in-editor' in its frontmatter. Independent of the " +
+				"General \"Open notes on access\" setting.",
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(ctx.settings.orchestration_open_notes_in_editor)
+				.onChange(async (value) => {
+					ctx.settings.orchestration_open_notes_in_editor = value;
+					await ctx.saveSettings();
+				}),
+		);
 }

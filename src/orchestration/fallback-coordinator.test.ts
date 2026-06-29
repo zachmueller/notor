@@ -33,6 +33,7 @@ function fakeFlow(): OrchestrationFlow {
 		handoffIsolation: "isolated",
 		maxDepth: null,
 		maxCostUsd: 5,
+		openNotesInEditor: null,
 	};
 }
 

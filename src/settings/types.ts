@@ -503,6 +503,19 @@ export interface NotorSettings {
 	 */
 	orchestration_write_failure_notes: boolean;
 
+	/**
+	 * When true, notes an orchestration step reads or writes are opened in the
+	 * Obsidian editor (so the user can follow along). Defaults to false so a flow
+	 * that touches many notes does not spray tabs across the workspace. A flow can
+	 * override this per-run via the `notor-open-notes-in-editor` frontmatter key.
+	 *
+	 * Independent of {@link open_notes_on_access} (which governs foreground chat):
+	 * orchestration opening is decided solely by this setting / the frontmatter
+	 * override, in both directions. Read at launch time, so no extension reload is
+	 * needed on change.
+	 */
+	orchestration_open_notes_in_editor: boolean;
+
 	// -------------------------------------------------------------------
 	// Phase 12: Extension block rate limiting
 	// -------------------------------------------------------------------

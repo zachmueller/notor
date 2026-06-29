@@ -52,6 +52,7 @@ Steps communicate **only by publishing events**. A step is triggered by a topic,
 | `notor-handoff-isolation` | `isolated` \| `shared` | no | `isolated` | `shared` inherits the parent's scratchpad. |
 | `notor-max-depth` | number \| null | no | `null` | Composition-depth cap (`null` = unlimited depth). |
 | `notor-max-cost-usd` | number | no | `5.00` | Aggregate tree-wide USD cost ceiling. |
+| `notor-open-notes-in-editor` | boolean | no | _(global setting)_ | Open each note this flow's steps read/write in the editor. Omit to inherit the global **Settings → Orchestration → "Open notes in editor"** toggle (default off); set `true`/`false` to force it for this flow, independent of the General "Open notes on access" chat setting. |
 
 > **Every flow is bounded by construction.** `notor-max-iterations`, `notor-max-runtime-minutes`, and `notor-max-cost-usd` are optional in frontmatter but **never absent at runtime** — the parser injects finite defaults (`100` / `60` / `5.00`, never `Infinity`). So even a hand-authored flow that sets nothing auto-terminates.
 

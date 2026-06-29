@@ -308,6 +308,23 @@ describe("FlowDefinitionParser", () => {
 		expect(flow.maxDepth).toBe(3);
 	});
 
+	it("defaults notor-open-notes-in-editor to null when absent (inherit global setting)", async () => {
+		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		expect(flow.openNotesInEditor).toBeNull();
+	});
+
+	it("parses notor-open-notes-in-editor: true into an explicit override", async () => {
+		const files = validFlowFiles({ "notor-open-notes-in-editor": true });
+		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		expect(flow.openNotesInEditor).toBe(true);
+	});
+
+	it("parses notor-open-notes-in-editor: false into an explicit override", async () => {
+		const files = validFlowFiles({ "notor-open-notes-in-editor": false });
+		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		expect(flow.openNotesInEditor).toBe(false);
+	});
+
 	it("rejects an invalid notor-handoff-isolation with a clear load error (INT-040)", async () => {
 		const files = validFlowFiles({ "notor-handoff-isolation": "sandboxed" });
 		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(

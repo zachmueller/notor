@@ -366,6 +366,7 @@ notor-on-complete-flow: null                     # chaining successor wikilink (
 notor-handoff-isolation: isolated                # isolated (fresh scratchpad) | shared (inherit parent's)
 notor-max-depth: 3                               # composition-depth cap (null = unlimited depth)
 notor-max-cost-usd: 5.00                         # aggregate USD ceiling (parser default 5.00)
+notor-open-notes-in-editor: false                # open notes this flow reads/writes in the editor? (omit = inherit global setting, default off)
 ---
 \`\`\`
 

@@ -39,6 +39,7 @@ function flow(name: string, over: Partial<OrchestrationFlow> = {}): Orchestratio
 		handoffIsolation: "isolated",
 		maxDepth: null,
 		maxCostUsd: 5,
+		openNotesInEditor: null,
 		...over,
 	};
 }

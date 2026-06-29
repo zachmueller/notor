@@ -134,6 +134,14 @@ export class ToolDispatcher {
 	/** When true, tools execute with note-opener side effects suppressed. */
 	private silentMode = false;
 
+	/**
+	 * Tri-state override of the note-opener's enabled state, independent of the
+	 * `open_notes_on_access` chat setting. `null` (default) defers to the chat
+	 * setting; `true`/`false` force-open/force-suppress. Set by orchestration to
+	 * honor its own setting / the per-flow `notor-open-notes-in-editor` override.
+	 */
+	private openNotesOverride: boolean | null = null;
+
 	/** Temp output spiller for dispatcher-level spillover of large tool results. */
 	private spiller?: import("../shell/temp-output-spiller").TempOutputSpiller;
 
@@ -203,6 +211,15 @@ export class ToolDispatcher {
 	/** Suppress editor-open side effects on all tools dispatched through this instance. */
 	setSilentMode(silent: boolean): void {
 		this.silentMode = silent;
+	}
+
+	/**
+	 * Override the note-opener's enabled state on all tools dispatched through this
+	 * instance, independent of the `open_notes_on_access` chat setting. `null`
+	 * defers to the chat default; `true`/`false` force-open/force-suppress.
+	 */
+	setOpenNotesOverride(value: boolean | null): void {
+		this.openNotesOverride = value;
 	}
 
 	/** Set the temp output spiller for dispatcher-level spillover of large results. */
@@ -681,7 +698,7 @@ export class ToolDispatcher {
 				? (request: InteractionRequest, signal?: AbortSignal) =>
 					interactionCallback(request, signal ?? abortSignal, messageId)
 				: undefined;
-			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined, interactionCallback: boundInteractionCallback, runContext, orchestrationContext };
+			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined, noteOpenerEnabled: this.openNotesOverride ?? undefined, interactionCallback: boundInteractionCallback, runContext, orchestrationContext };
 			const executePromise = tool.execute(parameters, executeOptions);
 
 			let result: ToolResult;

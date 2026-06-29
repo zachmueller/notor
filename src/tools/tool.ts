@@ -51,6 +51,14 @@ export interface ToolExecuteOptions {
 	/** Suppress editor-open side effects (e.g. noteOpener) — used by background/silent sub-agents. */
 	silentNoteOpener?: boolean;
 	/**
+	 * Tri-state override of the note-opener's enabled state, independent of the
+	 * `open_notes_on_access` chat setting (used by orchestration to honor its own
+	 * setting / the per-flow `notor-open-notes-in-editor` frontmatter):
+	 * `true` force-opens, `false` force-suppresses, `undefined` leaves the chat
+	 * default. `silentNoteOpener` (or `false` here) always wins toward suppression.
+	 */
+	noteOpenerEnabled?: boolean;
+	/**
 	 * Callback for requesting a user interaction (e.g. follow-up question) from
 	 * inside a tool. Bridged into the extension sandbox as `utils.ask`. Type is
 	 * `InteractionCallback` from `../chat/dispatcher`; declared structurally here

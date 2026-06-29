@@ -186,6 +186,18 @@ function parseBool(value: unknown, fallback: boolean): boolean {
 }
 
 /**
+ * Parse an optional tri-state boolean: an explicit `true`/`false` (incl. the
+ * `"true"`/`"false"` string forms) is honored; absent or unrecognized → `null`
+ * (inherit the global default). Used by `notor-open-notes-in-editor`.
+ */
+function parseBoolOrNull(value: unknown): boolean | null {
+	if (typeof value === "boolean") return value;
+	if (value === "true") return true;
+	if (value === "false") return false;
+	return null;
+}
+
+/**
  * Parse `notor-schedule` into a validated cron expression (or `null`). Mirrors
  * the workflow-discovery cron handling (`workflow-discovery.ts:378`): an invalid
  * expression is dropped to `null` with a logged warning rather than a hard load
@@ -419,6 +431,7 @@ export class FlowDefinitionParser {
 			handoffIsolation: parseHandoffIsolation(fm["notor-handoff-isolation"], name),
 			maxDepth: parseMaxDepth(fm["notor-max-depth"]),
 			maxCostUsd: parseFiniteNumberOrDefault(fm["notor-max-cost-usd"], DEFAULT_MAX_COST_USD),
+			openNotesInEditor: parseBoolOrNull(fm["notor-open-notes-in-editor"]),
 		};
 
 		// Two layers of load-time validation.

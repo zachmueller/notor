@@ -30,6 +30,7 @@ import type { Tool } from "../tools/tool";
 import type { AggregateBudget, OrchestrationToolContext } from "../run-loop/types";
 import { buildUtils, buildLibs, buildObsidianExports } from "../extensions/runtime-context";
 import { resolveNote } from "../utils/resolve-note";
+import { NoteOpener } from "../tools/note-opener";
 import { resolveIncludeNotes } from "../include-note/resolver";
 import { logger } from "../utils/logger";
 import { FlowDefinitionParser } from "./flow-parser";
@@ -124,6 +125,7 @@ function buildExecutor(
 	plugin: NotorPlugin,
 	sessionLog: SessionLog,
 	committedKeys: Set<string>,
+	openNotesInEditor: boolean,
 ): StepTurnExecutor {
 	// INT-006: persist each step conversation (hidden from the flat list) with its
 	// orchestration_edges header into the chat history directory.
@@ -134,7 +136,7 @@ function buildExecutor(
 	// INT-010: the deterministic code-step executor (notor-step-mode: code).
 	const codeStepExecutor = new CodeStepExecutor(
 		{
-			runtimeFactory: makeCodeStepRuntimeFactory(plugin, committedKeys),
+			runtimeFactory: makeCodeStepRuntimeFactory(plugin, committedKeys, openNotesInEditor),
 			notifyError: (message: string) => new Notice(message),
 		},
 		sessionLog,
@@ -147,7 +149,7 @@ function buildExecutor(
 			providerRegistry: plugin.getProviderRegistry(),
 			settings: plugin.settings,
 			promptBuilder: new StepPromptBuilder(),
-			runtimeFactory: makeRuntimeFactory(plugin),
+			runtimeFactory: makeRuntimeFactory(plugin, openNotesInEditor),
 			memoriesPath: memoriesPath(plugin.settings.notor_dir),
 			stepConversationStore,
 			codeStepExecutor,
@@ -276,7 +278,7 @@ async function maybeWriteFailureReport(
  * a per-step dispatcher (with the orchestration session context bound via the
  * dispatcher's session-context seam).
  */
-function makeRuntimeFactory(plugin: NotorPlugin): StepRuntimeFactory {
+function makeRuntimeFactory(plugin: NotorPlugin, openNotesInEditor: boolean): StepRuntimeFactory {
 	return {
 		async build({ step, persona, resolved, orchestrationContext }): Promise<StepRuntime> {
 			const settings = plugin.settings;
@@ -289,6 +291,10 @@ function makeRuntimeFactory(plugin: NotorPlugin): StepRuntimeFactory {
 				dispatcher.registerTool(tool);
 			}
 			dispatcher.setSettings(settings);
+			// Honor the orchestration note-opening decision (global setting or the
+			// per-flow `notor-open-notes-in-editor` override), independent of the chat
+			// `open_notes_on_access` setting, for every tool this step dispatches.
+			dispatcher.setOpenNotesOverride(openNotesInEditor);
 			dispatcher.setActivePersonaName(persona?.name ?? null);
 			if (plugin.vaultRootPath) dispatcher.setVaultRootPath(plugin.vaultRootPath);
 			dispatcher.setResolveVaultPath((p: string) => {
@@ -355,6 +361,7 @@ function makeRuntimeFactory(plugin: NotorPlugin): StepRuntimeFactory {
 function makeCodeStepRuntimeFactory(
 	plugin: NotorPlugin,
 	committedKeys: Set<string>,
+	openNotesInEditor: boolean,
 ): CodeStepRuntimeFactory {
 	const adapter = plugin.app.vault.adapter;
 	const scratchpadFs: ScratchpadFs = {
@@ -409,6 +416,9 @@ function makeCodeStepRuntimeFactory(
 				dispatcher.registerTool(tool);
 			}
 			dispatcher.setSettings(settings);
+			// Honor the orchestration note-opening decision for tools dispatched via
+			// `orchestration.callTool` (same seam as a conversation step's LLM calls).
+			dispatcher.setOpenNotesOverride(openNotesInEditor);
 			if (plugin.vaultRootPath) dispatcher.setVaultRootPath(plugin.vaultRootPath);
 			dispatcher.setResolveVaultPath((p: string) => {
 				const file = resolveNote(p, plugin.app.vault, plugin.app.metadataCache);
@@ -425,8 +435,15 @@ function makeCodeStepRuntimeFactory(
 			const { effective } = await configResolver.resolveEffectiveConfig(undefined, null, null);
 			dispatcher.setEffectiveToolConfig(effective);
 
-			// utils/libs/obsidian — IDENTICAL to user-defined tools.
+			// utils/libs/obsidian — IDENTICAL to user-defined tools, except the
+			// note-opener honors the orchestration note-opening decision (a code step
+			// may call `utils.noteOpener` directly, bypassing the dispatcher).
 			const utils = buildUtils(plugin);
+			utils.noteOpener = new NoteOpener(
+				plugin.app,
+				openNotesInEditor,
+				settings.focus_notes_on_access,
+			);
 			utils.abortSignal = abortSignal;
 			// The scaffold task tools (and any orchestration-aware tool reached via
 			// callTool) read the session carriage off utils, exactly as a step turn.
@@ -543,8 +560,11 @@ export async function launchOrchestration(
 	});
 
 	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(plugin.app));
+	// Resolve once: the per-flow `notor-open-notes-in-editor` override (when set)
+	// wins, else the global `orchestration_open_notes_in_editor` setting.
+	const openNotes = flow.openNotesInEditor ?? plugin.settings.orchestration_open_notes_in_editor;
 	// Fresh launch: no prior committed side-effects (INT-010 once() skip set).
-	const executor = buildExecutor(plugin, sessionLog, new Set<string>());
+	const executor = buildExecutor(plugin, sessionLog, new Set<string>(), openNotes);
 
 	const abortController = new AbortController();
 	const abortSignal = options?.abortSignal ?? abortController.signal;
@@ -1183,9 +1203,12 @@ async function resumeRecoveredSession(
 	await sessionManager.updateStatus(recovered.sessionId, "active").catch(() => undefined);
 
 	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(plugin.app));
+	// Resolve the note-opening decision identically to a fresh launch (per-flow
+	// override, else the global orchestration setting).
+	const openNotes = flow.openNotesInEditor ?? plugin.settings.orchestration_open_notes_in_editor;
 	// Resume: seed the once() skip set from the recovered log so an
 	// already-committed external effect is not re-run (FR-125 / INT-010).
-	const executor = buildExecutor(plugin, sessionLog, new Set(recovered.committedKeys));
+	const executor = buildExecutor(plugin, sessionLog, new Set(recovered.committedKeys), openNotes);
 	const abortSignal = inheritedContext?.abort ?? new AbortController().signal;
 
 	const runner = new OrchestrationRunner({

@@ -34,6 +34,7 @@ function flow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
 		handoffIsolation: "isolated",
 		maxDepth: null,
 		maxCostUsd: 5,
+		openNotesInEditor: null,
 		...over,
 	};
 }
