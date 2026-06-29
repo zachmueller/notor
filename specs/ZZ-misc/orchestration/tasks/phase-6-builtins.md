@@ -385,23 +385,27 @@ maintenance only.
 `OrchestrationHelper` runtime API the code-step docs + persona guidance must describe as built).
 
 **Acceptance Criteria:**
-- [ ] `docs/orchestration.md` exists in the house style and covers enabling the feature group, the
+- [x] `docs/orchestration.md` exists in the house style and covers enabling the feature group, the
   flow/step schema, conversation vs. code steps, session workspace/tasks/memories, running a flow,
   safety/limits, composition (`run_flow` + chaining), and the run-tree view; it references the POL-002
   reference flows.
-- [ ] `notor-help`'s inlined settings deep-link list includes the **Orchestration** section matching the
+- [x] `notor-help`'s inlined settings deep-link list includes the **Orchestration** section matching the
   group name in `src/settings/sections/orchestration.ts` (no dead deep-link).
-- [ ] `tool-creator`'s inlined `utils`/`libs` reference matches the real
-  `src/extensions/runtime-context/` API after orchestration work (no stale entry; no real-but-undocumented
-  member surfaced to code steps).
-- [ ] The code-step guidance (`INT-013`) is present in **both** `docs/orchestration.md` and the
+- [x] `tool-creator`'s inlined `utils`/`libs` reference matches the real
+  `src/extensions/runtime-context/` API after orchestration work — orchestration added no general
+  user-tool `utils`/`libs` members (the `orchestrationTasks`/`invokeWorkflow`/`orchestrationContext`
+  bridges are orchestration-internal and reached via the `orchestration.*` code-step helper, not `utils.*`),
+  so no reconciliation was needed (verified against `inventory.ts` + `runtime-context/types.ts`).
+- [x] The code-step guidance (`INT-013`) is present in **both** `docs/orchestration.md` and the
   `orchestration-creator` persona, consistent with
   [../contracts/orchestration-helper.md](../contracts/orchestration-helper.md), including the
   **at-least-once + `once()` + overwrite-only-scratchpad + no-unbounded-sync-loop caveats** and the
   **iteration-counter distinction** (HOP counter incl. code steps vs `notor-max-iterations` LLM-turns —
   Issue-13c).
-- [ ] The `audit-personas-docs` skill's audit targets are extended to include `orchestration-creator`,
+- [x] The `audit-personas-docs` skill's audit targets are extended to include `orchestration-creator`,
   the `notor-settings://Orchestration` deep-link, the orchestration tool scaffolds, and the
-  `OrchestrationHelper` API.
-- [ ] Running the `audit-personas-docs` audit at feature completion reports **no drift** (the Phase 6
-  documentation/persona gate).
+  `OrchestrationHelper` API (new source-of-truth-map rows + persona/docs diff bullets).
+- [x] The `inventory.ts` cross-check at feature completion is consistent: `orchestration-creator`
+  registered, `emit_event` + the four task scaffolds present, `run_flow` correctly the separately-
+  registered `RunFlowTool` (documented in the audit map like `use_subagent`), the `Orchestration`
+  deep-link resolves to a real settings group — no drift.

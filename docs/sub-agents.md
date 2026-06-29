@@ -139,3 +139,7 @@ Sub-agents can use a different provider or model than the parent conversation. T
 Preset resolution takes precedence: if `notor-preferred-preset` is set and the preset is configured, its provider and model are used regardless of `notor-preferred-provider`/`notor-preferred-model`. If the preset is not configured, resolution falls through to the legacy provider/model fields.
 
 If the specified provider is not configured, the sub-agent fails with a clear error rather than silently falling back.
+
+## Orchestration run-tree
+
+Sub-agents and [orchestration](orchestration.md) flows share one **run-tree view**: it renders sub-agent children (via the sub-agent parent link) and orchestration steps + child flows (via conversation edges) in a single navigable hierarchy, and both `use_subagent` and `run_flow` tool-call cards show the same inline peek card (the shared `child_run_metadata` rollup). `run_flow` generalizes the sub-agent pattern from one isolated conversation to a whole event-driven flow run.

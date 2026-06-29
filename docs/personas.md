@@ -63,3 +63,7 @@ For more fine-grained control, personas also support `<notor_tool_config>` block
 - The plugin rescans the personas directory when Settings is opened or the persona picker is activated; no plugin reload is needed when personas are created or deleted.
 - **Auto-refresh on file change** — when you save or modify a persona file, the active persona is automatically reloaded. If a parse error occurs, the previous persona state remains active and a persistent error Notice is shown.
 - **Per-panel isolation** — in multi-panel mode, each chat panel maintains independent persona state. Switching personas in one panel does not affect other open panels.
+
+## Orchestration
+
+Personas also drive **orchestration flow** conversation steps: a step note's `notor-step-persona` selects the persona (system prompt, tool config, provider/model) for that step's LLM turn. The built-in `orchestration-creator` persona interactively guides authoring a flow. See [Orchestration](orchestration.md).

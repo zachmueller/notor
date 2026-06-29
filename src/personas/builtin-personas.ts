@@ -67,6 +67,7 @@ where \`<Section>\` is one of these exact group names (URL-encode spaces as %20)
 - Personas
 - Sub-agents
 - Memory
+- Orchestration
 - Templates
 - Rules and workflows
 - Tools
