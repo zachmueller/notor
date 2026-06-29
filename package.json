@@ -18,6 +18,9 @@
 		"e2e:orch:meeting-notes": "npx tsx e2e/scripts/orchestration-meeting-notes-test.ts",
 		"e2e:orch:draft-critique": "npx tsx e2e/scripts/orchestration-draft-critique-test.ts",
 		"e2e:orch:inbox-triage": "npx tsx e2e/scripts/orchestration-inbox-triage-test.ts",
+		"e2e:orch:vault-health": "npx tsx e2e/scripts/orchestration-vault-health-test.ts",
+		"e2e:orch:zettelkasten": "npx tsx e2e/scripts/orchestration-zettelkasten-test.ts",
+		"e2e:orch:weekly-review": "npx tsx e2e/scripts/orchestration-weekly-review-test.ts",
 		"test": "vitest run",
 		"test:watch": "vitest"
 	},
