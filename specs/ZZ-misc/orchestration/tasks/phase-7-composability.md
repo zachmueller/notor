@@ -863,6 +863,18 @@ pause + step→workflow scenarios), FR-170…179.
 `TEST-008` (the e2e gate that must be green before the manual walkthrough). The Phase-5 scenarios (3A/3B)
 additionally exercise `INT-030` / `INT-031`, which must be landed for those two scenarios to pass.
 
+> **Status — implementation-complete + statically ready; the live walkthrough is a human gate.** Every
+> phase task VAL-001 depends on (Phases 0–7) is landed and unit-tested, and a **static readiness
+> cross-check** confirmed all 20 items of the quickstart's Validation checklist are **code-backed and
+> test-covered** (the surface for each item — gating, parsing/defaults, orphan hard-error, hook launch,
+> routing/fan-out, no-progress guard, must-publish, code steps + timeout, cancellation, pause +
+> paused-reload, step→workflow, Notices, hidden-from-list, run-tree, composition, cascading guardrails,
+> recovery, sub-agent regression — exists and has a corresponding unit/e2e test). The remaining work is the
+> **manual, live walkthrough** itself (a human with a running Obsidian + a configured LLM provider checks
+> the quickstart's checklist by observation) — it cannot be run headlessly here, so the
+> "produces the documented behavior" criteria below are **left unchecked** until that walkthrough is
+> performed. The acceptance criteria are intentionally not self-certified.
+
 **Acceptance Criteria:**
 - [ ] Every step of [../quickstart.md](../quickstart.md) Scenarios 1–6 **plus the Phase-5 scenarios 3A
   (interactive pause + paused-reload) and 3B (step→workflow)** produces the documented behavior.
