@@ -1021,8 +1021,7 @@ export class NotorChatView extends ItemView {
 			getMessageListEl: () => this.messageListEl,
 			getLoadingIndicatorEl: () => this.loadingIndicatorEl,
 			getWorkflows: () => this.getWorkflowsCallback?.() ?? [],
-			// eslint-disable-next-line @typescript-eslint/no-deprecated -- no non-deprecated API for active-leaf identity check
-			isActiveLeaf: () => this.app.workspace.activeLeaf === this.leaf,
+			isActiveLeaf: () => this.app.workspace.getActiveViewOfType(NotorChatView) === this,
 			onSendMessage: this.onSendMessage,
 			onStopResponse: this.onStopResponse,
 			onSendWorkflow: this.onSendWorkflow,

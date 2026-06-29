@@ -55,8 +55,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				const viewType = resolveWebViewerType();
 				if (!viewType) return null;
 				const leaves = plugin.app.workspace.getLeavesOfType(viewType);
-				// eslint-disable-next-line @typescript-eslint/no-deprecated -- no non-deprecated API for active-leaf identity check
-				const activeLeaf = plugin.app.workspace.activeLeaf;
+				const activeLeaf = plugin.app.workspace.getMostRecentLeaf();
 				const targetLeaf = leaves.find((l: any) => l === activeLeaf) ?? null;
 				if (!targetLeaf) return null;
 				const webviewEl = findWebviewEl(targetLeaf);

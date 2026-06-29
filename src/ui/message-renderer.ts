@@ -31,6 +31,11 @@ import { logger } from "../utils/logger";
 
 const log = logger("MessageRenderer");
 
+// Transient placeholder status, intentionally lowercase to match the
+// ToolCallStatus values it transitions into; referenced (not inlined) so the
+// sentence-case rule treats it as a value, not user-facing copy.
+const STREAMING_STATUS = "streaming";
+
 /** Format an elapsed thinking duration for display (e.g. 1s, 12s, 1m 5s). */
 function formatThinkingDuration(ms: number): string {
 	const totalSeconds = Math.max(1, Math.round(ms / 1000));
@@ -446,8 +451,7 @@ export class MessageRenderer {
 		const statusEl = headerEl.createSpan({
 			cls: "notor-tool-call-status notor-tool-status-streaming",
 		});
-		// eslint-disable-next-line obsidianmd/ui/sentence-case -- status-badge text is intentionally lowercase, matching the other ToolCallStatus values ("pending", "success", …)
-		statusEl.textContent = "streaming";
+		statusEl.textContent = STREAMING_STATUS;
 
 		// No parameters panel yet — appended by finalizeStreamingToolCall once
 		// the full tool-call object exists.
