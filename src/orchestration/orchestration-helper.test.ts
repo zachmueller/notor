@@ -343,3 +343,49 @@ describe("OrchestrationHelper.flow / eventHistory", () => {
 		expect(o.eventHistory(99).map((e) => e.topic)).toEqual(["e1", "e2", "e3", "e4"]);
 	});
 });
+
+describe("OrchestrationHelper.log", () => {
+	it("appends a step.log entry per level, keyed by the turn + step", async () => {
+		const writer = new FakeWriter();
+		const sessionLog = new SessionLog("sessions/sess-1/log.jsonl", writer, () => "T");
+		const o = buildOrchestrationHelper(makeArgs({ sessionLog, iteration: 7, stepName: "🔍 Verify" }));
+
+		o.log.debug("d");
+		o.log.info("chose branch A", { n: 3 });
+		o.log.warn("slow");
+		o.log.error("boom", { code: 1 });
+		await new Promise((r) => setTimeout(r, 0)); // drain the fire-and-forget write chain
+
+		const logs = writer.entries().filter((e) => e.type === "step.log");
+		expect(logs).toHaveLength(4);
+		expect(logs[1]).toMatchObject({
+			type: "step.log",
+			ts: "T",
+			turn: 7,
+			step: "🔍 Verify",
+			level: "info",
+			message: "chose branch A",
+			data: { n: 3 },
+		});
+		expect(logs.map((e) => e.level)).toEqual(["debug", "info", "warn", "error"]);
+	});
+
+	it("omits data when not provided", async () => {
+		const writer = new FakeWriter();
+		const sessionLog = new SessionLog("sessions/sess-1/log.jsonl", writer, () => "T");
+		const o = buildOrchestrationHelper(makeArgs({ sessionLog }));
+		o.log.info("no data");
+		await new Promise((r) => setTimeout(r, 0));
+		const entry = writer.entries().find((e) => e.type === "step.log")!;
+		expect("data" in entry).toBe(false);
+	});
+
+	it("never throws when the session-log append rejects (logging must not crash a run)", () => {
+		const writer: SessionLogWriter = {
+			append: () => Promise.reject(new Error("disk full")),
+		};
+		const sessionLog = new SessionLog("sessions/sess-1/log.jsonl", writer, () => "T");
+		const o = buildOrchestrationHelper(makeArgs({ sessionLog }));
+		expect(() => o.log.error("still fine")).not.toThrow();
+	});
+});

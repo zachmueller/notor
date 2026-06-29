@@ -127,6 +127,25 @@ export interface UserInputReceivedEntry extends BaseEntry {
 	payload: string;
 }
 
+/**
+ * `step.log` — a code step's logic-path log line, emitted via `orchestration.log`
+ * (INT-011). Persisted **unconditionally** (regardless of the console log level)
+ * so the run-tree can surface a code step's logic path; the `orchestration.log`
+ * tee still respects the console level for DevTools output. Keyed by `turn` (the
+ * step-turn / hop counter) + `step`, so the run-tree can associate logs with the
+ * code-step turn they belong to. A pure audit/diagnostic entry — recovery ignores
+ * it (it is not a `turn.*` / `event.*` entry).
+ */
+export interface StepLogEntry extends BaseEntry {
+	type: "step.log";
+	turn: number;
+	step: string;
+	level: "debug" | "info" | "warn" | "error";
+	message: string;
+	/** Optional structured payload (JSON-serializable; non-serializable values are dropped by the writer). */
+	data?: unknown;
+}
+
 /** The full session-log entry union. */
 export type SessionLogEntry =
 	| SessionStartEntry
@@ -140,7 +159,8 @@ export type SessionLogEntry =
 	| SessionCancelledEntry
 	| SessionCompleteEntry
 	| UserInputRequiredEntry
-	| UserInputReceivedEntry;
+	| UserInputReceivedEntry
+	| StepLogEntry;
 
 // ---------------------------------------------------------------------------
 // Writer abstraction (decouples from Obsidian's Vault for tests)
@@ -216,6 +236,17 @@ export class SessionLog {
 	 */
 	appendSideEffectCommitted(entry: Omit<SideEffectCommittedEntry, "type" | "ts">): Promise<void> {
 		return this.write({ type: "side_effect.committed", ts: this.now(), ...entry });
+	}
+
+	/**
+	 * `step.log` (INT-011): a code step's logic-path log line, written via
+	 * `orchestration.log`. Persisted **unconditionally** (independent of the console
+	 * log level) so the run-tree can show the path a code step took. Like every
+	 * append it is fire-and-forget on the write chain — a failed/unserializable
+	 * write is swallowed (logging must never crash a run).
+	 */
+	appendStepLog(entry: Omit<StepLogEntry, "type" | "ts">): Promise<void> {
+		return this.write({ type: "step.log", ts: this.now(), ...entry });
 	}
 
 	appendChildSpawned(entry: Omit<ChildSpawnedEntry, "type" | "ts">): Promise<void> {

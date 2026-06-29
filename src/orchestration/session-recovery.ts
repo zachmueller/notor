@@ -189,7 +189,8 @@ export class SessionRecovery {
 				}
 				default:
 					// side_effect.committed / child.spawned / child.result /
-					// event.emission_overwritten / session.start — skip; keep scanning.
+					// event.emission_overwritten / session.start / step.log — skip;
+					// keep scanning. (step.log is a pure diagnostic; never replayable.)
 					continue;
 			}
 		}

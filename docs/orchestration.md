@@ -105,6 +105,7 @@ The code receives the same arg signature as a snippet of a user-defined tool, pl
 | `tasks.{list,ensure,start,close}` | The runtime task registry (same backing as the task tools). |
 | `flow` | `{ name, iteration, sessionId }` — read-only flow/session metadata. |
 | `eventHistory(limit?)` | Recent event history for the session. |
+| `log.{debug,info,warn,error}(message, data?)` | Record the **logic path** this code step took. Persists to the session log and **surfaces in the run-tree** under the step's node (also tees to the DevTools console). Persists regardless of the console log level — prefer it over `utils.logger` inside a code step. Keep `data` JSON-serializable. |
 
 > **`callTool` returns a string — JSON for structured tools.** `callTool` / `callMcpTool` always resolve to a **`string`** (and **throw** on dispatch failure — an uncaught throw becomes `{step}.code_error`). For tools that return structured data the string is `JSON.stringify`'d, so you must **`JSON.parse`** it (`search_chat_history`, `read_chat_history`, `search_vault`, `list_vault`, `read_frontmatter`, `orchestration_task_list`); tools that return prose (`read_note`, `get_backlinks`, …) are used directly. Confirm a tool's exact output shape before consuming it — read its definition (user tools live at `{notor_dir}/tools/{name}.md`; for a built-in, open it from Settings → Tools to materialize the same file) or ask the `notor-help` sub-agent. The `orchestration-creator` persona walks you through this.
 
@@ -174,7 +175,9 @@ The **run-tree view** is the unified, navigable tree of a run — orchestration 
 - a **flow-run entry** in the activity indicator;
 - (selecting a node loads that node's conversation in the main chat).
 
-The view is **live** while a run is active (updating as turns complete) and **static** once it finishes; a recovered run re-attaches its live subscription. It tolerates dangling edges (a crash-recovery re-run mints new conversation ids) by rendering only resolvable edges.
+The tree also shows **code steps** — interleaved with conversation steps by hop order — even though a code step has no conversation. A code-step node is **not clickable** (there's no conversation to open); beneath it the tree renders the **logic-path logs** the step emitted via `orchestration.log` (color-coded by level), so you can see which branches and decisions ran. (Code-step nodes and their logs are read from the session's `session-log.jsonl`, not from conversation files.)
+
+The view is **live** while a run is active (updating as turns complete — a log written mid-turn appears once that turn completes) and **static** once it finishes; a recovered run re-attaches its live subscription. It tolerates dangling edges (a crash-recovery re-run mints new conversation ids) by rendering only resolvable edges.
 
 ## Composition
 

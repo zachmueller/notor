@@ -26,7 +26,7 @@
 import type { ConversationMode } from "../types";
 import type { ToolDispatcher } from "../chat/dispatcher";
 import type { OrchestrationToolContext, RunContext } from "../run-loop/types";
-import { logger } from "../utils/logger";
+import { logger, type Logger } from "../utils/logger";
 import type { SessionLog } from "./session-log";
 import { TaskRegistry, type TaskNote, type TaskStatus } from "./task-registry";
 import type { OrchestrationEvent } from "./types";
@@ -99,6 +99,15 @@ export interface OrchestrationHelper {
 	};
 	/** Recent event history for the current session (newest last), most-recent `limit` (default: all). */
 	eventHistory(limit?: number): OrchestrationEvent[];
+	/**
+	 * Persisted logic-path logger. Each call appends a `step.log` entry to
+	 * `session-log.jsonl` (**always** — independent of the console log level) AND
+	 * tees to the scoped console logger (which honors the level). The persisted
+	 * logs surface in the run-tree under this code step's node, so prefer this over
+	 * `utils.logger` inside a code step when you want the logic path to be visible
+	 * without DevTools.
+	 */
+	log: Logger;
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +165,25 @@ export interface BuildOrchestrationHelperArgs {
 /** Project the routed {@link OrchestrationEvent} into the read-only {@link CodeStepEvent}. */
 export function projectCodeStepEvent(event: OrchestrationEvent): CodeStepEvent {
 	return { topic: event.topic, payload: event.payload, source_step: event.source_step };
+}
+
+/**
+ * Build the `orchestration.log` {@link Logger}. Each level tees the call to the
+ * scoped console logger (which respects the configured console log level) AND
+ * appends a `step.log` entry to the session log **unconditionally** (so the
+ * run-tree shows the logic path even when the console is gated to `error`). The
+ * append is fire-and-forget (`void`) on the session log's serialized write chain;
+ * a failed/unserializable append is swallowed there, never crashing the step.
+ */
+function makeStepLogger(sessionLog: SessionLog, stepName: string, iteration: number): Logger {
+	const console = logger(`code-step:${stepName}`);
+	const tee =
+		(level: "debug" | "info" | "warn" | "error") =>
+		(message: string, data?: unknown): void => {
+			console[level](message, data);
+			void sessionLog.appendStepLog({ turn: iteration, step: stepName, level, message, data });
+		};
+	return { debug: tee("debug"), info: tee("info"), warn: tee("warn"), error: tee("error") };
 }
 
 // ---------------------------------------------------------------------------
@@ -298,5 +326,7 @@ export function buildOrchestrationHelper(args: BuildOrchestrationHelperArgs): Or
 			if (limit <= 0) return [];
 			return eventHistory.slice(eventHistory.length - limit);
 		},
+
+		log: makeStepLogger(sessionLog, stepName, iteration),
 	};
 }

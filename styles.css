@@ -4367,6 +4367,60 @@
 	white-space: nowrap;
 }
 
+/* Code-step nodes — deterministic, non-clickable; read as muted/distinct. */
+.notor-run-tree-node.is-code-step > .notor-run-tree-node-header .notor-run-tree-node-icon,
+.notor-run-tree-node.is-code-step > .notor-run-tree-node-header .notor-run-tree-node-label {
+	color: var(--text-faint);
+}
+
+.notor-run-tree-node-header.is-not-clickable {
+	cursor: default;
+}
+
+.notor-run-tree-node-header.is-not-clickable:hover {
+	background-color: transparent;
+}
+
+/* Code-step logic-path logs (orchestration.log) — non-interactive leaf rows. */
+.notor-run-tree-logs {
+	display: flex;
+	flex-direction: column;
+}
+
+.notor-run-tree-log {
+	display: flex;
+	gap: 6px;
+	padding: 1px 4px 1px 22px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	cursor: default;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.notor-run-tree-log-level {
+	flex: 0 0 auto;
+	font-variant: tabular-nums;
+	opacity: 0.7;
+}
+
+.notor-run-tree-log-message {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.notor-run-tree-log.is-debug {
+	opacity: 0.7;
+}
+
+.notor-run-tree-log.is-warn {
+	color: var(--text-warning);
+}
+
+.notor-run-tree-log.is-error {
+	color: var(--text-error);
+}
+
 /* Inline child-run peek card on a run_flow / use_subagent tool result. */
 .notor-child-run-peek {
 	margin-top: 4px;

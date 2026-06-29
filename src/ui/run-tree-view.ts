@@ -31,6 +31,13 @@ import { ItemView, normalizePath, setIcon } from "obsidian";
 import type { WorkspaceLeaf, ViewStateResult } from "obsidian";
 import type NotorPlugin from "../main";
 import type { OrchestrationEdge } from "../types";
+import {
+	type CodeStepLog,
+	type CodeStepTurn,
+	extractCodeStepTurns,
+	spliceCodeSteps,
+} from "../orchestration/code-step-overlay";
+import { SessionLogReader } from "../orchestration/session-log-reader";
 import { logger } from "../utils/logger";
 
 const log = logger("RunTreeView");
@@ -39,17 +46,22 @@ export const ORCHESTRATION_RUN_TREE_VIEW_TYPE = "notor-run-tree-view";
 
 /** A node in the run tree, resolved from a step / sub-agent conversation header. */
 interface RunTreeNode {
+	/** Conversation id for a real conversation node; a synthetic `code-step:{sid}:{turn}` key for a code step. */
 	conversationId: string;
 	title: string;
 	flowName?: string;
 	stepName?: string;
 	iteration?: number;
 	sessionId?: string;
-	kind: "step" | "child-flow" | "sub-agent";
+	kind: "step" | "child-flow" | "sub-agent" | "code-step";
 	/** Resolved child node ids (next-chain successors, child-flow entries, sub-agents). */
 	children: RunTreeNode[];
 	/** True when this node's conversation file resolved (false ⇒ dangling — render label only). */
 	resolved: boolean;
+	/** Code-step logic-path logs (only on `code-step` nodes), rendered as leaf rows beneath the node. */
+	logs?: CodeStepLog[];
+	/** False for a `code-step` node (no conversation to open). Defaults to true. */
+	clickable?: boolean;
 }
 
 /** A scanned conversation header (the subset the tree reads). */
@@ -166,6 +178,11 @@ export class OrchestrationRunTreeView extends ItemView {
 			});
 			return;
 		}
+
+		// Overlay code steps (no conversation file — read from each session's log)
+		// so the run-tree shows deterministic steps + their `orchestration.log`
+		// logic-path logs, interleaved with conversation steps by hop order.
+		await this.overlayCodeSteps(roots);
 
 		// Aggregate rollup header (whole-run token sums from the scanned step headers).
 		this.renderRollupHeader(header, roots);
@@ -299,6 +316,83 @@ export class OrchestrationRunTreeView extends ItemView {
 		return node;
 	}
 
+	/**
+	 * Overlay code-step nodes onto the built conversation tree. Code steps create
+	 * no conversation file (so the header scan misses them) — but they leave a
+	 * `turn.start`/`turn.complete` pair (`conversation_id: null`) plus `step.log`
+	 * entries in each session's `session-log.jsonl`. This reads those logs (reusing
+	 * {@link SessionLogReader}), reconstructs the per-session code-step turns, and
+	 * splices a synthesized node per turn at its hop position (the shared
+	 * `iteration`/`turn` counter). Failure is non-fatal: a missing/corrupt log for
+	 * one session is skipped so the conversation tree still renders.
+	 */
+	private async overlayCodeSteps(roots: RunTreeNode[]): Promise<void> {
+		const sessionIds = new Set<string>();
+		const collect = (n: RunTreeNode): void => {
+			if (n.sessionId) sessionIds.add(n.sessionId);
+			n.children.forEach(collect);
+		};
+		roots.forEach(collect);
+		if (sessionIds.size === 0) return;
+
+		let turnsBySession: Map<string, CodeStepTurn[]>;
+		try {
+			turnsBySession = await this.scanCodeStepTurns(sessionIds);
+		} catch (e) {
+			log.debug("Run-tree code-step overlay scan failed", { error: String(e) });
+			return;
+		}
+
+		spliceCodeSteps<RunTreeNode>({
+			roots,
+			turnsBySession,
+			rootSessionId: this.rootSessionId,
+			makeCodeStepNode: (turn, sessionId) => this.makeCodeStepNode(turn, sessionId),
+		});
+	}
+
+	/** Synthesize a `code-step` {@link RunTreeNode} from a reconstructed turn. */
+	private makeCodeStepNode(turn: CodeStepTurn, sessionId: string): RunTreeNode {
+		const title = turn.emittedTopic ? `${turn.step} → ${turn.emittedTopic}` : turn.step;
+		return {
+			conversationId: `code-step:${sessionId}:${turn.turn}`,
+			title,
+			stepName: turn.step,
+			iteration: turn.turn,
+			sessionId,
+			kind: "code-step",
+			children: [],
+			resolved: true,
+			logs: turn.logs,
+			clickable: false,
+		};
+	}
+
+	/**
+	 * Read each session's `session-log.jsonl` and reconstruct its code-step turns.
+	 * Reads from the orchestration sessions root (not `history_path` — that holds
+	 * conversation files only). Per-session failures (absent / unparseable log) are
+	 * skipped so one bad session never breaks the overlay.
+	 */
+	private async scanCodeStepTurns(sessionIds: Set<string>): Promise<Map<string, CodeStepTurn[]>> {
+		const out = new Map<string, CodeStepTurn[]>();
+		const sessionsRoot = normalizePath(`${this.plugin.settings.notor_dir}/orchestrations/sessions`);
+		const adapter = this.plugin.app.vault.adapter;
+		const reader = new SessionLogReader();
+		for (const sid of sessionIds) {
+			const path = normalizePath(`${sessionsRoot}/${sid}/session-log.jsonl`);
+			try {
+				if (!(await adapter.exists(path))) continue;
+				const parsed = reader.parse(await adapter.read(path));
+				const turns = extractCodeStepTurns(parsed.entries);
+				if (turns.length > 0) out.set(sid, turns);
+			} catch (e) {
+				log.debug("Run-tree: skipping unreadable session log", { sid, error: String(e) });
+			}
+		}
+		return out;
+	}
+
 	// -- Render ----------------------------------------------------------------
 
 	private renderRollupHeader(headerEl: HTMLElement, roots: RunTreeNode[]): void {
@@ -326,6 +420,7 @@ export class OrchestrationRunTreeView extends ItemView {
 		const nodeEl = parentEl.createDiv({ cls: "notor-run-tree-node" });
 		nodeEl.style.paddingLeft = `${depth * 14}px`;
 		if (node.conversationId === this.selectedId) nodeEl.addClass("is-selected");
+		if (node.kind === "code-step") nodeEl.addClass("is-code-step");
 
 		const headerRow = nodeEl.createDiv({ cls: "notor-run-tree-node-header" });
 
@@ -347,24 +442,67 @@ export class OrchestrationRunTreeView extends ItemView {
 		const iconEl = headerRow.createSpan({ cls: "notor-run-tree-node-icon" });
 		setIcon(
 			iconEl,
-			node.kind === "child-flow" ? "git-branch" : node.kind === "sub-agent" ? "bot" : "circle-dot",
+			node.kind === "child-flow"
+				? "git-branch"
+				: node.kind === "sub-agent"
+					? "bot"
+					: node.kind === "code-step"
+						? "code"
+						: "circle-dot",
 		);
 
 		const labelEl = headerRow.createSpan({ cls: "notor-run-tree-node-label" });
 		labelEl.textContent = node.title;
 
-		// Select-to-navigate: load this node's conversation in the main chat.
-		headerRow.addEventListener("click", () => {
-			this.selectedId = node.conversationId;
-			void this.navigateTo(node.conversationId);
-			void this.rebuild();
-		});
+		// A code-step node has no conversation to open — select-only (highlight),
+		// don't navigate. Conversation/sub-agent nodes navigate the main chat.
+		const clickable = node.clickable !== false;
+		if (clickable) {
+			headerRow.addEventListener("click", () => {
+				this.selectedId = node.conversationId;
+				void this.navigateTo(node.conversationId);
+				void this.rebuild();
+			});
+		} else {
+			headerRow.addClass("is-not-clickable");
+			headerRow.addEventListener("click", () => {
+				this.selectedId = node.conversationId;
+				void this.rebuild();
+			});
+		}
 
 		if (hasChildren && !isCollapsed) {
 			const childrenEl = nodeEl.createDiv({ cls: "notor-run-tree-node-children" });
 			for (const child of node.children) {
 				this.renderNode(childrenEl, child, visited, depth + 1);
 			}
+		}
+
+		// Code-step logic-path logs: plain leaf rows beneath the node (not
+		// RunTreeNodes — no navigation, no `visited` key, excluded from the count).
+		if (node.kind === "code-step" && node.logs && node.logs.length > 0 && !isCollapsed) {
+			const logsEl = nodeEl.createDiv({ cls: "notor-run-tree-logs" });
+			logsEl.style.paddingLeft = `${(depth + 1) * 14}px`;
+			for (const entry of node.logs) {
+				this.renderLogRow(logsEl, entry);
+			}
+		}
+	}
+
+	/** Render one code-step log line as a non-interactive, level-colored row. */
+	private renderLogRow(parentEl: HTMLElement, entry: CodeStepLog): void {
+		const row = parentEl.createDiv({ cls: `notor-run-tree-log is-${entry.level}` });
+		row.createSpan({ cls: "notor-run-tree-log-level", text: `[${entry.level}]` });
+		row.createSpan({ cls: "notor-run-tree-log-message", text: entry.message });
+		if (entry.data !== undefined) {
+			let serialized: string;
+			try {
+				serialized = JSON.stringify(entry.data) ?? "";
+			} catch {
+				// Non-serializable (circular / BigInt) — fall back to a safe label.
+				serialized = "[unserializable data]";
+			}
+			if (serialized) row.setAttribute("title", serialized);
 		}
 	}
 

@@ -419,6 +419,7 @@ Arg signature (injected): \`[app, obsidian, utils, libs, event, orchestration]\`
   - \`orchestration.callTool(name, params)\` / \`orchestration.callMcpTool(server, tool, params)\` — dispatch a built-in / MCP tool (threads the step's depth + budget + abort, so a code-step \`run_flow\` is depth/budget-gated identically to an LLM-step one). **Resolves to a \`string\`; throws on dispatch failure** — see "Calling tools from a code step" below before you consume the result.
   - \`orchestration.tasks.{list,ensure,start,close}\` — the runtime task registry.
   - \`orchestration.flow\` (\`{ name, iteration, sessionId }\`) and \`orchestration.eventHistory(limit?)\`.
+  - \`orchestration.log.{debug,info,warn,error}(message, data?)\` — **record the logic path this code step took**. Persists to the session log AND surfaces **in the run-tree** under this step's node (and tees to the DevTools console). Prefer it over \`utils.logger\` inside a code step: it's how a user sees which branches/decisions ran without opening DevTools, and it persists **regardless** of the console log level. Use it on each branch ("chose path A", "tests passed: 12") and keep \`data\` JSON-serializable.
 - A thrown error fires \`{step}.code_error\` (with the stack) and shows an error Notice, while still logging the turn.
 
 ### Calling tools from a code step — get the I/O shape right

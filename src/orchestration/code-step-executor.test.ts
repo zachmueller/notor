@@ -225,6 +225,32 @@ describe("CodeStepExecutor — fence extraction", () => {
 		const result = await executor.execute(request(step({ bodyContent: "```ts\n\n```" })));
 		expect(result.emission.topic).toBe("Verify.code_error");
 	});
+
+	it("orchestration.log writes a step.log entry between turn.start and turn.complete", async () => {
+		const { executor, writer } = makeExecutor();
+		const body = fenced(
+			"ts",
+			`orchestration.log.warn("slow path", { ms: 1200 });\nreturn orchestration.emit("tests.passed");`,
+		);
+		await executor.execute(request(step({ bodyContent: body })));
+
+		const types = writer.entries().map((e) => e.type);
+		const startIdx = types.indexOf("turn.start");
+		const logIdx = types.indexOf("step.log");
+		const completeIdx = types.indexOf("turn.complete");
+		expect(logIdx).toBeGreaterThan(startIdx);
+		expect(logIdx).toBeLessThan(completeIdx);
+
+		const logEntry = writer.entries().find((e) => e.type === "step.log")!;
+		expect(logEntry).toMatchObject({
+			turn: 5,
+			step: "Verify",
+			level: "warn",
+			message: "slow path",
+			data: { ms: 1200 },
+		});
+		expect("conversation_id" in logEntry).toBe(false);
+	});
 });
 
 describe("CodeStepExecutor — type strip + arg signature", () => {

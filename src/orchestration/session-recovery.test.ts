@@ -49,6 +49,9 @@ function turnComplete(turn: number, step: string, topic: string, costUsd: number
 		ts: TS,
 	};
 }
+function stepLog(turn: number, step: string, message: string): SessionLogEntry {
+	return { type: "step.log", turn, step, level: "info", message, ts: TS };
+}
 
 function meta(over: Partial<OrchestrationSessionMeta> = {}): OrchestrationSessionMeta {
 	return {
@@ -123,6 +126,32 @@ describe("SessionRecovery — tail classification", () => {
 	it("idempotency: classifying twice yields the identical action", () => {
 		const entries = [sessionStart("user"), eventEmitted(1, "build.start"), turnStart(2, "Planner", "build.start")];
 		expect(recovery.classifyTail(entries)).toEqual(recovery.classifyTail(entries));
+	});
+
+	it("a step.log tail is a no-op (a diagnostic entry is never replayable)", () => {
+		const entries = [
+			sessionStart("user"),
+			eventEmitted(1, "build.start"),
+			turnComplete(2, "Verify", "FLOW_COMPLETE", 0, null),
+			{ type: "session.complete", ts: TS } as SessionLogEntry,
+			stepLog(2, "Verify", "trailing diagnostic"),
+		];
+		expect(recovery.classifyTail(entries)).toEqual({ kind: "none" });
+	});
+
+	it("a step.log before a dangling turn.start is skipped — the turn governs", () => {
+		const entries = [
+			sessionStart("user"),
+			eventEmitted(1, "build.start", "the objective"),
+			stepLog(2, "Planner", "about to plan"),
+			turnStart(2, "Planner", "build.start"),
+		];
+		expect(recovery.classifyTail(entries)).toEqual({
+			kind: "re_emit_trigger",
+			topic: "build.start",
+			payload: "the objective",
+			turn: 2,
+		});
 	});
 });
 

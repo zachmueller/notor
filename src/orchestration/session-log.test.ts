@@ -132,4 +132,30 @@ describe("SessionLog", () => {
 		await log.appendSessionComplete();
 		expect(JSON.parse(writer.content.trim())).toMatchObject({ type: "session.complete" });
 	});
+
+	it("appendStepLog writes a step.log entry keyed by turn + step (INT-011)", async () => {
+		const writer = new FakeWriter();
+		const log = new SessionLog("l.jsonl", writer, fixedNow);
+		await log.appendStepLog({ turn: 4, step: "Verify", level: "info", message: "chose A", data: { n: 3 } });
+		const lines = writer.content.split("\n").filter(Boolean);
+		expect(lines).toHaveLength(1);
+		expect(writer.content.endsWith("\n")).toBe(true);
+		expect(JSON.parse(lines[0]!)).toMatchObject({
+			type: "step.log",
+			ts: fixedNow(),
+			turn: 4,
+			step: "Verify",
+			level: "info",
+			message: "chose A",
+			data: { n: 3 },
+		});
+	});
+
+	it("a failing writer never rejects the append (logging must not crash a run)", async () => {
+		const throwing: SessionLogWriter = { append: () => Promise.reject(new Error("disk full")) };
+		const log = new SessionLog("l.jsonl", throwing, fixedNow);
+		await expect(
+			log.appendStepLog({ turn: 1, step: "A", level: "error", message: "x" }),
+		).resolves.toBeUndefined();
+	});
 });

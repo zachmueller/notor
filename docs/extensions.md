@@ -398,7 +398,7 @@ All extension code executes with these variables in scope:
 | `utils.staleTracker` | Record reads and check for concurrent edits before writes. |
 | `utils.checkpointManager` | Create snapshots before destructive operations for rollback. |
 | `utils.noteOpener` | Open notes programmatically in the editor. |
-| `utils.logger(name)` | Create a scoped logger (prefixed with `ext:`). |
+| `utils.logger(name)` | Create a scoped logger (prefixed with `ext:`) — console-only. (Inside an orchestration **code step**, prefer `orchestration.log`, which also persists and surfaces in the run-tree — see [orchestration.md](orchestration.md).) |
 | `utils.resolveAndValidatePath(path, allowedPaths?)` | Validate and resolve filesystem paths against allowed paths. Returns `{ valid: true, resolvedPath }` or `{ valid: false, error }` — check `.valid` first. |
 | `utils.executeShellCommand(cmd, opts?)` | Run a shell command. |
 | `utils.isDomainBlocked(url, denylist)` | Check whether a URL's domain matches any denylist pattern. Returns `{ blocked: true, pattern }` or `{ blocked: false }`. |

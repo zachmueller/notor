@@ -84,4 +84,14 @@ describe("SessionLogReader", () => {
 		expect(reader.parse("").entries).toHaveLength(0);
 		expect(reader.parse("\n").entries).toHaveLength(0);
 	});
+
+	it("round-trips a step.log interior line (parser is type-agnostic)", () => {
+		const raw =
+			line({ type: "turn.start", turn: 2, step: "Verify", trigger_topic: "x", conversation_id: null, ts: "t" }) + "\n" +
+			line({ type: "step.log", turn: 2, step: "Verify", level: "info", message: "chose A", data: { n: 3 }, ts: "t" }) + "\n" +
+			line({ type: "turn.complete", turn: 2, step: "Verify", emitted_topic: "ok", conversation_id: null, cost_usd: 0, token_usage: { input: 0, output: 0 }, ts: "t" }) + "\n";
+		const { entries } = reader.parse(raw);
+		expect(entries).toHaveLength(3);
+		expect(entries[1]).toMatchObject({ type: "step.log", level: "info", message: "chose A", data: { n: 3 } });
+	});
 });
