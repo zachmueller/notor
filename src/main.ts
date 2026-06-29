@@ -471,7 +471,7 @@ export default class NotorPlugin extends Plugin {
 			// without this guard, every panel open fires a redundant load.
 			view._loadFallbackTimeout = setTimeout(() => {
 				if (!view.isConversationLoaded) {
-					this.loadConversation(view, orchestrator);
+					void this.loadConversation(view, orchestrator);
 				}
 			}, 0);
 
@@ -599,13 +599,13 @@ export default class NotorPlugin extends Plugin {
 				link.addEventListener("click", (e) => {
 					e.preventDefault();
 					e.stopPropagation();
-					this.openChatPanel().then(() => {
+					void this.openChatPanel().then(() => {
 						const orchestrator = this.getActiveOrchestrator();
 						if (!orchestrator) {
 							new Notice("No active chat panel");
 							return;
 						}
-						orchestrator.switchToConversationById(conversationId).then((found) => {
+						void orchestrator.switchToConversationById(conversationId).then((found) => {
 							if (!found) {
 								new Notice("Conversation not found — it may have been deleted");
 							}
@@ -2422,7 +2422,7 @@ export default class NotorPlugin extends Plugin {
 	 * Returns true if `file` is a Markdown note inside the workflows
 	 * subdirectory of the configured notor directory.
 	 */
-	private isWorkflowFile(file: TAbstractFile): boolean {
+	private isWorkflowFile(file: TAbstractFile): file is TFile {
 		return file instanceof TFile && this.isWorkflowPath(file.path);
 	}
 
@@ -2464,7 +2464,7 @@ export default class NotorPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("create", (f) => {
 				if (!this.isWorkflowFile(f)) return;
-				this.autoInjectIfNeeded(f as TFile);
+				this.autoInjectIfNeeded(f);
 			})
 		);
 		this.registerEvent(
@@ -2478,7 +2478,7 @@ export default class NotorPlugin extends Plugin {
 
 				// File renamed INTO workflows/ — may need injection
 				if (this.isWorkflowFile(f) && !this.isWorkflowPath(oldPath)) {
-					this.autoInjectIfNeeded(f as TFile);
+					this.autoInjectIfNeeded(f);
 				} else {
 					this.scheduleWorkflowRescan();
 				}
@@ -2640,7 +2640,7 @@ export default class NotorPlugin extends Plugin {
 
 		if (missing.length > 0) {
 			this.settings.memory_enabled = false;
-			this.saveSettings();
+			void this.saveSettings();
 			const lines = missing.map((m) => `• Preset "${m.preset}" (used by ${m.usedBy})`);
 			new Notice(
 				`Memory disabled — required model presets are not configured:\n${lines.join("\n")}\n\nConfigure them in Settings → Models, then re-enable memory.`,

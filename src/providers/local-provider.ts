@@ -249,9 +249,9 @@ export class LocalProvider implements LLMProvider {
 				return; // User cancellation — terminate cleanly
 			}
 			const message =
-				e instanceof TypeError && String(e).includes("fetch")
+				e instanceof TypeError && e.message.includes("fetch")
 					? `Could not connect to local LLM at ${this.endpoint}. Is the server running?`
-					: `Connection failed: ${String(e)}`;
+					: `Connection failed: ${e instanceof Error ? e.message : String(e)}`;
 			throw new ProviderError(message, "local", "CONNECTION_FAILED", e instanceof Error ? e : undefined);
 		}
 

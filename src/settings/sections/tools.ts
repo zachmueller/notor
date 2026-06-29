@@ -256,7 +256,7 @@ export function renderToolsSection(
 		persisted: ctx.settings.settings_collapsed_sections,
 		onToggle: (key, open) => {
 			ctx.settings.settings_collapsed_sections[key] = open;
-			ctx.saveSettings();
+			void ctx.saveSettings();
 		},
 		subgroupRefs: [],
 	};

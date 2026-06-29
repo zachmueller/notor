@@ -531,7 +531,7 @@ export class ChatInput {
 
 		const initialText = match[1]?.trim() || undefined;
 		this.textInputEl.textContent = "";
-		this.deps.onForkToNewPanel?.(undefined, initialText);
+		void this.deps.onForkToNewPanel?.(undefined, initialText);
 		return true;
 	}
 

@@ -354,7 +354,7 @@ export class ConversationLifecycleManager {
 					if (resolution.source === "default") {
 						conversation.preset_name = resolution.presetName;
 					}
-					this.historyManager.updateConversationHeader(conversation);
+					await this.historyManager.updateConversationHeader(conversation);
 				}
 
 				if (resolution.source === "default") {
@@ -425,7 +425,7 @@ export class ConversationLifecycleManager {
 			for (const [msgId, promise] of approvalResults) {
 				const pending = activeSession.pendingApprovals.get(msgId);
 				if (pending) {
-					promise.then((decision) => pending.resolve(decision));
+					void promise.then((decision) => pending.resolve(decision));
 				}
 			}
 		}

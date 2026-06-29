@@ -220,7 +220,7 @@ export function registerCommands(plugin: NotorPlugin): void {
 					}
 				};
 				reader.onerror = () => {
-					log.error("Failed to read imported file", { error: String(reader.error) });
+					log.error("Failed to read imported file", { error: reader.error?.message ?? "unknown error" });
 					new Notice("Failed to read selected file");
 					input.remove();
 				};

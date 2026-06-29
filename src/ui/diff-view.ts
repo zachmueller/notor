@@ -510,7 +510,7 @@ function renderViewModeToggle(
  */
 function renderViewModeToggleRaw(
 	headerEl: HTMLElement,
-	onModeChange: (mode: "source" | "rendered") => void
+	onModeChange: (mode: "source" | "rendered") => void | Promise<void>
 ): void {
 	const toggleEl = headerEl.createDiv({ cls: "notor-diff-mode-toggle" });
 
@@ -534,12 +534,12 @@ function renderViewModeToggleRaw(
 
 	sourceBtn.addEventListener("click", () => {
 		setActive(sourceBtn);
-		onModeChange("source");
+		void onModeChange("source");
 	});
 
 	renderedBtn.addEventListener("click", () => {
 		setActive(renderedBtn);
-		onModeChange("rendered");
+		void onModeChange("rendered");
 	});
 }
 

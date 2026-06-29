@@ -94,17 +94,6 @@ const SCHEMA_MAP_KEYS = new Set<string>([
 	"dependentSchemas",
 ]);
 
-/** Valid JSON Schema `type` values. */
-const VALID_TYPES = new Set<string>([
-	"null",
-	"boolean",
-	"object",
-	"array",
-	"number",
-	"string",
-	"integer",
-]);
-
 /** Common non-standard `type` spellings mapped to valid ones. */
 const TYPE_ALIASES: Record<string, string> = {
 	int: "integer",

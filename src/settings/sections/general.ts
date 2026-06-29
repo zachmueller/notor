@@ -131,7 +131,7 @@ export function renderGeneralSection(
 
 	if (ctx.settings.new_chat_persona_mode === "default") {
 		const personaContainer = containerEl.createDiv();
-		discoverPersonas(
+		void discoverPersonas(
 			ctx.app.vault,
 			ctx.app.metadataCache,
 			ctx.settings.notor_dir,

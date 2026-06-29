@@ -131,7 +131,7 @@ export class UserToolAdapter implements Tool {
 					? returnValue
 					: typeof returnValue === "object" && returnValue !== null
 						? returnValue as Record<string, unknown>
-						: String(returnValue ?? ""),
+						: String((returnValue ?? "") as string | number | boolean | bigint | symbol),
 				duration_ms,
 			};
 
@@ -150,7 +150,7 @@ export class UserToolAdapter implements Tool {
 						? innerResult
 						: typeof innerResult === "object" && innerResult !== null
 							? innerResult as Record<string, unknown>
-							: String(innerResult ?? "");
+							: String((innerResult ?? "") as string | number | boolean | bigint | symbol);
 				}
 			}
 
@@ -964,7 +964,7 @@ export class ExtensionManager {
 
 		const existing = this.plugin.app.vault.getAbstractFileByPath(filePath);
 		if (existing) {
-			await this.plugin.app.vault.delete(existing);
+			await this.plugin.app.fileManager.trashFile(existing);
 		}
 		log.info("Reset built-in tool to default scaffold", { tool: toolName, path: filePath });
 	}
@@ -1025,7 +1025,7 @@ export class ExtensionManager {
 
 		const existing = this.plugin.app.vault.getAbstractFileByPath(filePath);
 		if (existing) {
-			await this.plugin.app.vault.delete(existing);
+			await this.plugin.app.fileManager.trashFile(existing);
 		}
 		log.info("Reset built-in automation to default scaffold", { automation: automationName, path: filePath });
 	}

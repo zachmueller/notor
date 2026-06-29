@@ -181,7 +181,7 @@ export function buildSubAgentUtils(ctx: BuilderContext): Pick<ExtensionUtils, "r
 			if (opts.detached) {
 				plugin.registerDetachedSubAgent(controller);
 
-				(async () => {
+				void (async () => {
 					try {
 						const result = await runAndCleanup();
 						rsaLog.debug("runSubAgent detached: complete", { profile: opts.profileName });

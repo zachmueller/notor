@@ -103,7 +103,7 @@ export class ConversationList {
 			const fetcher = query
 				? this.deps.onSearchConversations?.(query)
 				: this.deps.onOpenConversationList?.();
-			fetcher?.then((entries) => {
+			void fetcher?.then((entries) => {
 				if (this.favFilterActive) {
 					entries = entries.filter((e) => e.is_favorite);
 				}
@@ -377,7 +377,7 @@ export class ConversationList {
 			item.setTitle(entry.is_favorite ? "Remove from favorites" : "Add to favorites")
 				.setIcon(entry.is_favorite ? "star-off" : "star")
 				.onClick(() => {
-					this.deps.onToggleFavorite?.(entry.filename);
+					void this.deps.onToggleFavorite?.(entry.filename);
 				});
 		});
 
@@ -460,7 +460,7 @@ export class ConversationList {
 				input.remove();
 			};
 			reader.onerror = () => {
-				log.error("Failed to read imported file", { error: String(reader.error) });
+				log.error("Failed to read imported file", { error: reader.error?.message ?? "unknown error" });
 				input.remove();
 			};
 			reader.readAsText(file);

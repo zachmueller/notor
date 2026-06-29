@@ -145,12 +145,12 @@ export class NotorSettingTab extends PluginSettingTab {
 		if ("Built-in tools" in persisted && !("Tools" in persisted)) {
 			persisted["Tools"] = persisted["Built-in tools"];
 			delete persisted["Built-in tools"];
-			ctx.saveSettings();
+			void ctx.saveSettings();
 		}
 		if ("Provider setup" in persisted && !("Providers" in persisted)) {
 			persisted["Providers"] = persisted["Provider setup"];
 			delete persisted["Provider setup"];
-			ctx.saveSettings();
+			void ctx.saveSettings();
 		}
 		delete persisted["Tool configuration"];
 		delete persisted["Extensions"];
@@ -158,7 +158,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		const onToggle = (title: string, open: boolean) => {
 			if (this.isRestoring) return;
 			ctx.settings.settings_collapsed_sections[title] = open;
-			ctx.saveSettings();
+			void ctx.saveSettings();
 		};
 
 		// --- General (expanded by default) ---

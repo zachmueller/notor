@@ -256,7 +256,7 @@ export interface RunResult {
 	/** Always present (final / wind-down output). */
 	text: string;
 	/** Populated only by a terminal code step's `emit(...)` third arg; otherwise `null`. */
-	structured: unknown | null;
+	structured: unknown;
 	/** Full conversation messages. */
 	messages: ChatMessage[];
 	/** Cumulative token usage across all turns. */

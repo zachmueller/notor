@@ -123,7 +123,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 
 			waitForReady: async (webviewEl: any, revealLeaf = false, leaf?: any) => {
 				if (revealLeaf && leaf) {
-					plugin.app.workspace.revealLeaf(leaf);
+					void plugin.app.workspace.revealLeaf(leaf);
 				}
 
 				if (typeof webviewEl.isLoading === "function" && webviewEl.isLoading()) {

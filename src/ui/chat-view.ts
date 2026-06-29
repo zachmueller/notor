@@ -1185,7 +1185,7 @@ export class NotorChatView extends ItemView {
 			this.isConversationLoaded = true;
 			const orchestrator = this.plugin.getOrchestratorForView(this);
 			if (orchestrator) {
-				this.plugin.loadConversation(this, orchestrator, s);
+				void this.plugin.loadConversation(this, orchestrator, s);
 			} else {
 				log.warn("setState: no orchestrator found for view — setTimeout fallback will retry");
 			}
@@ -1232,9 +1232,9 @@ export class NotorChatView extends ItemView {
 	}
 
 	private initConversationList(container: HTMLElement): void {
-		const self = this;
+		const getMessageListEl = () => this.messageListEl;
 		this.conversationList = new ConversationList(container, {
-			get messageListEl() { return self.messageListEl; },
+			get messageListEl() { return getMessageListEl(); },
 			headerTitleEl: this.headerTitleEl,
 			headerFavoriteEl: this.headerFavoriteEl,
 			getActiveConversationId: () => this.activeConversationId,
@@ -1285,7 +1285,7 @@ export class NotorChatView extends ItemView {
 		this.headerFavoriteEl.addEventListener("click", (e) => {
 			e.stopPropagation();
 			const meta = this.getActiveConversationMeta?.();
-			if (meta) this.onToggleFavorite?.(meta.filename);
+			if (meta) void this.onToggleFavorite?.(meta.filename);
 		});
 
 		const actions = this.headerEl.createDiv({ cls: "notor-chat-header-actions" });
@@ -1457,7 +1457,7 @@ export class NotorChatView extends ItemView {
 					item.setTitle("Fork here")
 						.setIcon("git-branch-plus")
 						.onClick(() => {
-							this.onForkConversation?.(messageId);
+							void this.onForkConversation?.(messageId);
 						});
 				});
 				// "Fork & re-run this tool" — only on a finished tool call/result.
@@ -1469,7 +1469,7 @@ export class NotorChatView extends ItemView {
 						item.setTitle("Fork & re-run this tool")
 							.setIcon("refresh-cw")
 							.onClick(() => {
-								this.onForkConversationRerun?.(messageId);
+								void this.onForkConversationRerun?.(messageId);
 							});
 					});
 				}
@@ -1477,7 +1477,7 @@ export class NotorChatView extends ItemView {
 					item.setTitle("/btw")
 						.setIcon("message-square-plus")
 						.onClick(() => {
-							this.onForkToNewPanel?.(messageId);
+							void this.onForkToNewPanel?.(messageId);
 						});
 				});
 				hasItems = true;

@@ -101,7 +101,7 @@ export function parseExtensionFile(
 		return { filePath, message: "Missing required frontmatter field 'notor-type'" };
 	}
 	if (notorType !== "tool" && notorType !== "automation" && notorType !== "settings" && notorType !== "block") {
-		return { filePath, message: `Invalid 'notor-type': '${String(notorType)}'. Must be 'tool', 'automation', 'settings', or 'block'` };
+		return { filePath, message: `Invalid 'notor-type': '${typeof notorType === "string" ? notorType : JSON.stringify(notorType)}'. Must be 'tool', 'automation', 'settings', or 'block'` };
 	}
 
 	// -- Extract YAML fence --

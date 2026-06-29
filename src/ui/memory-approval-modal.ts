@@ -68,14 +68,18 @@ export class MemoryApprovalModal extends Modal {
 
 		renderCards(entries);
 
-		approveAllBtn.addEventListener("click", async () => {
-			await this.manager.approveAll(entries.map((e) => e.filePath));
-			await this.render();
+		approveAllBtn.addEventListener("click", () => {
+			void (async () => {
+				await this.manager.approveAll(entries.map((e) => e.filePath));
+				await this.render();
+			})();
 		});
 
-		rejectAllBtn.addEventListener("click", async () => {
-			await this.manager.rejectAll(entries.map((e) => e.filePath));
-			await this.render();
+		rejectAllBtn.addEventListener("click", () => {
+			void (async () => {
+				await this.manager.rejectAll(entries.map((e) => e.filePath));
+				await this.render();
+			})();
 		});
 	}
 
@@ -101,7 +105,7 @@ export class MemoryApprovalModal extends Modal {
 			text: "Open note",
 		});
 		openBtn.addEventListener("click", () => {
-			this.app.workspace.openLinkText(openPath, "", false);
+			void this.app.workspace.openLinkText(openPath, "", false);
 		});
 
 		// Body: diff for updates, preview for creates
@@ -131,22 +135,26 @@ export class MemoryApprovalModal extends Modal {
 			rejectBtn.disabled = true;
 		};
 
-		approveBtn.addEventListener("click", async () => {
-			disable();
-			await this.manager.approveSingle(entry.filePath).catch(() => {});
-			card.addClass("notor-memory-approval-card--done");
-			actions.empty();
-			actions.createSpan({ cls: "notor-memory-approval-accepted", text: "✓ Approved" });
-			onActioned();
+		approveBtn.addEventListener("click", () => {
+			void (async () => {
+				disable();
+				await this.manager.approveSingle(entry.filePath).catch(() => {});
+				card.addClass("notor-memory-approval-card--done");
+				actions.empty();
+				actions.createSpan({ cls: "notor-memory-approval-accepted", text: "✓ Approved" });
+				onActioned();
+			})();
 		});
 
-		rejectBtn.addEventListener("click", async () => {
-			disable();
-			await this.manager.rejectSingle(entry.filePath).catch(() => {});
-			card.addClass("notor-memory-approval-card--done");
-			actions.empty();
-			actions.createSpan({ cls: "notor-memory-approval-rejected", text: "✗ Rejected" });
-			onActioned();
+		rejectBtn.addEventListener("click", () => {
+			void (async () => {
+				disable();
+				await this.manager.rejectSingle(entry.filePath).catch(() => {});
+				card.addClass("notor-memory-approval-card--done");
+				actions.empty();
+				actions.createSpan({ cls: "notor-memory-approval-rejected", text: "✗ Rejected" });
+				onActioned();
+			})();
 		});
 	}
 
