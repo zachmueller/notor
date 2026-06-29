@@ -23,7 +23,7 @@ export class ExportModal extends Modal {
 		contentEl.addClass("notor-export-modal");
 
 		// Title
-		contentEl.createEl("h2", { text: "Export Conversation" });
+		contentEl.createEl("h2", { text: "Export conversation" });
 
 		// Conversation info
 		const title = this.conversation.title ?? "Untitled conversation";

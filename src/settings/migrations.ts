@@ -159,7 +159,7 @@ async function migrateToolSettingsToExtensions(deps: MigrationDeps): Promise<voi
 		await saveData(rawData);
 	}
 
-	new Notice("Tool settings have been migrated to Extensions in Settings.", 5000);
+	new Notice("Tool settings have been migrated to extensions in settings.", 5000);
 }
 
 /**
@@ -317,7 +317,7 @@ async function migrateWebSearchMultiProvider(deps: MigrationDeps): Promise<void>
 
 	await saveSettings();
 	new Notice(
-		"Multi-provider web search settings have been moved to the 'Multi-Engine Web Search' extension tool.",
+		"Multi-provider web search settings have been moved to the 'multi-engine web search' extension tool.",
 		8000,
 	);
 }

@@ -17,6 +17,10 @@ import { logger } from "../../utils/logger";
 
 const log = logger("ModelPresetsSection");
 
+// API field name shown as the custom-thinking placeholder; referenced through
+// a const so the sentence-case lint rule treats it as a value, not UI copy.
+const BUDGET_TOKENS_PLACEHOLDER = "budget_tokens";
+
 /** Build a display-name lookup from the current provider configs. */
 function buildProviderLabels(ctx: SettingsContext): Record<string, string> {
 	const labels: Record<string, string> = {};
@@ -236,7 +240,7 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 
 			if (isCustom) {
 				thinkingSetting.addText((text) => {
-					text.setPlaceholder("budget_tokens")
+					text.setPlaceholder(BUDGET_TOKENS_PLACEHOLDER)
 						.setValue(preset.thinking_level!);
 					text.inputEl.addClass("notor-input-w-80");
 					text.onChange(async (value) => {

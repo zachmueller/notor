@@ -194,7 +194,7 @@ export class SettingsPopover {
 		separatorOpt.disabled = true;
 
 		const customOpt = presetSelect.createEl("option", {
-			text: "Custom…  —  Select specific provider & model",
+			text: "Custom…  —  select specific provider & model",
 			attr: { value: "__custom" },
 		});
 		if (currentPreset === null) {

@@ -28,7 +28,7 @@ export class MemoryApprovalModal extends Modal {
 
 		const entries = await this.manager.listPending(50);
 
-		contentEl.createEl("h2", { text: "Pending Memory Approvals" });
+		contentEl.createEl("h2", { text: "Pending memory approvals" });
 
 		if (entries.length === 0) {
 			contentEl.createEl("p", {
@@ -46,11 +46,11 @@ export class MemoryApprovalModal extends Modal {
 		});
 		const approveAllBtn = globalBar.createEl("button", {
 			cls: "notor-approve-btn",
-			text: "Approve All",
+			text: "Approve all",
 		});
 		const rejectAllBtn = globalBar.createEl("button", {
 			cls: "notor-reject-btn mod-warning",
-			text: "Reject All",
+			text: "Reject all",
 		});
 
 		const listEl = contentEl.createDiv({ cls: "notor-memory-approval-list" });

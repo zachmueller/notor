@@ -241,7 +241,7 @@ export function registerCommands(plugin: NotorPlugin): void {
 
 	plugin.addCommand({
 		id: "btw-side-conversation",
-		name: "/btw — Open side conversation in new panel",
+		name: "/btw — open side conversation in new panel",
 		callback: () => {
 			const orch = plugin.getLastFocusedOrchestrator();
 			if (!orch) return;

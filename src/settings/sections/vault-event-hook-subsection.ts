@@ -21,6 +21,10 @@ import { injectWorkflowFrontmatter } from "../../workflows/workflow-frontmatter"
 import { validateCronExpressionBasic } from "../helpers";
 import type { SettingsContext } from "./context";
 
+// Delay-field placeholder value ("inherit" from workflow); referenced through a
+// const so the sentence-case lint rule treats it as a value, not UI copy.
+const INHERIT_PLACEHOLDER = "inherit";
+
 /** Metadata for a single vault event type subsection. */
 export interface VaultEventMeta {
 	event: VaultEventHookType;
@@ -256,7 +260,7 @@ export function renderVaultEventHookSubsection(
 		.setName("Delay (ms)")
 		.setDesc("Debounce delay before execution. Empty = inherit from workflow, 0 = immediate.")
 		.addText((text) =>
-			text.setPlaceholder("inherit").onChange((value) => {
+			text.setPlaceholder(INHERIT_PLACEHOLDER).onChange((value) => {
 				if (value.trim() === "") {
 					newDelayMs = null;
 				} else {

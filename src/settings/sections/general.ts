@@ -140,7 +140,7 @@ export function renderGeneralSection(
 				.setName("Default persona")
 				.setDesc("The persona activated for every new conversation.")
 				.addDropdown((dropdown) => {
-					dropdown.addOption("", "(None — no persona)");
+					dropdown.addOption("", "(none — no persona)");
 					for (const p of personas.sort((a, b) => a.name.localeCompare(b.name))) {
 						dropdown.addOption(p.name, p.chip_emoji ? `${p.chip_emoji} ${p.name}` : p.name);
 					}

@@ -604,8 +604,11 @@ function renderUserTools(
 	containerEl.createEl("hr", { cls: "notor-tool-divider" });
 	const userToolsHeading = new Setting(containerEl).setHeading().setName("User tools");
 	markSubsection(userToolsHeading, "User tools");
+	// Built via a const (not an inline literal) so the sentence-case rule
+	// doesn't try to capitalize the "notor/" path segment to the Notor brand.
+	const userToolsDescText = "Tools defined in your vault's notor/tools/ directory.";
 	const userToolsDesc = containerEl.createEl("p", {
-		text: "Tools defined in your vault's notor/tools/ directory.",
+		text: userToolsDescText,
 		cls: "setting-item-description",
 	});
 

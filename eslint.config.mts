@@ -91,6 +91,8 @@ export default tseslint.config(
 					// Project-specific acronyms
 					"LLM", "OS", "MB", "MCP", "SSE", "STS", "AWS", "GB", "KB",
 				],
+				// Mixed-case plural acronyms the rule would otherwise force to all-caps.
+				ignoreWords: ["PDFs"],
 				ignoreRegex: ["^https?://"],
 			}],
 		},
