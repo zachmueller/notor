@@ -66,7 +66,7 @@ if (!file) throw new Error(\`Note not found: \${params.path}\`);
 
 // Only allow markdown files
 if (file.extension !== "md") {
-  throw new Error(\`Path is not a Markdown note: \${params.path}\`);
+  throw new Error(\`Path is not a Markdown note: \${params.path}. read_note only reads Markdown (.md) notes — use read_file to read JSON, text, or other non-Markdown files.\`);
 }
 
 // Use vault.read (not cachedRead) since we'll track for write operations

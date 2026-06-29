@@ -47,6 +47,7 @@ import { SessionLog, type SessionLogWriter } from "./session-log";
 import { OrchestrationSessionManager, type SessionFs } from "./session-manager";
 import { TaskRegistry, type TaskFs } from "./task-registry";
 import { seedMemoriesNote, memoriesPath } from "./memories";
+import { writeFailureReport, shouldWriteFailureReport } from "./failure-report";
 import { SessionRecovery, type RecoveryFs, type RecoverableSession } from "./session-recovery";
 import { VaultStepConversationStore } from "./step-conversation-store";
 import { showOrchestrationProgressNotice } from "./notices";
@@ -226,6 +227,46 @@ export class VaultSessionFs implements SessionFs {
 
 	read(path: string): Promise<string> {
 		return this.app.vault.adapter.read(normalizePath(path));
+	}
+}
+
+/**
+ * Opt-in failed-run debug note (Part B). When a run terminates with
+ * `status: "error"` and `orchestration_write_failure_notes` is on, compose a
+ * human-readable Markdown report from data already captured (session.json meta +
+ * the run result + session-log.jsonl) and write it under
+ * `{notor_dir}/orchestrations/failures/`. Called from both finalize sites (a
+ * fresh run and a crash-recovery resume).
+ *
+ * Fully best-effort: a missing log, an absent meta, or a write failure is logged
+ * and swallowed so the report never masks the original run error.
+ */
+async function maybeWriteFailureReport(
+	plugin: NotorPlugin,
+	sessionManager: OrchestrationSessionManager,
+	sessionId: string,
+	flow: OrchestrationFlow,
+	result: OrchestrationRunResult,
+): Promise<void> {
+	if (!shouldWriteFailureReport(result.status, plugin.settings.orchestration_write_failure_notes)) {
+		return;
+	}
+	try {
+		const ws = sessionManager.resolveWorkspace(sessionId);
+		const meta = await sessionManager.readMeta(sessionId);
+		const fsVault = new VaultSessionFs(plugin.app);
+		const logJsonl = await fsVault.read(ws.logPath).catch(() => null);
+		const path = await writeFailureReport({
+			notorDir: plugin.settings.notor_dir,
+			fs: fsVault,
+			meta,
+			result,
+			logJsonl,
+			sessionDir: ws.sessionDir,
+		});
+		new Notice(`Orchestration '${flow.name}' failed — debug report: ${path}`);
+	} catch (e) {
+		log.warn("Failed to write orchestration failure report", { sessionId, error: String(e) });
 	}
 }
 
@@ -589,6 +630,9 @@ export async function launchOrchestration(
 		status: finalStatus,
 		startedAt: new Date().toISOString(),
 	});
+
+	// Part B: opt-in failed-run debug note (no-op unless status is error + setting on).
+	await maybeWriteFailureReport(plugin, sessionManager, sessionId, flow, result);
 
 	// INT-045: chaining / one-way handoff. On successful completion, if the flow
 	// declares `notor-on-complete-flow`, launch the successor INSTEAD of returning
@@ -1193,6 +1237,10 @@ async function resumeRecoveredSession(
 	await sessionManager
 		.updateStatus(recovered.sessionId, finalStatus, { iteration: result.iterations })
 		.catch((e) => log.warn("Failed to finalize resumed session.json status", { error: String(e) }));
+
+	// Part B: opt-in failed-run debug note for a recovered run that ends in error.
+	await maybeWriteFailureReport(plugin, sessionManager, recovered.sessionId, flow, result);
+
 	return result;
 }
 

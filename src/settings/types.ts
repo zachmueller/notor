@@ -486,6 +486,16 @@ export interface NotorSettings {
 	 */
 	orchestration_enabled: boolean;
 
+	/**
+	 * When true, a run that terminates with `status: "error"` writes a
+	 * human-readable Markdown debug report to
+	 * `{notor_dir}/orchestrations/failures/{flow-slug}-{session_id}.md` — composed
+	 * from the session metadata, run result, and event log already captured — so
+	 * the user (or Notor) can open or `@`-reference it to debug the failure.
+	 * Opt-in (default false); read at finalize time, so no extension reload needed.
+	 */
+	orchestration_write_failure_notes: boolean;
+
 	// -------------------------------------------------------------------
 	// Phase 12: Extension block rate limiting
 	// -------------------------------------------------------------------

@@ -108,6 +108,16 @@ describe("StepPromptBuilder — always-injected sections", () => {
 		expect(out).toMatch(/OVERWRITE-ONLY|never incrementally append/i);
 	});
 
+	it("warns that note tools are Markdown-only and non-Markdown state arrives via the payload", () => {
+		const out = build("body");
+		// read_note/write_note are Markdown-only …
+		expect(out).toMatch(/MARKDOWN ONLY/i);
+		// … and JSON/non-.md coordination files come through the incoming event payload,
+		// not via read_note (the Part-A guidance that prevents the read_note-on-JSON error).
+		expect(out).toMatch(/INCOMING EVENT payload/i);
+		expect(out).toMatch(/do NOT read_note/i);
+	});
+
 	it("injects flow guardrails into the GUARDRAILS section on every turn", () => {
 		const out = build("body", { guardrails: ["Verification is mandatory.", "YAGNI ruthlessly."] });
 		expect(out).toContain("### GUARDRAILS");

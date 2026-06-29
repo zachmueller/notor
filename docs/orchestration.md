@@ -76,6 +76,8 @@ The body of a **conversation step** is its instructions (injected into the promp
 
 A conversation step runs one LLM turn driven by its persona. The engine **always** injects a must-publish rule: the step MUST call `emit_event` with exactly one of its `notor-step-publishes` topics — narrative text alone never counts. If the step ends its turn without emitting, the engine synthesizes its `notor-step-default-publishes` topic so the loop never stalls.
 
+> **Conversation steps read/write Markdown only.** A conversation step has no `orchestration.scratchpad` helper — it touches the scratchpad through its normal note tools (`read_note` / `write_note`), which handle **Markdown (`.md`) only**. Non-Markdown coordination files (e.g. a `.json` manifest) are written and read by **code steps**; a conversation step receives whatever it needs from such a file via the **incoming event payload** — it must not `read_note` a `.json` (that errors). When a downstream conversation step needs structured state a code step produced, have the code step assemble it into the event payload (the reference flows and the `notor-usage-miner` example follow this pattern).
+
 ## Code steps
 
 A code step (`notor-step-mode: code`) runs deterministic TypeScript with **no LLM call, no conversation, and zero tokens**. Use one for verification, conditional/multi-way routing, pre-flight checks, data-fetch, notifications, aggregation, and the reliable **structured return** of an invocable flow. The step routes by its **return value**.
@@ -99,6 +101,8 @@ The code receives the same arg signature as a snippet of a user-defined tool, pl
 | `tasks.{list,ensure,start,close}` | The runtime task registry (same backing as the task tools). |
 | `flow` | `{ name, iteration, sessionId }` — read-only flow/session metadata. |
 | `eventHistory(limit?)` | Recent event history for the session. |
+
+> **`callTool` returns a string — JSON for structured tools.** `callTool` / `callMcpTool` always resolve to a **`string`** (and **throw** on dispatch failure — an uncaught throw becomes `{step}.code_error`). For tools that return structured data the string is `JSON.stringify`'d, so you must **`JSON.parse`** it (`search_chat_history`, `read_chat_history`, `search_vault`, `list_vault`, `read_frontmatter`, `orchestration_task_list`); tools that return prose (`read_note`, `get_backlinks`, …) are used directly. Confirm a tool's exact output shape before consuming it — read its definition (user tools live at `{notor_dir}/tools/{name}.md`; for a built-in, open it from Settings → Tools to materialize the same file) or ask the `notor-help` sub-agent. The `orchestration-creator` persona walks you through this.
 
 A worked verify step:
 
@@ -143,6 +147,10 @@ Each run gets a session directory under `{notor_dir}/orchestrations/sessions/{se
 - `tasks/` — the runtime task registry (`orchestration_task_ensure` / `_start` / `_close` / `_list`). `FLOW_COMPLETE` is rejected and re-triggered while any task is `open`/`running`; `FLOW_CANCELLED` bypasses this.
 
 A persistent cross-session note, `{notor_dir}/orchestrations/memories.md`, is seeded on first use; the prompt scaffold instructs every step to consult it before acting in unfamiliar territory and append fix-memories when blocked.
+
+### Debugging failed runs
+
+The per-session `session.json` / `session-log.jsonl` are raw machine state — useful but not browsable. Enable **Write failed-run debug notes** ([Settings → Notor → Orchestration](notor-settings://Orchestration)) and any run that ends in `error` also writes a human-readable Markdown report to `{notor_dir}/orchestrations/failures/{flow-slug}-{session-id}.md`. The note distils data already captured — the objective, the failure reason (the terminal `FLOW_ERROR` payload), the failing step + stack (from the `{step}.code_error` event), and a compact turn-by-turn timeline — plus pointers to the raw session files. Open it, or `@`-reference it in a Notor chat, to debug the run. The setting is **off by default** and read at finalize time (no extension reload needed); the note carries `notor-type: orchestration-failure-report` so flow discovery ignores it.
 
 ## Running a flow
 

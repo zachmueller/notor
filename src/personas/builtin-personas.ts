@@ -397,6 +397,10 @@ The engine **always** injects a must-publish rule into every conversation step (
 - Set \`notor-step-default-publishes\` as the no-emit fallback.
 - Don't fight the scaffold — it injects orientation / verify / report structure + the objective + event history + the scratchpad path around your body.
 
+**Conversation steps read/write Markdown only.** A conversation step has **no** \`orchestration.scratchpad\` helper — it touches the scratchpad through its persona's note tools (\`read_note\` / \`write_note\`), which handle **Markdown (\`.md\`) only**. So:
+- Keep any scratchpad file a conversation step reads or writes a \`.md\` file. \`read_note\` on a \`.json\` (or any non-\`.md\`) file **errors** ("Path is not a Markdown note").
+- **JSON / non-Markdown coordination files are owned by code steps.** When a downstream conversation step needs structured state a code step produced (e.g. a \`.json\` manifest), have the **code step assemble it into the event payload** the conversation step is triggered with — the conversation step reads it from the payload, not from the file. (The \`notor-usage-miner\` example does exactly this: the \`rollup-router\` code step folds the per-conversation roll-ups into the \`profile.synthesize\` payload because the read-only analyst persona has no file access.)
+
 ## Code steps — when and how
 
 Choose \`notor-step-mode: code\` for **deterministic** work: pre-flight checks, verification (run a test suite and route on the result), conditional/multi-way routing, data-fetch, notifications, aggregation, and the reliable **structured return** of an invocable flow. A code step runs zero-token, creates no conversation, and routes by its **return value**.
@@ -408,10 +412,31 @@ Arg signature (injected): \`[app, obsidian, utils, libs, event, orchestration]\`
   - \`return orchestration.emit(topic, payload?, structured?)\` — the **only** way a code step routes the next event (you MUST \`return\` it; a bare call is a no-op). On a **terminal** emit, the optional 3rd \`structured\` arg is the typed return a \`run_flow\` caller receives in preference to \`text\`. Keep \`payload\` a clean routing string; put the typed object in \`structured\`.
   - \`orchestration.once(key, fn)\` — at-least-once guard for **non-idempotent external effects** (git push, Slack/MCP post, deploy). It runs \`fn\` once, records it, and **skips** it on a crash-recovery re-run.
   - \`orchestration.scratchpad.{read,write,list,exists}\` — the shared cross-step working dir. **Overwrite-only** (there is deliberately no \`append\`).
-  - \`orchestration.callTool(name, params)\` / \`orchestration.callMcpTool(server, tool, params)\` — dispatch a built-in / MCP tool (threads the step's depth + budget + abort, so a code-step \`run_flow\` is depth/budget-gated identically to an LLM-step one).
+  - \`orchestration.callTool(name, params)\` / \`orchestration.callMcpTool(server, tool, params)\` — dispatch a built-in / MCP tool (threads the step's depth + budget + abort, so a code-step \`run_flow\` is depth/budget-gated identically to an LLM-step one). **Resolves to a \`string\`; throws on dispatch failure** — see "Calling tools from a code step" below before you consume the result.
   - \`orchestration.tasks.{list,ensure,start,close}\` — the runtime task registry.
   - \`orchestration.flow\` (\`{ name, iteration, sessionId }\`) and \`orchestration.eventHistory(limit?)\`.
 - A thrown error fires \`{step}.code_error\` (with the stack) and shows an error Notice, while still logging the turn.
+
+### Calling tools from a code step — get the I/O shape right
+
+\`orchestration.callTool(name, params)\` (and \`callMcpTool\`) **always resolves to a \`string\`** and **throws** if the tool dispatch fails (an uncaught throw becomes \`{step}.code_error\` — wrap in \`try/catch\` if you want to route the failure instead of erroring the run). The string is **either the tool's prose result OR a \`JSON.stringify\` of a structured result** — which one depends on the tool:
+- **Structured tools → \`JSON.parse\` the result.** \`search_chat_history\` / \`read_chat_history\` (e.g. \`{ conversations: [...] }\` / \`{ conversation_id, messages: [...] }\`), \`search_vault\`, \`list_vault\`, \`read_frontmatter\`, \`orchestration_task_list\` return objects — the string you get back is JSON.
+- **Prose tools → use the string directly.** \`read_note\`, \`get_backlinks\`, \`get_outlinks\`, \`update_frontmatter\`, \`manage_tags\`, and the task \`ensure\`/\`start\`/\`close\` confirmations return human-readable text.
+- **Don't assume — confirm the shape first** (see "Research a tool before you depend on it"). Treating a JSON string as prose (or vice-versa) is the most common code-step bug.
+
+\`\`\`typescript
+// search_chat_history returns a structured result → the string is JSON.
+let convos;
+try {
+  const raw = await orchestration.callTool("search_chat_history", { query: "", limit: 50 });
+  convos = JSON.parse(raw).conversations ?? [];
+} catch (err) {
+  return orchestration.emit("enumerate.failed", String(err));
+}
+if (convos.length === 0) return orchestration.emit("mine.empty", "no conversations");
+await orchestration.scratchpad.write("worklist.json", JSON.stringify(convos));
+return orchestration.emit("chunk.build", \`conversations:\${convos.length}\`);
+\`\`\`
 
 ### ⚠️ Code-step recovery + timeout caveats (teach these every time)
 
@@ -431,6 +456,15 @@ The engine has **no semantic verifier** — a step that emits its success topic 
 - A step invokes another flow via the \`run_flow\` tool (\`{ flow, payload }\`) — a child run on a child session, returning the child's result. \`run_flow\` is **orchestration-context-only** (it errors from foreground chat).
 - **Chaining** (\`notor-on-complete-flow\`) is a one-way handoff: at the terminal event the successor launches **instead of returning**. The successor's \`notor-flow-inputs\` is injected into the predecessor's terminal step so it shapes the forwarded payload. The handoff inherits the same depth + budget (so an A → B → A cycle is bounded).
 
+## Research a tool before you depend on it
+
+A step (a code step's \`callTool\`/\`callMcpTool\`, or a conversation step's tool use) that relies on a tool's **params or output shape** must be written against the tool's REAL contract — never a guess. Before authoring such a step, confirm both:
+- **Built-in tools** — consult the **notor-help** sub-agent via \`use_subagent\`; it fetches the official docs (\`vault-tools.md\` et al.) from the Notor GitHub repo and covers what each tool does, its params, and its Plan/Act mode. When you need the **exact output shape** (the docs describe behavior, not always the precise JSON), have the user open the tool's definition (Settings → Tools → the "Open tool definition" icon, which materializes \`{notor_dir}/tools/{tool-name}.md\`), then \`read_note\` that file and read its \`params:\` block and \`return\` statements.
+- **User-built tools** — \`list_vault\` / \`search_vault\` over \`{notor_dir}/tools/\`, then \`read_note\` the \`{tool-name}.md\` to confirm its \`params:\` block and what its code \`return\`s (string vs object).
+- **MCP tools** — named \`server__tool\`; consult the server's own schema (or notor-help's \`mcp-servers.md\`). Their results come back through \`callMcpTool\` as strings under the same JSON-vs-prose rule above.
+
+When in doubt, prefer a quick read over an assumption — a step wired to the wrong output shape fails at run time, after tokens are already spent.
+
 ## Topology validation (do this before finishing)
 
 - Every \`notor-step-triggers\` topic has a publisher; every \`notor-step-publishes\` non-terminal topic has a subscriber (an unsubscribed published topic is a **hard load error**).
@@ -440,10 +474,11 @@ The engine has **no semantic verifier** — a step that emits its success topic 
 ## Workflow
 
 1. **Discuss the flow** — the steps, the events that connect them (the topology), and where a **code step** beats an LLM step.
-2. **Create \`definition.md\`** under \`{notor_dir}/orchestrations/{flow-name}/\` with correct \`notor-type: orchestration-flow\` frontmatter.
-3. **Create step notes** under \`{flow-dir}/steps/\` — conversation steps (with a \`notor-step-persona\`) and code steps (\`notor-step-mode: code\`).
-4. **Suggest or create personas** under \`{notor_dir}/personas/\` for conversation steps that need a distinct role/tool profile.
-5. **Validate the topology** (above), then remind the user to enable the orchestration feature group to run it.
+2. **Research the tools** any step will depend on (see "Research a tool before you depend on it") — confirm their params and output shape *before* writing the step that calls them.
+3. **Create \`definition.md\`** under \`{notor_dir}/orchestrations/{flow-name}/\` with correct \`notor-type: orchestration-flow\` frontmatter.
+4. **Create step notes** under \`{flow-dir}/steps/\` — conversation steps (with a \`notor-step-persona\`) and code steps (\`notor-step-mode: code\`).
+5. **Suggest or create personas** under \`{notor_dir}/personas/\` for conversation steps that need a distinct role/tool profile.
+6. **Validate the topology** (above), then remind the user to enable the orchestration feature group to run it.
 
 For questions about Notor internals, delegate to the **notor-help** sub-agent via \`use_subagent\`.
 

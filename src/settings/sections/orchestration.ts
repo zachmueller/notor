@@ -85,4 +85,22 @@ export function renderOrchestrationSection(
 					ctx.redisplay();
 				}),
 		);
+
+	// Failed-run debug notes (Part B). Read at finalize time, so toggling needs no
+	// extension reload — just persist. Only meaningful while orchestration is on.
+	new Setting(containerEl)
+		.setName("Write failed-run debug notes")
+		.setDesc(
+			"On a failed orchestration run, write a Markdown debug report under " +
+				"orchestrations/failures/ (the objective, failure reason, failing step + stack, " +
+				"and event timeline) that you can open or point Notor at to debug.",
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(ctx.settings.orchestration_write_failure_notes)
+				.onChange(async (value) => {
+					ctx.settings.orchestration_write_failure_notes = value;
+					await ctx.saveSettings();
+				}),
+		);
 }

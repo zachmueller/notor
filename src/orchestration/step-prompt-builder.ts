@@ -201,7 +201,12 @@ export class StepPromptBuilder {
 			`Tasks: ${tasksPath}\n` +
 			`Write cross-step state to the scratchpad. OVERWRITE-ONLY: always write the COMPLETE current ` +
 			`content of a file (or use a per-iteration filename) — never incrementally append, because a ` +
-			`crash-recovery re-run would duplicate appended content.`
+			`crash-recovery re-run would duplicate appended content.\n` +
+			`Your note tools (read_note / write_note) read and write MARKDOWN ONLY — use them for .md ` +
+			`scratchpad files. Non-Markdown coordination files (e.g. .json manifests) are written and read ` +
+			`by CODE steps; do NOT read_note them — whatever you need from them is handed to you in the ` +
+			`INCOMING EVENT payload above. If you genuinely must read a non-.md file and read_file is ` +
+			`available to you, use read_file (never read_note) for it.`
 		);
 	}
 
