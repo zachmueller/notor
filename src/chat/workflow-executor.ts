@@ -144,7 +144,11 @@ export interface WorkflowExecutorDeps {
 	setActivePersona(persona: Persona | null): void;
 
 	// Orchestrator method bridges
-	runResponseLoop(mode: ConversationMode, session: ConversationSession): Promise<void>;
+	runSession(
+		session: ConversationSession,
+		mode: ConversationMode,
+		opts?: { preLoop?: () => Promise<void> },
+	): Promise<void>;
 	setWorkflowPersonaRevert(prev: string | null | undefined): void;
 	handleError(e: unknown): void;
 }
@@ -460,55 +464,35 @@ export class WorkflowExecutor {
 			initialParsedConfigs,
 		});
 
-		this.deps.sessionManager.registerSession(session);
-
-		// G-006: Activate workflow-scoped hook overrides before the first LLM call.
-		// activate() is last-write-wins, so switching cleanly replaces a prior
-		// workflow's hooks. When switching to a workflow with NO hooks, the prior
-		// override must be explicitly cleared (deactivate is idempotent).
-		const whOverrideManager = this.deps.getWorkflowHookOverrideManager();
-		if (whOverrideManager) {
-			if (workflow.hooks) {
-				whOverrideManager.activate(conversation.id, workflow.hooks);
-				log.info("Workflow hook overrides activated for manual execution", {
-					conversationId: conversation.id,
-					events: Object.keys(workflow.hooks),
-				});
-			} else if (isExisting) {
-				whOverrideManager.deactivate(conversation.id);
-			}
-		}
-
-		// Step 10: Start the response loop
-		session.responsePromise = this.deps.runResponseLoop(currentMode, session);
-		try {
-			await session.responsePromise;
-		} catch (e) {
-			session.setStatus("errored");
-			this.deps.handleError(e);
-		} finally {
-			if (session.status === "running" || session.status === "waiting_approval") {
-				session.setStatus("completed");
-			}
-			// Drain pending JSONL writes for THIS conversation before removing the session.
-			try {
-				const conv = session.conversationManager.getActiveConversation();
-				if (conv) {
-					await this.deps.historyManager.flushConversation(conv);
+		// Step 10: Run the session through the orchestrator's canonical lifecycle
+		// (register → run → flush → sync-back → hook-deactivate → unregister).
+		// Delegating to runSession() — rather than reimplementing the lifecycle
+		// here — guarantees the manual-workflow path can never again drift from
+		// the display sync-back that keeps follow-up turns attached to this
+		// conversation. Hook *activation* is workflow-specific, so it runs in the
+		// preLoop hook (after registration, before the first LLM call).
+		await this.deps.runSession(session, currentMode, {
+			preLoop: async () => {
+				// G-006: Activate workflow-scoped hook overrides before the first
+				// LLM call. activate() is last-write-wins, so switching cleanly
+				// replaces a prior workflow's hooks. When switching to a workflow
+				// with NO hooks, the prior override must be explicitly cleared
+				// (deactivate is idempotent). runSession()'s finally performs the
+				// matching deactivate() on all exit paths.
+				const whOverrideManager = this.deps.getWorkflowHookOverrideManager();
+				if (whOverrideManager) {
+					if (workflow.hooks) {
+						whOverrideManager.activate(conversation.id, workflow.hooks);
+						log.info("Workflow hook overrides activated for manual execution", {
+							conversationId: conversation.id,
+							events: Object.keys(workflow.hooks),
+						});
+					} else if (isExisting) {
+						whOverrideManager.deactivate(conversation.id);
+					}
 				}
-			} catch {
-				// Best-effort — don't block session cleanup on write errors
-			}
-			// G-005: Deactivate workflow-scoped hook overrides on all exit paths.
-			// deactivate() is idempotent — safe if destroy() also calls it.
-			const whm = this.deps.getWorkflowHookOverrideManager();
-			if (session.workflowAssembly && whm) {
-				whm.deactivate(session.conversationId);
-			}
-			session.rejectAllPendingApprovals();
-			this.deps.sessionManager.unregisterSession(session.conversationId);
-			this.deps.viewRouter.getViewForSession(session)?.setRespondingState(false);
-		}
+			},
+		});
 	}
 
 	// -------------------------------------------------------------------

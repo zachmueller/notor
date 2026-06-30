@@ -155,3 +155,32 @@ export class ConversationSession {
 		};
 	}
 }
+
+/**
+ * Sync a finished session's isolated conversation state back into the panel's
+ * **display** ConversationManager, so follow-up turns (which snapshot the
+ * display manager) see the full turn — assistant + tool messages — not just the
+ * user message that started it.
+ *
+ * Guarded on the active conversation id: if the user navigated the display
+ * manager to a different conversation while the session ran, the sync is
+ * skipped so we never clobber the now-active conversation. The session's
+ * messages are still persisted to JSONL and re-loaded on switch-back.
+ *
+ * Loaded `{ silent: true }` so `onConversationChanged` does not re-fire (no
+ * mid-teardown header/token writes). This is the single canonical reconcile
+ * point shared by the normal-message path and the manual-workflow path.
+ */
+export function syncSessionToDisplay(
+	displayManager: ConversationManager,
+	session: ConversationSession,
+): void {
+	const displayConv = displayManager.getActiveConversation();
+	if (displayConv && displayConv.id === session.conversationId) {
+		const finalConv = session.conversationManager.getActiveConversation();
+		const finalMessages = session.conversationManager.getMessages();
+		if (finalConv && finalMessages.length > 0) {
+			displayManager.loadConversation(finalConv, finalMessages, { silent: true });
+		}
+	}
+}

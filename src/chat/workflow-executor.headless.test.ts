@@ -149,7 +149,7 @@ function makeDeps(provider: LLMProvider, dispatch: ReturnType<typeof vi.fn>): {
 		getVaultRootPath: () => undefined,
 		getTemplateRegistry: () => undefined,
 		getSessionContext: () => ({}),
-		runResponseLoop: vi.fn(async () => {}),
+		runSession: vi.fn(async () => {}),
 		setWorkflowPersonaRevert: () => {},
 		handleError: () => {},
 	} as unknown as WorkflowExecutorDeps;

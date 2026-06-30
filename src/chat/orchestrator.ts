@@ -46,7 +46,7 @@ import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-overrid
 import type { Workflow, WorkflowExecutionRequest } from "../types";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
-import { ConversationSession } from "./conversation-session";
+import { ConversationSession, syncSessionToDisplay } from "./conversation-session";
 import type { ApprovalCallback, InteractionCallback } from "./dispatcher";
 import type { ToolSessionContext } from "../tools/tool";
 import type { CheckpointManager } from "../checkpoints/checkpoint";
@@ -334,7 +334,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			getVaultRootPath: () => this.getVaultRootPath(),
 			getTemplateRegistry: () => this.templateRegistry,
 			getSessionContext: () => this,
-			runResponseLoop: (mode, session) => this.responseLoop(mode, session),
+			runSession: (session, mode, opts) => this.runSession(session, mode, opts),
 			setWorkflowPersonaRevert: (prev) => this.setWorkflowPersonaRevert(prev),
 			handleError: (e) => this.handleError(e),
 		});
@@ -1173,24 +1173,19 @@ export class ChatOrchestrator implements ToolSessionContext {
 			}
 			// Sync session state back to display manager so getMessages() reflects
 			// the full conversation (assistant + tool messages added during the
-			// response loop). Only sync if the display manager is still showing
-			// the same conversation — if the user switched away, don't clobber.
-			const displayConv = this.conversationManager.getActiveConversation();
-			if (displayConv && displayConv.id === session.conversationId) {
-				const finalConv = session.conversationManager.getActiveConversation();
-				const finalMessages = session.conversationManager.getMessages();
-				if (finalConv && finalMessages.length > 0) {
-					this.conversationManager.loadConversation(finalConv, finalMessages, { silent: true });
-				}
+			// response loop). No-ops if the user switched away mid-turn.
+			syncSessionToDisplay(this.conversationManager, session);
+			// G-005: Deactivate workflow-scoped hook overrides on all exit paths.
+			// Only the manual-workflow path (WorkflowExecutor) *activates* these
+			// before delegating here; handleUserMessage() never does. deactivate()
+			// is idempotent and guarded by workflowAssembly, so this is a harmless
+			// no-op for normal messages — even when their session carries a
+			// re-hydrated workflowAssembly (which only carries toolConfigs for
+			// config resolution and is never tied to an active override).
+			const whm = this.workflowHookOverrideManager;
+			if (session.workflowAssembly && whm) {
+				whm.deactivate(session.conversationId);
 			}
-			// Workflow hook deactivation is intentionally absent here because
-			// handleUserMessage() never *activates* hook overrides — only
-			// executeWorkflow() does (see its finally block). The session's
-			// workflowAssembly may now be non-null (re-hydrated from the
-			// conversation header to keep tool configs alive across turns), but
-			// that re-hydrated assembly only carries toolConfigs for config
-			// resolution; it is never tied to an active hook override here, so
-			// there is nothing to deactivate.
 			session.rejectAllPendingApprovals();
 			this.sessionManager.unregisterSession(session.conversationId);
 			this.getViewForSession(session)?.setRespondingState(false);
