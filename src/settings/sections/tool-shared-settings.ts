@@ -44,6 +44,34 @@ export function renderSharedSettingsSection(
 }
 
 /**
+ * Render the "Extension execution timeout" numeric setting. Bounds a single
+ * user-tool or automation execution; `0` disables the guard.
+ */
+export function renderExtensionTimeoutSetting(
+	containerEl: HTMLElement,
+	ctx: SettingsContext,
+): void {
+	new Setting(containerEl)
+		.setName("Extension execution timeout (seconds)")
+		.setDesc(
+			"Abandon a user tool or automation that runs longer than this, instead of wedging the conversation. " +
+				"0 disables the guard. The guard fires only at an await boundary — an unbounded synchronous loop is not interruptible.",
+		)
+		.addText((text) =>
+			text
+				.setPlaceholder("300")
+				.setValue(String(ctx.settings.extension_execution_timeout_seconds))
+				.onChange(async (value) => {
+					const parsed = parseInt(value, 10);
+					if (!isNaN(parsed) && parsed >= 0) {
+						ctx.settings.extension_execution_timeout_seconds = parsed;
+						await ctx.saveSettings();
+					}
+				}),
+		);
+}
+
+/**
  * Render the "Reload extensions" button that re-discovers and re-compiles
  * all user tools and automations.
  */

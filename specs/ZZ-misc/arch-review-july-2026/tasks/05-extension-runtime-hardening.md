@@ -40,25 +40,25 @@ Three independently landable parts = three phases, each its own commit(s).
 
 ## Phase 2 — Execution timeouts for tools + automations (commit 2)
 
-- [ ] **2.1** New `src/utils/with-timeout.ts`:
+- [x] **2.1** New `src/utils/with-timeout.ts`:
       `withTimeout<T>(invoke: () => Promise<T>, ms: number): Promise<T>` — lift the
       `Promise.race` + always-`clearTimeout` shape from `CodeStepExecutor.runWithTimeout`
       (`code-step-executor.ts:287–302`), throwing a typed `ExtensionTimeoutError` whose message
       carries the honest caveat ("fires only at an await boundary; a synchronous loop is not
       interruptible"). Refactor `runWithTimeout` to delegate — three consumers, one
       implementation.
-- [ ] **2.2** Wrap `UserToolAdapter.execute` step 5 (`manager.ts:124–134`): timeout → the
+- [x] **2.2** Wrap `UserToolAdapter.execute` step 5 (`manager.ts:124–134`): timeout → the
       existing structured-error ToolResult path (:185–199) so the LLM sees a diagnosable tool
       error. Compose with, don't clobber, the merged `options?.abortSignal` (:92–94).
-- [ ] **2.3** Wrap `executeAutomation` (`manager.ts:840–848`): timeout → throw; every caller
+- [x] **2.3** Wrap `executeAutomation` (`manager.ts:840–848`): timeout → throw; every caller
       already try/catches into `Notice("Automation error in {displayName}: …")`. The `unknown`
       return-value contract must hold (pre_send string = injected stdout,
       `hook-events.ts:499–503`; `on_approval_required` interprets `"approved"`/`"rejected"`,
       :1143–1160) — `withTimeout` is transparent on success, so it holds by construction.
-- [ ] **2.4** Leave the `on_conversation_start` blocking race (`hook-events.ts:977–996`) as-is —
+- [x] **2.4** Leave the `on_conversation_start` blocking race (`hook-events.ts:977–996`) as-is —
       it now composes: the inner timeout actually errors the automation; the outer race bounds
       only the blocking window.
-- [ ] **2.5** Setting: `extension_execution_timeout_seconds`, default **300** (matches the
+- [x] **2.5** Setting: `extension_execution_timeout_seconds`, default **300** (matches the
       code-step default, `constants.ts:70`), `0` = disabled — in `NotorSettings`
       (`settings/types.ts`, extension cluster near :425–442) + `defaults.ts`; rendered next to
       `renderReloadExtensionsButton` in the Tools section. Per-extension override deliberately

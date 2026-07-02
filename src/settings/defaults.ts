@@ -234,6 +234,9 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	extension_block_max_emits_per_window: 10,
 	extension_block_rate_window_seconds: 60,
 
+	// Execution timeout for user tools + automations (0 = disabled)
+	extension_execution_timeout_seconds: 300,
+
 	// Developer escape hatch
 	log_level: "error",
 

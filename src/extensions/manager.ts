@@ -27,6 +27,7 @@ import { resolveSettings, resolveSharedSettings } from "./settings-schema";
 import { buildUtils, buildLibs, buildObsidianExports } from "./runtime-context";
 import type { ExtensionUtils, ExtensionLibs, ExtensionObsidianExports } from "./runtime-context";
 import { NoteOpener } from "../tools/note-opener";
+import { withTimeout } from "../utils/with-timeout";
 import { TOOL_PATH_PARAMS } from "../tool-config/path-enforcer";
 import { BUILTIN_TOOL_SCAFFOLDS, BUILTIN_SHARED_SETTINGS_SCHEMA } from "./builtin-tool-scaffolds";
 import type { ChatBlockDefinition } from "../ui/chat-blocks/registry";
@@ -121,9 +122,14 @@ export class UserToolAdapter implements Tool {
 			const libs = this.manager.getCachedLibs();
 			const obsidian = this.manager.getCachedObsidianExports();
 
-			// 5. Call compiled function
+			// 5. Call compiled function — under a wall-clock timeout guard when
+			// `extension_execution_timeout_seconds` > 0. On timeout the thrown
+			// ExtensionTimeoutError falls through to the catch below and becomes a
+			// structured error ToolResult, so the LLM sees a diagnosable tool error
+			// instead of the conversation wedging. Composes with (does not clobber)
+			// the merged `options?.abortSignal` set on `utils` above.
 			const compiledFn = this.definition.compiledFn!;
-			const returnValue = await compiledFn(
+			const invoke = () => compiledFn(
 				this.plugin.app,
 				obsidian,
 				utils,
@@ -132,6 +138,10 @@ export class UserToolAdapter implements Tool {
 				shared,
 				params,
 			);
+			const timeoutSeconds = this.plugin.settings.extension_execution_timeout_seconds;
+			const returnValue = timeoutSeconds > 0
+				? await withTimeout(invoke, timeoutSeconds * 1000)
+				: await invoke();
 
 			// 6. Map return value to ToolResult
 			const duration_ms = Date.now() - startTime;
@@ -837,7 +847,14 @@ export class ExtensionManager {
 		const libs = this.getCachedLibs();
 		const obsidian = this.getCachedObsidianExports();
 
-		return automation.compiledFn(
+		// Run under a wall-clock timeout guard when
+		// `extension_execution_timeout_seconds` > 0. On timeout `withTimeout`
+		// throws ExtensionTimeoutError; every caller already try/catches into a
+		// `Notice("Automation error in {displayName}: …")`. `withTimeout` is
+		// transparent on success, so the `unknown` return-value contract holds by
+		// construction (pre_send string-return, on_approval_required's
+		// "approved"/"rejected", etc.).
+		const invoke = () => automation.compiledFn!(
 			this.plugin.app,
 			obsidian,
 			utils,
@@ -846,6 +863,10 @@ export class ExtensionManager {
 			shared,
 			context,
 		);
+		const timeoutSeconds = this.plugin.settings.extension_execution_timeout_seconds;
+		return timeoutSeconds > 0
+			? withTimeout(invoke, timeoutSeconds * 1000)
+			: invoke();
 	}
 
 	// -----------------------------------------------------------------------

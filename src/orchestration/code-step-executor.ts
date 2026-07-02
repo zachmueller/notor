@@ -46,6 +46,7 @@
 import { stripTypes, compileFunction } from "../extensions/compiler";
 import { extractCodeFence } from "../extensions/parser";
 import { logger } from "../utils/logger";
+import { withTimeout } from "../utils/with-timeout";
 import { DEFAULT_CODE_STEP_TIMEOUT_SECONDS } from "./constants";
 import {
 	buildOrchestrationHelper,
@@ -117,17 +118,6 @@ export interface CodeStepExecutorDeps {
 	 * still routes via `{step}.code_error`).
 	 */
 	notifyError?: (message: string) => void;
-}
-
-/** Thrown internally when the outer timeout guard fires (at an `await` boundary). */
-class CodeStepTimeoutError extends Error {
-	constructor(timeoutSeconds: number) {
-		super(
-			`Code step exceeded its ${timeoutSeconds}s timeout. (Note: the guard fires only at an ` +
-				`await boundary — an unbounded synchronous loop is not interruptible; insert await yield points.)`,
-		);
-		this.name = "CodeStepTimeoutError";
-	}
 }
 
 export class CodeStepExecutor {
@@ -292,25 +282,16 @@ export class CodeStepExecutor {
 	}
 
 	/**
-	 * Race the compiled function against a `setTimeout`. The guard fires only at an
-	 * `await` boundary (Issue-7) — a synchronous loop is not interruptible. The
-	 * timer is always cleared so a fast step does not leak a pending timeout.
+	 * Race the compiled function against a timeout. The guard fires only at an
+	 * `await` boundary (Issue-7) — a synchronous loop is not interruptible.
+	 * Delegates to the shared {@link withTimeout} (throws {@link ExtensionTimeoutError}
+	 * on timeout, which routes into `{step}.code_error` like any other failure).
 	 */
-	private async runWithTimeout(
+	private runWithTimeout(
 		invoke: () => Promise<unknown>,
 		timeoutSeconds: number,
 	): Promise<unknown> {
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		const timeout = new Promise<never>((_, reject) => {
-			timer = setTimeout(() => reject(new CodeStepTimeoutError(timeoutSeconds)), timeoutSeconds * 1000);
-		});
-		try {
-			// `invoke()` returns the AsyncFunction's promise; a synchronous throw
-			// inside it surfaces as a rejected promise (async-function semantics).
-			return await Promise.race([Promise.resolve().then(invoke), timeout]);
-		} finally {
-			if (timer !== undefined) clearTimeout(timer);
-		}
+		return withTimeout(invoke, timeoutSeconds * 1000);
 	}
 }
 

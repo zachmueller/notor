@@ -34,7 +34,7 @@ import { renderMcpServersSection } from "./sections/mcp-servers";
 import { renderPersonasSection } from "./sections/personas";
 import { renderSubAgentsSection } from "./sections/sub-agents";
 import { renderRulesAndWorkflowsSection } from "./sections/rules-and-workflows";
-import { renderSharedSettingsSection, renderReloadExtensionsButton } from "./sections/tool-shared-settings";
+import { renderSharedSettingsSection, renderReloadExtensionsButton, renderExtensionTimeoutSetting } from "./sections/tool-shared-settings";
 import { renderMemorySection } from "./sections/memory";
 import { renderTemplatesSection } from "./sections/templates";
 import { renderOrchestrationSection } from "./sections/orchestration";
@@ -225,6 +225,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		const toolsGroup = createSettingsGroup(containerEl, "Tools", true, persisted, onToggle);
 		renderToolsSection(toolsGroup, ctx);
 		renderSharedSettingsSection(toolsGroup, ctx);
+		renderExtensionTimeoutSetting(toolsGroup, ctx);
 		renderReloadExtensionsButton(toolsGroup, ctx);
 
 		// --- MCP Servers (expanded by default) ---

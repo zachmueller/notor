@@ -525,4 +525,16 @@ export interface NotorSettings {
 
 	/** Rate window duration in seconds (default 60). */
 	extension_block_rate_window_seconds: number;
+
+	/**
+	 * Wall-clock timeout (seconds) for a single user-tool or automation
+	 * execution. On timeout the run is abandoned with an `ExtensionTimeoutError`
+	 * (surfaced to the LLM as a structured tool error, or to the user as an
+	 * automation-error Notice) instead of wedging the conversation. `0` disables
+	 * the guard. Default 300, matching the orchestration code-step timeout.
+	 *
+	 * Caveat: the guard is a `setTimeout` and fires only at an `await` boundary —
+	 * an unbounded synchronous loop is not interruptible.
+	 */
+	extension_execution_timeout_seconds: number;
 }

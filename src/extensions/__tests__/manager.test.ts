@@ -710,6 +710,72 @@ describe("UserToolAdapter.execute", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Execution timeout (tools + automations)
+// ---------------------------------------------------------------------------
+
+describe("execution timeout", () => {
+	// Zero-timeout trick (from code-step-executor.test.ts): timeoutSeconds resolved
+	// to 0s fires on the next macrotask; an awaited setTimeout yields control, so
+	// the guard preempts at the await boundary. No fake timers needed.
+	function pluginWithTimeout(timeoutSeconds: number) {
+		const plugin = createMockPlugin();
+		(plugin.settings as Record<string, unknown>).extension_execution_timeout_seconds = timeoutSeconds;
+		return plugin;
+	}
+
+	it("tool: never-resolving fn + tiny timeout → structured error ToolResult with ExtensionTimeoutError message", async () => {
+		// Awaits a 5s timer so the guard's 0s macrotask wins at the await boundary.
+		const compiledFn = vi.fn(() => new Promise<string>((resolve) => setTimeout(() => resolve("late"), 5000)));
+		const toolDef = makeToolDef({ compiledFn });
+
+		const plugin = pluginWithTimeout(0.001);
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const adapter = new UserToolAdapter(toolDef, manager, plugin as never);
+
+		const result = await adapter.execute({ query: "test" });
+
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/timeout|await boundary/i);
+	});
+
+	it("tool: timeout of 0 disables the guard — a fast fn still resolves normally", async () => {
+		const compiledFn = vi.fn().mockResolvedValue("ok");
+		const toolDef = makeToolDef({ compiledFn });
+
+		const plugin = pluginWithTimeout(0);
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const adapter = new UserToolAdapter(toolDef, manager, plugin as never);
+
+		const result = await adapter.execute({ query: "test" });
+		expect(result.success).toBe(true);
+		expect(result.result).toBe("ok");
+	});
+
+	it("automation: never-resolving automation rejects when the timeout fires", async () => {
+		const compiledFn = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve("late"), 5000)));
+		const automation = makeAutomationDef({ compiledFn });
+
+		const plugin = pluginWithTimeout(0.001);
+		(plugin.settings as Record<string, unknown>).automation_enabled = {};
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+
+		await expect(manager.executeAutomation(automation, {})).rejects.toThrow(/timeout|await boundary/i);
+	});
+
+	it("automation: a fast automation's return value passes through unchanged", async () => {
+		const compiledFn = vi.fn().mockResolvedValue("approved");
+		const automation = makeAutomationDef({ compiledFn });
+
+		const plugin = pluginWithTimeout(300);
+		(plugin.settings as Record<string, unknown>).automation_enabled = {};
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+
+		const returned = await manager.executeAutomation(automation, {});
+		expect(returned).toBe("approved");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // getAutomationsForTrigger
 // ---------------------------------------------------------------------------
 
