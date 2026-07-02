@@ -115,6 +115,7 @@ function makeExecutor(): StepTurnExecutor {
 					dispatcher: {} as never,
 					toolDefinitions: [],
 					systemPrompt: "sys",
+					policyCtx: { effectiveConfig: { tools: {} }, mode: "act", vaultRootPath: "/vault" },
 				}),
 			},
 		},

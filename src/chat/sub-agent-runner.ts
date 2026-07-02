@@ -105,10 +105,10 @@ export interface SubAgentRunnerOptions {
 	 * the intersected effective config + the tool's settings reference, and
 	 * threaded into every tool dispatch so command patterns / path allowlists /
 	 * plan-mode / denylist gate sub-agent tool calls (they previously ran the
-	 * dispatcher's legacy inline branch). Omitted → legacy branch (removed in
-	 * Phase D).
+	 * dispatcher's legacy inline branch). Required since F2 Phase D removed that
+	 * branch — the sub-agent assembly always builds one.
 	 */
-	policyCtx?: ToolPolicyContext;
+	policyCtx: ToolPolicyContext;
 }
 
 // ---------------------------------------------------------------------------

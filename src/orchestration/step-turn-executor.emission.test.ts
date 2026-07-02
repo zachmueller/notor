@@ -137,6 +137,7 @@ function makeExecutor(runtimeOver: Record<string, unknown> = {}): StepTurnExecut
 					dispatcher: {} as never,
 					toolDefinitions: [],
 					systemPrompt: "sys",
+					policyCtx: { effectiveConfig: { tools: {} }, mode: "act", vaultRootPath: "/vault" },
 					...runtimeOver,
 				}),
 			},

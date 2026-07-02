@@ -131,7 +131,6 @@ export class ConfigResolver {
 	updateDisplayConfig(effective: EffectiveToolConfig, parsedConfigs: ParsedToolConfig[]): void {
 		this.activeParsedConfigs = parsedConfigs;
 		this.effectiveToolConfig = effective;
-		this.dispatcher.setEffectiveToolConfig(effective);
 	}
 
 	/**

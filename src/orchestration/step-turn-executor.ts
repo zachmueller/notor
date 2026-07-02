@@ -77,9 +77,10 @@ export interface StepRuntime {
 	 * effective config + mode + vault root + the orchestration scratchpad
 	 * allow-paths, and threaded into the step's `RunLoop` so the pure policy
 	 * engine gates its tool calls (this step ran the dispatcher's legacy branch
-	 * before). Omitted in unit tests that inject a bare runtime.
+	 * before). Required since F2 Phase D removed that branch — the factory always
+	 * builds one; unit tests inject a minimal ctx.
 	 */
-	policyCtx?: ToolPolicyContext;
+	policyCtx: ToolPolicyContext;
 }
 
 /** Builds the per-step {@link StepRuntime} from a resolved persona + provider/model. */

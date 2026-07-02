@@ -182,7 +182,6 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		vaultRuleManager.clearAccessedNotes();
 
 		plugin.loadSettings().then(() => {
-			toolDispatcher.setAutoApprove(plugin.settings.auto_approve);
 			toolDispatcher.setActivePersonaName(
 				plugin.settings.active_persona || null
 			);

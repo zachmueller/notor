@@ -118,7 +118,6 @@ export function buildSubAgentUtils(ctx: BuilderContext): Pick<ExtensionUtils, "r
 				const tool = toolRegistry.get(name);
 				if (tool) subDispatcher.registerTool(tool);
 			}
-			subDispatcher.setEffectiveToolConfig(intersectedConfig);
 			subDispatcher.setSettings(plugin.settings);
 			if (plugin.vaultRootPath) {
 				subDispatcher.setVaultRootPath(plugin.vaultRootPath);

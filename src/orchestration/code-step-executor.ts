@@ -93,11 +93,10 @@ export interface CodeStepRuntime {
 	/**
 	 * Per-step tool-policy context (F2). Threaded into `orchestration.callTool` /
 	 * `callMcpTool` dispatch so the pure policy engine gates a code step's tool
-	 * calls (command patterns / paths / plan-mode / denylist) — these ran the
-	 * dispatcher's legacy branch before. Omitted in unit tests that inject a bare
-	 * runtime → dispatch behaves as before (legacy branch).
+	 * calls (command patterns / paths / plan-mode / denylist). Required since F2
+	 * Phase D removed the dispatcher's legacy branch — the factory always builds one.
 	 */
-	policyCtx?: ToolPolicyContext;
+	policyCtx: ToolPolicyContext;
 }
 
 /** Builds the per-turn {@link CodeStepRuntime} for a code step. */

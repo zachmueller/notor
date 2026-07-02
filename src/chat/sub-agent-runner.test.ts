@@ -96,6 +96,9 @@ function buildOptions(overrides: Partial<SubAgentRunnerOptions> = {}): SubAgentR
 		dispatcher: mockDispatcher(new Map()),
 		parentAbortSignal: new AbortController().signal,
 		mode: "act" as ConversationMode,
+		// policyCtx is required since F2 Phase D; tests asserting the dispatch vector
+		// override it with their own POLICY_CTX.
+		policyCtx: { effectiveConfig: { tools: {} }, mode: "act", vaultRootPath: "/vault" },
 		...overrides,
 	};
 }

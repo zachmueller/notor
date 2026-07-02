@@ -244,8 +244,6 @@ async function assembleStepDispatcher(
 		null,
 		opts.persona,
 	);
-	dispatcher.setEffectiveToolConfig(effective);
-
 	return { dispatcher, effective, toolDefinitions };
 }
 
@@ -283,11 +281,9 @@ export function makeRuntimeFactory(host: OrchestrationHost, openNotesInEditor: b
 
 			// F2: build the per-step policy context so the step's RunLoop gates its
 			// tool calls through the pure engine (command patterns / paths /
-			// plan-mode / denylist) — this context ran the dispatcher's legacy branch
-			// before. The scratchpad (+ a shared-handoff child's parent scratchpad)
-			// is auto-allowed IN ADDITION to each tool's configured allowed_paths,
-			// sourced from the orchestrationContext — the same construction the legacy
-			// branch performed at dispatch, but now on the pure path.
+			// plan-mode / denylist). The scratchpad (+ a shared-handoff child's
+			// parent scratchpad) is auto-allowed IN ADDITION to each tool's
+			// configured allowed_paths, sourced from the orchestrationContext.
 			const policyCtx: ToolPolicyContext = {
 				effectiveConfig: effective,
 				mode,

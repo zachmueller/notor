@@ -399,7 +399,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 	/** Update settings reference. */
 	updateSettings(settings: NotorSettings): void {
 		this.settings = settings;
-		this.dispatcher.setAutoApprove(settings.auto_approve);
 		this.configResolver.updateSettings(settings);
 	}
 

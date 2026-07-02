@@ -160,10 +160,10 @@ export interface BuildOrchestrationHelperArgs {
 	/**
 	 * Per-step tool-policy context (F2). Threaded into `callTool` / `callMcpTool`
 	 * dispatch so the pure policy engine gates a code step's tool calls (command
-	 * patterns / paths / plan-mode / denylist). `undefined` in unit tests → the
-	 * dispatcher's legacy branch (removed in Phase D).
+	 * patterns / paths / plan-mode / denylist). Required since F2 Phase D removed
+	 * the dispatcher's legacy branch — the code-step factory always builds one.
 	 */
-	policyCtx?: ToolPolicyContext;
+	policyCtx: ToolPolicyContext;
 }
 
 // ---------------------------------------------------------------------------

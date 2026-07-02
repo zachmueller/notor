@@ -408,8 +408,8 @@ export interface RunLoopOptions {
 	 * pure `evaluateToolPolicy()` engine gates the run — command patterns, path
 	 * allowlists, plan-mode, denylist, enabled checks. The caller (an
 	 * orchestration factory or sub-agent assembly) builds it from the run's
-	 * effective config; RunLoop never assembles it. When omitted, the dispatcher
-	 * falls back to its legacy inline branch (removed in Phase D).
+	 * effective config; RunLoop never assembles it. Required since F2 Phase D —
+	 * the dispatcher no longer has a legacy branch to fall back to.
 	 */
-	policyCtx?: ToolPolicyContext;
+	policyCtx: ToolPolicyContext;
 }

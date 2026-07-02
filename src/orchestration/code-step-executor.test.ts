@@ -90,6 +90,7 @@ function makeRuntimeFactory(over: Partial<CodeStepRuntime> = {}): {
 		scratchpadFs: memScratchpad(),
 		taskRegistry: new TaskRegistry(memTaskFs()),
 		committedKeys: new Set<string>(),
+		policyCtx: { effectiveConfig: { tools: {} }, mode: "act", vaultRootPath: "/vault" },
 		...over,
 	};
 	return { factory: { build: async () => runtime }, runtime };

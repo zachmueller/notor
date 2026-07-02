@@ -381,7 +381,6 @@ export class UseSubagentTool implements Tool {
 			const tool = this.toolRegistry.get(name);
 			if (tool) subDispatcher.registerTool(tool);
 		}
-		subDispatcher.setEffectiveToolConfig(intersectedConfig);
 		subDispatcher.setSettings(this.settings);
 		if (this.vaultRootPath) {
 			subDispatcher.setVaultRootPath(this.vaultRootPath);

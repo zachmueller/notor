@@ -126,6 +126,9 @@ function makeArgs(over: Partial<BuildOrchestrationHelperArgs> = {}): BuildOrches
 		sessionLog: new SessionLog("sessions/sess-1/session-log.jsonl", new FakeWriter(), () => "T"),
 		committedKeys: new Set<string>(),
 		eventHistory: [],
+		// policyCtx is required since F2 Phase D — the code-step factory always
+		// builds one. Tests asserting the threaded ctx override it explicitly.
+		policyCtx: { effectiveConfig: { tools: {} }, mode: "act", vaultRootPath: "/vault" },
 		...over,
 	};
 }
@@ -257,7 +260,9 @@ describe("OrchestrationHelper.callTool / callMcpTool", () => {
 		expect(call[1]).toEqual({ path: "x.md" }); // params
 		expect(call[2]).toBe("act"); // mode
 		expect(call[4]).toBe(abort); // abortSignal = runContext.abort
-		expect(call[6]).toBeUndefined(); // policyCtx (7th positional) — undefined when not supplied
+		// policyCtx (7th positional) is always a real ctx since F2 Phase D — here it
+		// is makeArgs' default. The explicit-threading assertion is the next test.
+		expect(call[6]).toEqual(expect.objectContaining({ mode: "act", vaultRootPath: "/vault" }));
 		expect(call[11]).toBe(rc); // runContext (12th positional)
 		expect(call[12]).toBe(oc); // orchestrationContext (13th positional)
 	});

@@ -117,10 +117,13 @@ export async function executeToolBatches(
 	dispatcher: ToolDispatcher,
 	mode: ConversationMode,
 	messageIdMap: Map<string, string>,
-	abortSignal?: AbortSignal,
-	concurrencyCap: number = DEFAULT_CONCURRENCY_CAP,
-	onProgressMap?: Map<string, (status: string) => void>,
-	policyCtx?: ToolPolicyContext,
+	// abortSignal + concurrencyCap + onProgressMap precede the now-required
+	// `policyCtx`, so they are required-but-nullable positional args (TS forbids a
+	// required param after an optional one). Callers pass all of them positionally.
+	abortSignal: AbortSignal | undefined,
+	concurrencyCap: number | undefined,
+	onProgressMap: Map<string, (status: string) => void> | undefined,
+	policyCtx: ToolPolicyContext,
 	approvalCallback?: ApprovalCallback,
 	sessionContext?: ToolSessionContext,
 	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
@@ -157,7 +160,7 @@ export async function executeToolBatches(
 				mode,
 				messageIdMap,
 				abortSignal,
-				concurrencyCap,
+				concurrencyCap ?? DEFAULT_CONCURRENCY_CAP,
 				onProgressMap,
 				policyCtx,
 				approvalCallback,
@@ -205,10 +208,13 @@ async function runConcurrentBatch(
 	dispatcher: ToolDispatcher,
 	mode: ConversationMode,
 	messageIdMap: Map<string, string>,
-	abortSignal?: AbortSignal,
-	concurrencyCap: number = DEFAULT_CONCURRENCY_CAP,
-	onProgressMap?: Map<string, (status: string) => void>,
-	policyCtx?: ToolPolicyContext,
+	// abortSignal + concurrencyCap + onProgressMap precede the now-required
+	// `policyCtx` (required-but-nullable — TS forbids a required param after an
+	// optional one). The sole caller passes all three positionally.
+	abortSignal: AbortSignal | undefined,
+	concurrencyCap: number,
+	onProgressMap: Map<string, (status: string) => void> | undefined,
+	policyCtx: ToolPolicyContext,
 	approvalCallback?: ApprovalCallback,
 	sessionContext?: ToolSessionContext,
 	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
@@ -275,9 +281,11 @@ async function safeDispatch(
 	dispatcher: ToolDispatcher,
 	mode: ConversationMode,
 	messageId: string,
-	abortSignal?: AbortSignal,
-	onProgress?: (status: string) => void,
-	policyCtx?: ToolPolicyContext,
+	// abortSignal + onProgress precede the now-required `policyCtx`
+	// (required-but-nullable — TS forbids a required param after an optional one).
+	abortSignal: AbortSignal | undefined,
+	onProgress: ((status: string) => void) | undefined,
+	policyCtx: ToolPolicyContext,
 	approvalCallback?: ApprovalCallback,
 	sessionContext?: ToolSessionContext,
 	approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
@@ -291,10 +299,9 @@ async function safeDispatch(
 		// neither, so `dispatch()` is invoked with EXACTLY the historical 11
 		// positional arguments — keeping the RunLoop Regression Gate's
 		// `toHaveBeenCalledWith(...)` arity assertions byte-identical (vitest fails
-		// on any extra trailing arg, even `undefined`). F2 note: `policyCtx` (the
-		// 7th positional) is WITHIN those 11 args, so it now carries a real ctx on
-		// every path without changing the arity — the regression gate asserts the
-		// ctx at position 7, not `undefined`.
+		// on any extra trailing arg, even `undefined`). `policyCtx` (the 7th
+		// positional) is WITHIN those 11 args and is now required — every path
+		// carries a real ctx; the regression gate asserts the ctx at position 7.
 		const result = (runContext !== undefined || orchestrationContext !== undefined)
 			? await dispatcher.dispatch(
 				call.toolName,

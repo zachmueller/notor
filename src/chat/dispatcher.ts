@@ -11,52 +11,15 @@
 import type { ConversationMode, ToolCall, ToolResult } from "../types";
 import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
-import type { EffectiveToolConfig } from "../tool-config/types";
 import type { ToolExecuteOptions, ToolSessionContext } from "../tools/tool";
 import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
 import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
-import { isDomainBlocked } from "../utils/domain-denylist";
-import { enforcePathConstraints } from "../tool-config/path-enforcer";
-import { resolveAutoApprove } from "../personas/auto-approve-resolver";
-import { isMcpTool, McpRegisteredTool } from "../mcp/mcp-tool-adapter";
-import { evaluateToolPolicy, getWriteToolDescription, type ToolPolicyContext } from "./tool-policy";
+import { McpRegisteredTool } from "../mcp/mcp-tool-adapter";
+import { evaluateToolPolicy, type ToolPolicyContext } from "./tool-policy";
 import type { ParseStreamOpts } from "./stream-utils";
 import { logger } from "../utils/logger";
 
 const log = logger("ToolDispatcher");
-
-// ---------------------------------------------------------------------------
-// MCP auto-approve resolution (FEAT-002)
-// ---------------------------------------------------------------------------
-
-/**
- * Resolve the effective auto-approve decision for an MCP tool call.
- *
- * MCP auto-approve precedence:
- * 1. Server-level: raw tool name (without namespace) in `McpServerConfig.autoApprove[]` → true
- * 2. Global default: false (all MCP tools require manual approval unless configured)
- *
- * Per-persona overrides removed in Phase 4b (CLEAN-001) — now handled by
- * `<notor_tool_config>` via the effective config path.
- *
- * @param tool - The McpRegisteredTool instance (exposes server config and raw name)
- * @returns true if auto-approved, false if manual approval required
- *
- * @see specs/04-mcp/tasks.md — FEAT-002
- */
-function resolveMcpAutoApprove(
-	tool: McpRegisteredTool,
-): boolean {
-	// 1. Server-level: check McpServerConfig.autoApprove array (raw tool name)
-	const config = tool.getServerConfig();
-	const rawToolName = tool.getRawToolName();
-	if (config.autoApprove && config.autoApprove.includes(rawToolName)) {
-		return true;
-	}
-
-	// 2. Global default: require approval for all MCP tools
-	return false;
-}
 
 /** Tool interface for the dispatcher (minimal — not the full tool registry). */
 export interface DispatchableTool {
@@ -97,12 +60,6 @@ export interface DispatcherEvents {
 export class ToolDispatcher {
 	/** Registered tools keyed by name. */
 	private tools = new Map<string, DispatchableTool>();
-
-	/** Auto-approve settings per tool name (global defaults). */
-	private autoApprove: Record<string, boolean> = {};
-
-	/** Effective tool config from `<notor_tool_config>` merge (null = use global defaults). */
-	private effectiveToolConfig: EffectiveToolConfig | null = null;
 
 	/** Currently active persona name (null = no persona). */
 	private activePersonaName: string | null = null;
@@ -170,11 +127,6 @@ export class ToolDispatcher {
 			log.debug("Unregistered tool", { name });
 		}
 		return existed;
-	}
-
-	/** Update auto-approve settings. */
-	setAutoApprove(settings: Record<string, boolean>): void {
-		this.autoApprove = { ...settings };
 	}
 
 	/** Update plugin settings reference. */
@@ -261,24 +213,6 @@ export class ToolDispatcher {
 	setActivePersonaName(name: string | null): void {
 		this.activePersonaName = name;
 		log.debug("Updated active persona for auto-approve", { persona: name });
-	}
-
-	/**
-	 * Set the effective tool config from `<notor_tool_config>` merge.
-	 *
-	 * When set, the dispatcher uses this config for enabled checks,
-	 * auto-approve resolution, and path enforcement. When null, the
-	 * dispatcher falls back to existing global defaults.
-	 *
-	 * @param config - Merged effective config, or null to revert to defaults
-	 * @see specs/04b-tool-toggle/spec.md — FR-83, FR-84
-	 */
-	setEffectiveToolConfig(config: EffectiveToolConfig | null): void {
-		this.effectiveToolConfig = config;
-		log.debug("Updated effective tool config", {
-			active: config !== null,
-			toolCount: config ? Object.keys(config.tools).length : 0,
-		});
 	}
 
 	// -----------------------------------------------------------------------
@@ -408,9 +342,12 @@ export class ToolDispatcher {
 		parameters: Record<string, unknown>,
 		mode: ConversationMode,
 		messageId: string,
-		abortSignal?: AbortSignal,
-		onProgress?: (status: string) => void,
-		policyCtx?: ToolPolicyContext,
+		// abortSignal + onProgress precede the now-required `policyCtx`, so they are
+		// required-but-nullable positional args (TS forbids a required param after
+		// an optional one). Every caller already passes all three positionally.
+		abortSignal: AbortSignal | undefined,
+		onProgress: ((status: string) => void) | undefined,
+		policyCtx: ToolPolicyContext,
 		perCallApprovalCallback?: ApprovalCallback,
 		sessionContext?: ToolSessionContext,
 		approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
@@ -440,265 +377,73 @@ export class ToolDispatcher {
 		// Emit started event
 		this.events.onToolCallStarted?.(toolCall, messageId);
 
-		// --- Policy evaluation ---
-		// When policyCtx is provided (session-scoped), use the pure evaluateToolPolicy()
-		// function. Otherwise, fall back to inline checks reading from shared state
-		// (backward compat during migration to per-session policy).
-		if (policyCtx) {
-			const decision = evaluateToolPolicy(toolName, parameters, tool, policyCtx);
+		// --- Policy evaluation (pure engine) ---
+		// Every dispatch context builds a per-session `policyCtx` and threads it
+		// here, so `evaluateToolPolicy()` is the single policy engine — command
+		// patterns, path allowlists, plan-mode, denylist, and enabled checks all
+		// run through it. (The legacy inline branch was removed in F2 Phase D once
+		// the tripwire confirmed no context reached dispatch without a ctx.)
+		const decision = evaluateToolPolicy(toolName, parameters, tool, policyCtx);
 
-			if (!decision.allowed) {
-				toolCall.status = "error";
-				this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-				const result: ToolResult = {
-					tool_name: toolName,
-					success: false,
-					result: "",
-					error: decision.error ?? "Tool call blocked by policy.",
-				};
-
-				log.info("Tool blocked by policy", { toolName, error: decision.error });
-				this.events.onToolCallResult?.(toolCall, result, messageId);
-				return result;
-			}
-
-			// Approval resolution (approval ≠ policy — kept in the dispatcher). Prefer
-			// the per-call callback (sessions), falling back to the instance callback
-			// set via setApprovalCallback — the sub-agent seam. Preserved so the seam
-			// keeps working when the pure branch becomes the only branch (Phase D).
-			const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
-
-			if (!decision.autoApproved) {
-				if (!approvalCb) {
-					log.warn("No approval callback set, auto-approving", { toolName });
-				} else {
-					const userDecision = await this.raceApprovalSources(
-						toolCall, toolName, parameters, mode,
-						approvalCb, abortSignal, messageId, approvalHookDispatcher,
-					);
-
-					if (userDecision === "rejected" || userDecision === "timed_out") {
-						toolCall.status = "rejected";
-						this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-						const error = userDecision === "timed_out"
-							? `Tool call '${toolName}' was not approved within ${this.settings?.approval_timeout ?? 0} seconds and was automatically skipped. The user may be away — proceed without this tool's output.`
-							: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`;
-
-						const result: ToolResult = {
-							tool_name: toolName,
-							success: false,
-							result: "",
-							error,
-						};
-
-						log.info(userDecision === "timed_out" ? "Tool call timed out waiting for approval" : "Tool call rejected by user", { toolName });
-						this.events.onToolCallResult?.(toolCall, result, messageId);
-						return result;
-					}
-				}
-			} else if (approvalCb && !tool.internal) {
-				// Auto-approved: render the collapsed diff for after-the-fact review.
-				// Internal tools (only update_tasks) stay invisible — matching the
-				// legacy `else if (tool.internal)` bypass, which fired no render.
-				void approvalCb(toolCall, abortSignal, messageId, true);
-			}
-
-			// Mark as approved
-			toolCall.status = "approved";
+		if (!decision.allowed) {
+			toolCall.status = "error";
 			this.events.onToolCallStatusChanged?.(toolCall, messageId);
-		} else if (tool.internal) {
-			// Internal tools bypass all legacy checks
-			toolCall.status = "approved";
-			this.events.onToolCallStatusChanged?.(toolCall, messageId);
-		} else {
-			// --- Legacy inline policy checks (no policyCtx provided) ---
-			// F2 tripwire (Phase C.3): after all five contexts pass a policyCtx this
-			// branch is unreachable in production. A hit means a caller regressed to
-			// omitting the ctx — captured for a release before the branch is deleted
-			// (Phase D, gated on this line never firing).
-			log.error("LEGACY POLICY PATH HIT — policyCtx was not provided", { toolName, mode });
 
-			// 2. Enabled check — block disabled tools before any other check (FR-83)
-			if (this.effectiveToolConfig) {
-				const toolEntry = this.effectiveToolConfig.tools[toolName];
-				if (toolEntry && !toolEntry.enabled) {
-					toolCall.status = "error";
+			const result: ToolResult = {
+				tool_name: toolName,
+				success: false,
+				result: "",
+				error: decision.error ?? "Tool call blocked by policy.",
+			};
+
+			log.info("Tool blocked by policy", { toolName, error: decision.error });
+			this.events.onToolCallResult?.(toolCall, result, messageId);
+			return result;
+		}
+
+		// Approval resolution (approval ≠ policy — kept in the dispatcher). Prefer
+		// the per-call callback (sessions), falling back to the instance callback
+		// set via setApprovalCallback — the sub-agent seam.
+		const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
+
+		if (!decision.autoApproved) {
+			if (!approvalCb) {
+				log.warn("No approval callback set, auto-approving", { toolName });
+			} else {
+				const userDecision = await this.raceApprovalSources(
+					toolCall, toolName, parameters, mode,
+					approvalCb, abortSignal, messageId, approvalHookDispatcher,
+				);
+
+				if (userDecision === "rejected" || userDecision === "timed_out") {
+					toolCall.status = "rejected";
 					this.events.onToolCallStatusChanged?.(toolCall, messageId);
+
+					const error = userDecision === "timed_out"
+						? `Tool call '${toolName}' was not approved within ${this.settings?.approval_timeout ?? 0} seconds and was automatically skipped. The user may be away — proceed without this tool's output.`
+						: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`;
 
 					const result: ToolResult = {
 						tool_name: toolName,
 						success: false,
 						result: "",
-						error: `Tool '${toolName}' is disabled and cannot be used in this context.`,
+						error,
 					};
 
-					log.info("Blocked disabled tool", { toolName });
+					log.info(userDecision === "timed_out" ? "Tool call timed out waiting for approval" : "Tool call rejected by user", { toolName });
 					this.events.onToolCallResult?.(toolCall, result, messageId);
 					return result;
 				}
 			}
-
-			// 3. Check Plan/Act mode — block write tools in Plan mode
-			if (mode === "plan" && tool.mode === "write") {
-				toolCall.status = "error";
-				this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-				// FEAT-001: MCP tools get a specific error message format per spec FR-59
-				const planModeError = isMcpTool(toolName)
-					? `Tool '${toolName}' is write-only and blocked in Plan mode. Switch to Act mode to use this tool.`
-					: `${toolName} is not available in Plan mode. Switch to Act mode to ${getWriteToolDescription(toolName)}.`;
-
-				const result: ToolResult = {
-					tool_name: toolName,
-					success: false,
-					result: "",
-					error: planModeError,
-				};
-
-				log.info("Blocked write tool in Plan mode", { toolName });
-				this.events.onToolCallResult?.(toolCall, result, messageId);
-				return result;
-			}
-
-			// 3a. fetch_webpage: domain denylist check
-			if (toolName === "fetch_webpage" && this.settings) {
-				const url = parameters["url"] as string;
-				if (url) {
-					const denyCheck = isDomainBlocked(url, this.settings.domain_denylist);
-					if (denyCheck.blocked) {
-						let hostname: string;
-						try {
-							hostname = new URL(url).hostname;
-						} catch {
-							hostname = url;
-						}
-						toolCall.status = "error";
-						this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-						const result: ToolResult = {
-							tool_name: toolName,
-							success: false,
-							result: "",
-							error: `Domain ${hostname} is blocked by your denylist.`,
-						};
-
-						log.info("Domain blocked by denylist", { toolName, url, pattern: denyCheck.pattern });
-						this.events.onToolCallResult?.(toolCall, result, messageId);
-						return result;
-					}
-				}
-			}
-
-			// 4. Check auto-approve settings
-			// When effectiveToolConfig is active, use its merged auto_approve as unified early-return
-			// before consulting legacy MCP/built-in branching (DISP-004)
-			let isAutoApproved: boolean;
-			if (this.effectiveToolConfig) {
-				const toolEntry = this.effectiveToolConfig.tools[toolName];
-				isAutoApproved = toolEntry?.auto_approve ?? false;
-			} else {
-				// Fallback: legacy MCP/built-in branching when no effective config
-				// For MCP tools: server-level per-tool → default false (FEAT-002)
-				// For built-in tools: global setting
-				if (isMcpTool(toolName) && tool instanceof McpRegisteredTool) {
-					isAutoApproved = resolveMcpAutoApprove(tool);
-				} else {
-					isAutoApproved = resolveAutoApprove(toolName, this.autoApprove);
-				}
-			}
-
-			const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
-
-			if (!isAutoApproved) {
-				// Request user approval.
-				// Legacy path: falls back to instance-level callback (used by sub-agent
-				// dispatchers which set approval via setApprovalCallback on their own
-				// ToolDispatcher instance). The shared plugin-level dispatcher passes
-				// per-call approval from sessions.
-				if (!approvalCb) {
-					log.warn("No approval callback set, auto-approving", { toolName });
-				} else {
-					const decision = await this.raceApprovalSources(
-						toolCall, toolName, parameters, mode,
-						approvalCb, abortSignal, messageId, approvalHookDispatcher,
-					);
-
-					if (decision === "rejected" || decision === "timed_out") {
-						toolCall.status = "rejected";
-						this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-						const error = decision === "timed_out"
-							? `Tool call '${toolName}' was not approved within ${this.settings?.approval_timeout ?? 0} seconds and was automatically skipped. The user may be away — proceed without this tool's output.`
-							: `Tool call rejected by user. The user chose not to approve this ${toolName} operation.`;
-
-						const result: ToolResult = {
-							tool_name: toolName,
-							success: false,
-							result: "",
-							error,
-						};
-
-						log.info(decision === "timed_out" ? "Tool call timed out waiting for approval" : "Tool call rejected by user", { toolName });
-						this.events.onToolCallResult?.(toolCall, result, messageId);
-						return result;
-					}
-				}
-			} else if (approvalCb) {
-				// Auto-approved: render collapsed diff for after-the-fact review.
-				// The callback resolves immediately when autoApproved=true.
-				void approvalCb(toolCall, abortSignal, messageId, true);
-			}
-
-			// Mark as approved
-			toolCall.status = "approved";
-			this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-			// 5. Path enforcement — check allowed_paths/blocked_paths (FR-84)
-			if (this.effectiveToolConfig) {
-				const toolEntry = this.effectiveToolConfig.tools[toolName];
-				if (toolEntry) {
-					// INT-001 / FR-121: while an orchestration step turn runs, the
-					// owning session's scratchpad (and a `shared`-handoff child's
-					// parent scratchpad) is auto-allowed IN ADDITION to the tool's
-					// configured allowed_paths — sourced from the per-step carriage,
-					// without mutating the shared/global tool config. Undefined for
-					// non-orchestration calls → byte-identical to today.
-					const sessionAllowedPaths = orchestrationContext
-						? [
-								orchestrationContext.scratchpadPath,
-								...(orchestrationContext.parentScratchpadPath
-									? [orchestrationContext.parentScratchpadPath]
-									: []),
-							]
-						: undefined;
-					const pathError = enforcePathConstraints(
-						toolName,
-						parameters,
-						toolEntry,
-						this.vaultRootPath ?? "",
-						this.resolveVaultPath,
-						sessionAllowedPaths,
-					);
-					if (pathError) {
-						toolCall.status = "error";
-						this.events.onToolCallStatusChanged?.(toolCall, messageId);
-
-						const result: ToolResult = {
-							tool_name: toolName,
-							success: false,
-							result: "",
-							error: pathError,
-						};
-
-						log.info("Blocked tool by path constraint", { toolName, error: pathError });
-						this.events.onToolCallResult?.(toolCall, result, messageId);
-						return result;
-					}
-				}
-			}
+		} else if (approvalCb && !tool.internal) {
+			// Auto-approved: render the collapsed diff for after-the-fact review.
+			// Internal tools (only update_tasks) stay invisible — they fire no render.
+			void approvalCb(toolCall, abortSignal, messageId, true);
 		}
+
+		// Mark as approved
+		toolCall.status = "approved";
+		this.events.onToolCallStatusChanged?.(toolCall, messageId);
 
 		// 6. Execute tool — race against abort signal so the user is unblocked
 		//    immediately when they click Stop. The tool may continue running in

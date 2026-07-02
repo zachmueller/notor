@@ -80,6 +80,9 @@ function buildOptions(overrides: Partial<RunLoopOptions> = {}): RunLoopOptions {
 		dispatcher: mockDispatcher(new Map()),
 		mode: "act" as ConversationMode,
 		runContext: makeRunContext(),
+		// policyCtx is required since F2 Phase D — a minimal ctx is enough for the
+		// mock dispatcher (it ignores policy); tests overriding it pass their own.
+		policyCtx: { effectiveConfig: { tools: {} }, mode: "act", vaultRootPath: "/vault" },
 		...overrides,
 	};
 }
