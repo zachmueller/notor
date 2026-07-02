@@ -238,6 +238,10 @@ export class RunLoop {
 				// --- Handle stream result ---
 				if (streamResult.type === "error") {
 					log.warn("Run stream error", { error: streamResult.error });
+					// The turn's cost was already drawn down from the shared cell above,
+					// so fire onTurnComplete too — the cost was real and must reach the
+					// per-turn log (else the cell and turn.complete.cost_usd disagree).
+					await this.fireHook(() => this.options.hooks?.onTurnComplete?.(iterationCount, this.buildTurnOutcome(streamResult!, turnCostUsd)));
 					return {
 						text: `[Sub-agent error: ${streamResult.error}]`,
 						structured: null,
@@ -251,6 +255,9 @@ export class RunLoop {
 
 				if (streamResult.type === "cancelled") {
 					log.info("Run stream cancelled", { iteration: iterationCount });
+					// Same as the error path: the turn's cost is already in the cell, so
+					// fire onTurnComplete so the log agrees with the cell.
+					await this.fireHook(() => this.options.hooks?.onTurnComplete?.(iterationCount, this.buildTurnOutcome(streamResult!, turnCostUsd)));
 					return {
 						text: streamResult.text ? `${streamResult.text}\n\n[Sub-agent cancelled]` : "[Sub-agent cancelled]",
 						structured: null,
@@ -406,6 +413,7 @@ export class RunLoop {
 			cost_cap: "aggregate cost limit",
 		};
 		const reasonLabel = reasonLabels[reason];
+		const { runContext } = this.options;
 
 		this.reportProgress("Summarizing progress...");
 
@@ -440,6 +448,16 @@ export class RunLoop {
 
 			tokenUsage.input += streamResult.inputTokens;
 			tokenUsage.output += streamResult.outputTokens;
+
+			// Account for the wind-down turn like any other turn: draw down the SHARED
+			// aggregate cell and fire onTurnComplete. Without this, turn.complete's
+			// cost_usd under-reports precisely on capped runs (the wind-down call's
+			// cost was real but invisible to both the cell and the per-turn log).
+			const windDownCostUsd = this.computeTurnCost(streamResult.inputTokens, streamResult.outputTokens);
+			decrementAggregate(runContext.budget, windDownCostUsd, 1);
+			runContext.subtreeConsumed.costUsd += windDownCostUsd;
+			runContext.subtreeConsumed.iterations += 1;
+			await this.fireHook(() => this.options.hooks?.onTurnComplete?.(iterationCount, this.buildTurnOutcome(streamResult, windDownCostUsd)));
 
 			const summaryText = streamResult.text || "[No summary generated]";
 			const marker = `[Sub-agent stopped: ${reasonLabel}]`;

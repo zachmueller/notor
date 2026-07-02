@@ -858,6 +858,9 @@ export function makeChildFlowSpawner(plugin: NotorPlugin): SpawnChildFlow {
 		}
 
 		// child.result AFTER the child returns, BEFORE the parent turn continues.
+		// Record the child subtree's cost/iterations (F3 §3.3.3) so a root that spent
+		// budget via this child can subtract it on recovery — the shared cell was
+		// drawn down live, but the root's OWN log never recorded the child's spend.
 		await parentLog
 			.appendChildResult({
 				turn: 0,
@@ -865,6 +868,8 @@ export function makeChildFlowSpawner(plugin: NotorPlugin): SpawnChildFlow {
 				structured: result.structured ?? undefined,
 				text: result.text,
 				stop_reason: result.terminal.topic,
+				cost_usd: result.subtreeConsumed.costUsd,
+				iterations: result.subtreeConsumed.iterations,
 			})
 			.catch((e) => log.warn("child.result append failed", { error: String(e) }));
 

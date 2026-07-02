@@ -105,6 +105,16 @@ export interface ChildResultEntry extends BaseEntry {
 	structured?: unknown;
 	text: string;
 	stop_reason: string;
+	/**
+	 * The child subtree's total cost in USD (from `SpawnChildFlowResult.rollup`).
+	 * Optional so recovery's `rebuildBudget` can subtract child spend a root's own
+	 * log never recorded. Readers default a missing field to `0` (old logs keep
+	 * today's inflated-headroom behavior on recovery — acceptable for pre-existing
+	 * sessions). F3 §3.3.3.
+	 */
+	cost_usd?: number;
+	/** The child subtree's total LLM turns (from `SpawnChildFlowResult.rollup`). Defaults to `0`. */
+	iterations?: number;
 }
 
 export interface SessionCancelledEntry extends BaseEntry {

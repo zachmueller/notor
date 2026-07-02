@@ -202,15 +202,26 @@ export class SessionRecovery {
 	 * (defaulted, finite) ceilings, then subtract each `turn.complete`'s `cost_usd`
 	 * and (for LLM turns only — `conversation_id !== null`) one iteration. So a
 	 * `$5.00` cap that spent `$4.90` resumes at `$0.10`, not `$5.00`.
+	 *
+	 * Also subtract each `child.result`'s recorded subtree `cost_usd`/`iterations`
+	 * (F3 §3.3.3): a root whose live run spent budget via a `run_flow` child drew
+	 * down the SHARED cell by reference, but that spend lives in the child's log,
+	 * not the root's `turn.complete` entries — so without this the root would resume
+	 * with inflated headroom. Legacy `child.result` entries with no cost fields
+	 * default to `0` (unchanged behavior for pre-existing sessions).
 	 */
 	rebuildBudget(entries: SessionLogEntry[], ceilings: FlowCeilings): AggregateBudget {
 		let iterationsRemaining = ceilings.maxIterations;
 		let costRemainingUsd = ceilings.maxCostUsd;
 		for (const e of entries) {
-			if (e.type !== "turn.complete") continue;
-			costRemainingUsd -= e.cost_usd ?? 0;
-			// Code steps record conversation_id: null and are NOT LLM turns.
-			if (e.conversation_id !== null) iterationsRemaining -= 1;
+			if (e.type === "turn.complete") {
+				costRemainingUsd -= e.cost_usd ?? 0;
+				// Code steps record conversation_id: null and are NOT LLM turns.
+				if (e.conversation_id !== null) iterationsRemaining -= 1;
+			} else if (e.type === "child.result") {
+				costRemainingUsd -= e.cost_usd ?? 0;
+				iterationsRemaining -= e.iterations ?? 0;
+			}
 		}
 		return { iterationsRemaining, costRemainingUsd };
 	}
