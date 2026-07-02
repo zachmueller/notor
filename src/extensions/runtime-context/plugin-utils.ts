@@ -1,6 +1,7 @@
 import type { BuilderContext, ExtensionUtils, WebviewElement } from "./types";
 import { logger } from "../../utils/logger";
 import { NoteOpener } from "../../tools/note-opener";
+import { TOOLS_DEFAULT_DISABLED } from "../../settings/constants";
 import { Notice, Platform, normalizePath } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 
@@ -29,6 +30,30 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 
 	const webview: ExtensionUtils["webview"] = (() => {
 		if (!Platform.isDesktopApp) return null;
+
+		// Gate `utils.webview` on the same opt-in that gates the `webview` tool
+		// (default-disabled via TOOLS_DEFAULT_DISABLED). This closes the
+		// tool-gated / utils-ungated asymmetry: extension code can only reach the
+		// live Electron <webview> when the user has enabled the tool. When
+		// disabled, hand back a stub whose methods throw a clear, actionable error
+		// instead of a working handle.
+		const toolEnabled =
+			plugin.settings.tool_enabled?.["webview"] ?? !TOOLS_DEFAULT_DISABLED.has("webview");
+		if (!toolEnabled) {
+			const gateError = () => {
+				throw new Error(
+					"utils.webview is unavailable: enable the webview tool in Settings → Tools.",
+				);
+			};
+			return {
+				getConversationWebview: gateError,
+				getActiveWebview: gateError,
+				waitForReady: gateError,
+				getConversationId: gateError,
+				persistUrl: gateError,
+				readPersistedUrl: gateError,
+			} as NonNullable<ExtensionUtils["webview"]>;
+		}
 
 		const WEB_VIEWER_TYPE_CANDIDATES = ["web-viewer", "web-browser", "webviewer", "browser-view"];
 		const WEBVIEW_PROP_CANDIDATES = ["webview", "webviewEl", "frame", "browser"];

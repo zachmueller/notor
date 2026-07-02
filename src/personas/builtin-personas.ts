@@ -253,7 +253,7 @@ Return a string for success, or throw an Error for failure.
 - \`utils.chatBlocks\` — emit custom blocks into the chat transcript (\`null\` if unavailable)
 - \`utils.memory\` — memory subsystem (\`null\` when \`memory_enabled\` is false)
 - \`utils.memoryApprovalMode\` — current memory approval mode: \`"auto"\` | \`"bulk"\` | \`"bulk_and_inline"\` (\`null\` when memory is disabled)
-- \`utils.webview\` — Web Viewer browser facade (\`getConversationWebview\`, \`getActiveWebview\`, \`waitForReady\`, \`getConversationId\`, \`persistUrl\`, \`readPersistedUrl\`); \`null\` off-desktop (Electron required)
+- \`utils.webview\` — Web Viewer browser facade (\`getConversationWebview\`, \`getActiveWebview\`, \`waitForReady\`, \`getConversationId\`, \`persistUrl\`, \`readPersistedUrl\`); \`null\` off-desktop (Electron required). On desktop, present only when the webview tool is enabled in Settings → Tools (default off); otherwise its methods throw
 - \`utils.tempOutputSpiller\` — spill truncated tool output to disk; \`undefined\` when disabled or on mobile
 
 ### Common patterns

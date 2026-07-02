@@ -428,7 +428,7 @@ All extension code executes with these variables in scope:
 | `utils.editPluginSetting(keyPath, value)` | Update a single setting by dot-separated key path. Returns `{ success, oldValue, newValue, error }`. |
 | `utils.ask(question, opts?)` | Ask the user a follow-up mid-run, suspending the tool loop until they answer. Resolves to their answer (`null` if headless). |
 | `utils.askMany(questions)` | Ask several follow-up questions at once. Resolves to an index-aligned array of answers (each `null` if headless). |
-| `utils.webview` | Web Viewer browser facade (`getConversationWebview`, `getActiveWebview`, `waitForReady`, `getConversationId`, `persistUrl`, `readPersistedUrl`). `null` off-desktop (Electron required). |
+| `utils.webview` | Web Viewer browser facade (`getConversationWebview`, `getActiveWebview`, `waitForReady`, `getConversationId`, `persistUrl`, `readPersistedUrl`). `null` off-desktop (Electron required). On desktop, present only when the **webview tool** is enabled (Settings → Tools; default off) — otherwise its methods throw, directing you to enable the tool. |
 | `utils.tempOutputSpiller` | Spill truncated tool output to disk. `undefined` when disabled or on mobile. |
 | `utils.abortSignal` | `AbortSignal` for the current tool call (tools only, not automations). |
 | `utils.onProgress(status)` | Emit a progress status string for long-running tools (tools only, set per-invocation). |

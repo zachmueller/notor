@@ -88,7 +88,7 @@ Three independently landable parts = three phases, each its own commit(s).
 - [x] **3.3** Code steps inherit the narrowing automatically (same `buildUtils`) — this turns
       the orchestration helper's isolation from advisory to real for these three surfaces.
       `libs.fs` and `app` remain: worker isolation is the deferred answer; don't half-build it.
-- [ ] **3.4 Webview gate** (this task's only novel scope vs. June): in `buildPluginUtils`,
+- [x] **3.4 Webview gate** (this task's only novel scope vs. June): in `buildPluginUtils`,
       expose `utils.webview` (`plugin-utils.ts:23–181`) only when the `webview` **tool** is
       enabled in settings (it's in `TOOLS_DEFAULT_DISABLED`, `settings/constants.ts:224`, so
       default = absent); otherwise a stub whose methods throw a clear "enable the webview tool
@@ -103,29 +103,29 @@ overrides.
 
 ## Tests
 
-- [ ] Parser version key (`parser.test.ts`): absent → loads; `notor-min-api: 1` → loads; `2` →
+- [x] Parser version key (`parser.test.ts`): absent → loads; `notor-min-api: 1` → loads; `2` →
       ExtensionError naming file+versions; malformed → ExtensionError.
-- [ ] `utils.api` (`manager.test.ts` or runtime-context test): `buildUtils().api.version === 1`;
+- [x] `utils.api` (`manager.test.ts` or runtime-context test): `buildUtils().api.version === 1`;
       code-step utils carries it too.
-- [ ] Tool timeout (`manager.test.ts`, `UserToolAdapter.execute` harness at :587+): never-
+- [x] Tool timeout (`manager.test.ts`, `UserToolAdapter.execute` harness at :587+): never-
       resolving fn + tiny timeout → structured error ToolResult with `ExtensionTimeoutError`
       message. Use the zero-timeout trick from `code-step-executor.test.ts:282–305` — no fake
       timers.
-- [ ] Automation timeout: never-resolving automation rejects; fast automation's return value
+- [x] Automation timeout: never-resolving automation rejects; fast automation's return value
       passes through unchanged.
-- [ ] Facades: scaffold tests (`replace-in-scaffolds.test.ts` etc. compile real fences — they
+- [x] Facades: scaffold tests (`replace-in-scaffolds.test.ts` etc. compile real fences — they
       catch renames) + a facade round-trip unit; raw members gone from the type.
-- [ ] Webview gate: tool disabled → `utils.webview` absent/throwing; enabled → present.
+- [x] Webview gate: tool disabled → `utils.webview` absent/throwing; enabled → present.
 
 ## Verification
 
-- [ ] `tsc` + suite green.
+- [x] `tsc` + suite green.
 - [ ] Manual: extension with `notor-min-api: 99` → persistent Notice, does not load; a tool that
       `await new Promise(()=>{})`s errors after the configured timeout instead of wedging the
       conversation; `word-count` and the 8 migrated scaffolds still work.
 - [ ] Run the `audit-personas-docs` skill (docs + tool-creator persona both change here).
-- [ ] Grep gates:
+- [x] Grep gates:
       `grep -rn "checkpointManager\|staleTracker\b" src/extensions/builtin-tool-scaffolds/` →
       zero; `grep -rn "notor-min-api" docs/ src/` → parser + docs hits only.
-- [ ] Migration note covers: facade break for third-party extensions using raw managers;
+- [x] Migration note covers: facade break for third-party extensions using raw managers;
       webview stub-throw on desktop where it previously always existed.
