@@ -13,7 +13,7 @@
  */
 
 import { Notice } from "obsidian";
-import type NotorPlugin from "../main";
+import type { OrchestrationHost } from "./host";
 import type { ConversationMode } from "../types";
 import type { AggregateBudget, OrchestrationToolContext } from "../run-loop/types";
 import { logger } from "../utils/logger";
@@ -55,22 +55,22 @@ export function newSessionId(): string {
  * and swallowed so the report never masks the original run error.
  */
 export async function maybeWriteFailureReport(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	sessionManager: OrchestrationSessionManager,
 	sessionId: string,
 	flow: OrchestrationFlow,
 	result: OrchestrationRunResult,
 ): Promise<void> {
-	if (!shouldWriteFailureReport(result.status, plugin.settings.orchestration_write_failure_notes)) {
+	if (!shouldWriteFailureReport(result.status, host.settings.orchestration_write_failure_notes)) {
 		return;
 	}
 	try {
 		const ws = sessionManager.resolveWorkspace(sessionId);
 		const meta = await sessionManager.readMeta(sessionId);
-		const fsVault = new VaultSessionFs(plugin.app);
+		const fsVault = new VaultSessionFs(host.app);
 		const logJsonl = await fsVault.read(ws.logPath).catch(() => null);
 		const path = await writeFailureReport({
-			notorDir: plugin.settings.notor_dir,
+			notorDir: host.settings.notor_dir,
 			fs: fsVault,
 			meta,
 			result,
@@ -93,7 +93,7 @@ export async function maybeWriteFailureReport(
  * invariant structural rather than a copy pair that can drift.
  */
 export async function finalizeRun(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	sessionManager: OrchestrationSessionManager,
 	sessionId: string,
 	flow: OrchestrationFlow,
@@ -111,7 +111,7 @@ export async function finalizeRun(
 		.catch((e) => log.warn("Failed to finalize session.json status", { error: String(e) }));
 
 	// Part B: opt-in failed-run debug note (no-op unless status is error + setting on).
-	await maybeWriteFailureReport(plugin, sessionManager, sessionId, flow, result);
+	await maybeWriteFailureReport(host, sessionManager, sessionId, flow, result);
 
 	return finalStatus;
 }
@@ -121,7 +121,7 @@ export async function finalizeRun(
  * the command (FEAT-011) and the `run_orchestration` hook (FEAT-012).
  */
 export async function launchOrchestration(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	flow: OrchestrationFlow,
 	promptText: string,
 	options?: {
@@ -175,7 +175,7 @@ export async function launchOrchestration(
 	// per-flow with `notor-flow-allow-concurrent: true`. In-memory only: after a
 	// crash the recovery liveness guard (Fix 2) is the protection.
 	if (origin !== "run_flow" && origin !== "chaining" && !flow.allowConcurrent) {
-		const registry = plugin.getOrchestrationRunRegistry();
+		const registry = host.getOrchestrationRunRegistry();
 		if (registry.isFlowRunning(flow.name)) {
 			const running = registry.listActive().find((h) => h.flowName === flow.name);
 			log.info("Skipping launch — flow already running", {
@@ -192,8 +192,8 @@ export async function launchOrchestration(
 	// INT-001: create the session workspace (dir + scratchpad/ + tasks/ +
 	// session.json status `active`) before the first turn runs.
 	const sessionManager = new OrchestrationSessionManager(
-		plugin.settings.notor_dir,
-		new VaultSessionFs(plugin.app),
+		host.settings.notor_dir,
+		new VaultSessionFs(host.app),
 	);
 	const ws = await sessionManager.createSession({
 		sessionId,
@@ -205,14 +205,14 @@ export async function launchOrchestration(
 
 	// INT-004: seed the persistent cross-session memories note on first use
 	// (idempotent — never overwrites an existing note).
-	await seedMemoriesNote(plugin.settings.notor_dir, new VaultSessionFs(plugin.app)).catch((e) =>
+	await seedMemoriesNote(host.settings.notor_dir, new VaultSessionFs(host.app)).catch((e) =>
 		log.warn("memories.md seeding failed", { error: String(e) }),
 	);
 
 	// POL-004: surface this run in the unified activity indicator as an active
 	// `flow-run` entry (session-file-backed registry).
 	const flowRunStartedAt = new Date().toISOString();
-	plugin.upsertFlowRun({
+	host.upsertFlowRun({
 		type: "flow-run",
 		sessionId,
 		flowName: flow.name,
@@ -220,12 +220,12 @@ export async function launchOrchestration(
 		startedAt: flowRunStartedAt,
 	});
 
-	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(plugin.app));
+	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(host.app));
 	// Resolve once: the per-flow `notor-open-notes-in-editor` override (when set)
 	// wins, else the global `orchestration_open_notes_in_editor` setting.
-	const openNotes = flow.openNotesInEditor ?? plugin.settings.orchestration_open_notes_in_editor;
+	const openNotes = flow.openNotesInEditor ?? host.settings.orchestration_open_notes_in_editor;
 	// Fresh launch: no prior committed side-effects (INT-010 once() skip set).
-	const executor = buildExecutor(plugin, sessionLog, new Set<string>(), openNotes);
+	const executor = buildExecutor(host, sessionLog, new Set<string>(), openNotes);
 
 	const abortController = new AbortController();
 	const abortSignal = options?.abortSignal ?? abortController.signal;
@@ -234,7 +234,7 @@ export async function launchOrchestration(
 	// guard, and onunload teardown can find and cancel it. A child / chaining run
 	// that inherits a parent abort signal (`options.abortSignal`) is cancelled
 	// transitively via the cascade, so only register the controller we own here.
-	const registry = plugin.getOrchestrationRunRegistry();
+	const registry = host.getOrchestrationRunRegistry();
 	if (!options?.abortSignal) {
 		registry.register({
 			sessionId,
@@ -248,7 +248,7 @@ export async function launchOrchestration(
 	// successor's `notor-flow-inputs` so the prompt builder injects the HANDOFF
 	// section on the terminal step (the predecessor shapes its forwarded payload).
 	const onCompleteFlowInputs = flow.onCompleteFlow
-		? await resolveSuccessorInputs(plugin, flow.onCompleteFlow)
+		? await resolveSuccessorInputs(host, flow.onCompleteFlow)
 		: null;
 
 	const requestUserInput = options?.requestUserInput;
@@ -269,7 +269,7 @@ export async function launchOrchestration(
 			childEdges: [],
 		}),
 		makeConversationId: () => crypto.randomUUID(),
-		mode: options?.mode ?? plugin.settings.mode,
+		mode: options?.mode ?? host.settings.mode,
 		sessionId,
 		abortSignal,
 		origin,
@@ -281,7 +281,7 @@ export async function launchOrchestration(
 		// terminal step's HANDOFF section so the predecessor shapes its payload.
 		onCompleteFlowInputs,
 		// INT-003: query the session's task registry to gate FLOW_COMPLETE.
-		listOpenTasks: () => listOpenTaskKeys(plugin, ws.tasksPath),
+		listOpenTasks: () => listOpenTaskKeys(host, ws.tasksPath),
 		// INT-030: interactive pause. The runner writes user.input.required,
 		// suspends, and calls this to collect the answer (a modal). Returning
 		// null (declined/dismissed) finalizes via FLOW_CANCELLED. The callback is
@@ -321,12 +321,12 @@ export async function launchOrchestration(
 	// INT-001 + Part B: reflect the terminal status into session.json (the recovery
 	// entry point) and write the opt-in failure report — the shared finalize
 	// invariant both a fresh launch and a recovery resume apply identically.
-	const finalStatus = await finalizeRun(plugin, sessionManager, sessionId, flow, result);
+	const finalStatus = await finalizeRun(host, sessionManager, sessionId, flow, result);
 
 	// POL-004: reflect the terminal status into the unified indicator's flow-run
 	// entry. Bug C: preserve the entry's original `startedAt` (overwriting it with
 	// the finalize timestamp mis-sorted completed entries).
-	plugin.upsertFlowRun({
+	host.upsertFlowRun({
 		type: "flow-run",
 		sessionId,
 		flowName: flow.name,
@@ -342,7 +342,7 @@ export async function launchOrchestration(
 	// A → B → A on-complete cycle terminates at max_depth / the aggregate budget. A
 	// blocked handoff is a loud FLOW_ERROR (the chain has no caller to return to).
 	if (result.status === "completed" && flow.onCompleteFlow) {
-		await chainToSuccessor(plugin, flow, result, sessionId, requestUserInput).catch((e) =>
+		await chainToSuccessor(host, flow, result, sessionId, requestUserInput).catch((e) =>
 			log.error("Chaining handoff failed", { flow: flow.name, error: String(e) }),
 		);
 	}
@@ -382,14 +382,14 @@ function skippedRunResult(flow: OrchestrationFlow): OrchestrationRunResult {
  * HANDOFF section is then simply omitted).
  */
 async function resolveSuccessorInputs(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	successorName: string,
 ): Promise<string | null> {
 	try {
 		const parser = new FlowDefinitionParser(
-			plugin.app.vault,
-			plugin.app.metadataCache,
-			plugin.settings.notor_dir,
+			host.app.vault,
+			host.app.metadataCache,
+			host.settings.notor_dir,
 		);
 		const parsed = await parser.discoverFlows();
 		const match = parsed.find((p) => p.flow.name === successorName);
@@ -417,7 +417,7 @@ async function resolveSuccessorInputs(
  * the code rather than the code changed.
  */
 async function chainToSuccessor(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	predecessor: OrchestrationFlow,
 	predecessorResult: OrchestrationRunResult,
 	predecessorSessionId: string,
@@ -427,9 +427,9 @@ async function chainToSuccessor(
 	if (!successorName) return;
 
 	const parser = new FlowDefinitionParser(
-		plugin.app.vault,
-		plugin.app.metadataCache,
-		plugin.settings.notor_dir,
+		host.app.vault,
+		host.app.metadataCache,
+		host.settings.notor_dir,
 	);
 	const parsed = await parser.discoverFlows();
 	const successor = parsed.find((p) => p.flow.name === successorName)?.flow;
@@ -468,7 +468,7 @@ async function chainToSuccessor(
 	// Forward the predecessor's terminal payload (shaped by the HANDOFF section).
 	const forwardedPayload = predecessorResult.text;
 	new Notice(`Chaining '${predecessor.name}' → '${successorName}'…`);
-	await launchOrchestration(plugin, successor, forwardedPayload, {
+	await launchOrchestration(host, successor, forwardedPayload, {
 		origin: "chaining",
 		parentSessionId: predecessorSessionId,
 		// Inherit the SAME shared cell by reference + depth + 1 (bounded cycle).
@@ -476,8 +476,8 @@ async function chainToSuccessor(
 		parentScratchpadPath:
 			successor.handoffIsolation === "shared"
 				? new OrchestrationSessionManager(
-						plugin.settings.notor_dir,
-						new VaultSessionFs(plugin.app),
+						host.settings.notor_dir,
+						new VaultSessionFs(host.app),
 					).resolveWorkspace(predecessorSessionId).scratchpadPath
 				: undefined,
 		requestUserInput,

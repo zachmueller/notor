@@ -145,6 +145,46 @@ export class VaultStepConversationStore implements StepConversationStore {
 		}
 	}
 
+	/**
+	 * Add a `parent` back-link edge on a child flow's **entry** step conversation
+	 * header, pointing at the caller's step conversation (INT-043). The reciprocal
+	 * of the `child` edge composition writes on the caller side; called by the
+	 * `run_flow` spawner (child-spawn) once the child's entry conversation is known.
+	 *
+	 * Single owner for step-conversation header surgery (F6 §4.2): same fs seam and
+	 * same idempotent-edge idiom as {@link backfillNextEdge}, so the raw-adapter copy
+	 * that lived in launch.ts is gone. The entry conversation belongs to a different
+	 * session's runner, so its path is derived from `historyDir` + the conversation
+	 * id (the `pathById` map only covers conversations THIS store persisted).
+	 */
+	async backfillParentEdge(
+		childEntryConversationId: string,
+		parentConversationId: string,
+		parentSessionId: string,
+	): Promise<void> {
+		const path = `${this.historyDir.replace(/\/+$/, "")}/orchestration_step_${childEntryConversationId}.jsonl`;
+		try {
+			if (!(await this.fs.exists(path))) return;
+			const content = await this.fs.read(path);
+			const newline = content.indexOf("\n");
+			const headerLine = newline >= 0 ? content.slice(0, newline) : content;
+			const rest = newline >= 0 ? content.slice(newline) : "";
+			const header = JSON.parse(headerLine) as Record<string, unknown>;
+			header.schema_version ??= 1;
+			const edges = Array.isArray(header.orchestration_edges)
+				? (header.orchestration_edges as OrchestrationEdge[])
+				: [];
+			// Idempotent: don't duplicate an existing parent edge to the same target.
+			if (!edges.some((e) => e.kind === "parent" && e.conversation_id === parentConversationId)) {
+				edges.push({ kind: "parent", conversation_id: parentConversationId, session_id: parentSessionId });
+			}
+			header.orchestration_edges = edges;
+			await this.fs.write(path, JSON.stringify(header) + rest);
+		} catch (e) {
+			log.warn("Failed to backfill parent edge on child entry", { childEntryConversationId, error: String(e) });
+		}
+	}
+
 	/** Add a `next` edge to `predecessorId`'s header pointing at `nextId`. */
 	private async backfillNextEdge(predecessorId: string, nextId: string): Promise<void> {
 		const path = this.pathById.get(predecessorId);

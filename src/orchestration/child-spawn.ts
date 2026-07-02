@@ -11,11 +11,9 @@
  * @see specs/ZZ-misc/arch-review-july-2026/F6-launch-ts-decomposition.md
  */
 
-import { normalizePath } from "obsidian";
-import type NotorPlugin from "../main";
+import type { OrchestrationHost } from "./host";
 import type { AggregateBudget } from "../run-loop/types";
 import { logger } from "../utils/logger";
-import { atomicRewrite } from "../utils/atomic-write";
 import { FlowCompositionManager } from "./flow-composition-manager";
 import type {
 	SpawnChildFlow,
@@ -28,6 +26,7 @@ import { SessionRecovery, type RecoverableSession } from "./session-recovery";
 import { matchChildInLedger, parseLedgerEntries } from "./child-ledger";
 import type { OrchestrationRunResult } from "./runner";
 import type { OrchestrationFlow, OrchestrationSessionMeta } from "./types";
+import { VaultStepConversationStore } from "./step-conversation-store";
 import { VaultSessionFs, VaultSessionLogWriter } from "./launch-wiring";
 import { launchOrchestration, newSessionId, type RequestUserInput } from "./run-lifecycle";
 import { makeRecoveryFs, resumeRecoveredSession } from "./recovery-boot";
@@ -38,7 +37,7 @@ const log = logger("OrchestrationLaunch");
  * The minimal read surface the child-ledger reconciliation + entry-conversation
  * resolution need (F1 Fix 3). Mirrors the `exists`/`read` half of `RecoveryFs`;
  * `makeChildFlowSpawner` builds the vault-backed adapter in production, and tests
- * inject a fake so the replay path is unit-testable without a plugin.
+ * inject a fake so the replay path is unit-testable without a host.
  */
 export interface ChildLedgerFs {
 	exists(path: string): Promise<boolean>;
@@ -47,7 +46,7 @@ export interface ChildLedgerFs {
 
 /**
  * Build the {@link SpawnChildFlow} callback injected into `RunFlowTool`.
- * Closes over the plugin; for each `run_flow` call it:
+ * Closes over the host; for each `run_flow` call it:
  *  1. resolves the parent session's depth (from the parent's `RunContext` cascade,
  *     passed by the tool) and writes a **`child.spawned`** ledger entry on the
  *     **parent** session log (the recovery anchor — FR-125);
@@ -78,27 +77,31 @@ export interface ChildLedgerFs {
  * from the composition site (main.ts) so this logic module never imports ui.
  */
 export function makeChildFlowSpawner(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	requestUserInput?: RequestUserInput,
 ): SpawnChildFlow {
-	const sessionManager = new OrchestrationSessionManager(
-		plugin.settings.notor_dir,
-		new VaultSessionFs(plugin.app),
-	);
+	const fsVault = new VaultSessionFs(host.app);
+	const sessionManager = new OrchestrationSessionManager(host.settings.notor_dir, fsVault);
 	// The vault-backed reader the ledger reconciliation + entry-conversation
-	// resolution read through (F1 Fix 3 — injected so both are unit-testable).
+	// resolution read through (F1 Fix 3 — injected so both are unit-testable). A
+	// `RecoveryFs`-shaped reader (exists/read); routed through the `VaultSessionFs`
+	// seam rather than the raw adapter so child-spawn holds no direct vault I/O.
 	const ledgerFs: ChildLedgerFs = {
-		exists: (p) => plugin.app.vault.adapter.exists(normalizePath(p)),
-		read: (p) => plugin.app.vault.adapter.read(normalizePath(p)),
+		exists: (p) => fsVault.exists(p),
+		read: (p) => fsVault.read(p),
 	};
+	// The single owner for step-conversation header surgery (F6 §4.2) — the
+	// reciprocal `parent`-edge backfill goes through the store's atomic fs seam
+	// instead of raw adapter I/O.
+	const stepConversationStore = new VaultStepConversationStore(fsVault, host.settings.history_path);
 
 	return async (req: SpawnChildFlowRequest): Promise<SpawnChildFlowResult> => {
 		// Resolve the callee flow (the tool already validated it is invocable, but
 		// re-resolve so the spawner is self-contained / testable).
 		const composition = new FlowCompositionManager(
-			plugin.app.vault,
-			plugin.app.metadataCache,
-			plugin.settings.notor_dir,
+			host.app.vault,
+			host.app.metadataCache,
+			host.settings.notor_dir,
 		);
 		const flow = await composition.resolveFlow(req.flowName);
 		if (!flow) {
@@ -106,10 +109,10 @@ export function makeChildFlowSpawner(
 		}
 
 		const parentWs = sessionManager.resolveWorkspace(req.parentSessionId);
-		const parentLog = new SessionLog(parentWs.logPath, new VaultSessionLogWriter(plugin.app));
+		const parentLog = new SessionLog(parentWs.logPath, new VaultSessionLogWriter(host.app));
 
 		// --- Recovery reuse/resume (INT-044 / F1 Fix 3) --------------------------
-		const reconciled = await reconcileChildLedger(plugin, req, ledgerFs, sessionManager, requestUserInput);
+		const reconciled = await reconcileChildLedger(host, req, ledgerFs, sessionManager, requestUserInput);
 		if (reconciled) return reconciled;
 
 		// --- Fresh spawn ---------------------------------------------------------
@@ -132,7 +135,7 @@ export function makeChildFlowSpawner(
 
 		let result: OrchestrationRunResult;
 		try {
-			result = await launchOrchestration(plugin, flow, req.payload, {
+			result = await launchOrchestration(host, flow, req.payload, {
 				origin: "run_flow",
 				parentSessionId: req.parentSessionId,
 				sessionId: childSessionId,
@@ -164,10 +167,10 @@ export function makeChildFlowSpawner(
 			.catch((e) => log.warn("child.result append failed", { error: String(e) }));
 
 		const entryConversationId = await resolveChildEntryConversationId(ledgerFs, sessionManager, childSessionId);
-		// Backfill the reciprocal `parent` edge on the child entry conversation.
+		// Backfill the reciprocal `parent` edge on the child entry conversation
+		// (through the store — the single owner for step-conversation header surgery).
 		if (entryConversationId && req.parentConversationId) {
-			await backfillParentEdge(
-				plugin,
+			await stepConversationStore.backfillParentEdge(
 				entryConversationId,
 				req.parentConversationId,
 				req.parentSessionId,
@@ -203,7 +206,7 @@ export function makeChildFlowSpawner(
  * id-keyed match could never hit and the child would double-execute.
  */
 async function reconcileChildLedger(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	req: SpawnChildFlowRequest,
 	fs: ChildLedgerFs,
 	sessionManager: OrchestrationSessionManager,
@@ -252,15 +255,15 @@ async function reconcileChildLedger(
 	// Non-terminal child → RESUME it in place (replay its own log), never respawn.
 	log.info("run_flow recovery: resuming non-terminal child in place", { childSessionId });
 	const composition = new FlowCompositionManager(
-		plugin.app.vault,
-		plugin.app.metadataCache,
-		plugin.settings.notor_dir,
+		host.app.vault,
+		host.app.metadataCache,
+		host.settings.notor_dir,
 	);
 	const flow = await composition.resolveFlow(req.flowName);
 	if (!flow) return childErrorResult(req, `Flow '${req.flowName}' is no longer invocable.`, childSessionId);
 
 	const recovery = new SessionRecovery();
-	const recoveryFs = makeRecoveryFs(plugin, sessionManager);
+	const recoveryFs = makeRecoveryFs(host, sessionManager);
 	const logRaw = await recoveryFs.readLog(childSessionId);
 	const metaRaw = await recoveryFs.readMeta(childSessionId);
 	if (!logRaw || !metaRaw) {
@@ -270,7 +273,7 @@ async function reconcileChildLedger(
 	const recovered = recovery.replay(childMeta, logRaw, {
 		resolveCeilings: () => ({ maxIterations: flow.maxIterations, maxCostUsd: flow.maxCostUsd }),
 	});
-	const result = await resumeChildSession(plugin, flow, recovered, sessionManager, req.cascade, requestUserInput);
+	const result = await resumeChildSession(host, flow, recovered, sessionManager, req.cascade, requestUserInput);
 	const entryConversationId = await resolveChildEntryConversationId(fs, sessionManager, childSessionId);
 	return {
 		status: result.status,
@@ -336,41 +339,6 @@ async function resolveChildEntryConversationId(
 	return null;
 }
 
-/** Add a `parent` back-link edge on the child entry conversation's header. */
-async function backfillParentEdge(
-	plugin: NotorPlugin,
-	childEntryConversationId: string,
-	parentConversationId: string,
-	parentSessionId: string,
-): Promise<void> {
-	const path = `${plugin.settings.history_path.replace(/\/+$/, "")}/orchestration_step_${childEntryConversationId}.jsonl`;
-	try {
-		const norm = normalizePath(path);
-		if (!(await plugin.app.vault.adapter.exists(norm))) return;
-		await atomicRewrite(plugin.app.vault.adapter, norm, (content) => {
-			const nl = content.indexOf("\n");
-			const headerLine = nl >= 0 ? content.slice(0, nl) : content;
-			const rest = nl >= 0 ? content.slice(nl) : "";
-			const header = JSON.parse(headerLine) as Record<string, unknown>;
-			header.schema_version ??= 1;
-			const edges = Array.isArray(header.orchestration_edges)
-				? (header.orchestration_edges as Array<Record<string, unknown>>)
-				: [];
-			if (!edges.some((e) => e.kind === "parent" && e.conversation_id === parentConversationId)) {
-				edges.push({
-					kind: "parent",
-					conversation_id: parentConversationId,
-					session_id: parentSessionId,
-				});
-			}
-			header.orchestration_edges = edges;
-			return JSON.stringify(header) + rest;
-		});
-	} catch (e) {
-		log.warn("Failed to backfill parent edge on child entry", { error: String(e) });
-	}
-}
-
 /**
  * Resume a non-terminal `run_flow` child in place (INT-044). The parent's replay
  * (via {@link makeChildFlowSpawner}'s reconciliation) calls this to replay the
@@ -383,14 +351,14 @@ async function backfillParentEdge(
  * calls {@link resumeRecoveredSession} directly.
  */
 async function resumeChildSession(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	flow: OrchestrationFlow,
 	recovered: RecoverableSession,
 	sessionManager: OrchestrationSessionManager,
 	cascade: { budget: AggregateBudget; depth: number; abort: AbortSignal },
 	requestUserInput?: RequestUserInput,
 ): Promise<OrchestrationRunResult> {
-	return resumeRecoveredSession(plugin, flow, recovered, sessionManager, {
+	return resumeRecoveredSession(host, flow, recovered, sessionManager, {
 		budget: cascade.budget,
 		depth: cascade.depth,
 		abort: cascade.abort,

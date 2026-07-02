@@ -1,7 +1,7 @@
 /**
  * Orchestration launch wiring (FEAT-011) — the stack-composition half of the
  * former `launch.ts`. Builds a fully-wired {@link StepTurnExecutor} from the
- * plugin's chat stack and the two per-step runtime factories (conversation +
+ * host's chat stack and the two per-step runtime factories (conversation +
  * code) behind it, plus the vault-adapter-backed fs seams the session log and
  * task registry read/write through.
  *
@@ -18,13 +18,13 @@
 
 import { Notice, normalizePath } from "obsidian";
 import type { App } from "obsidian";
-import type NotorPlugin from "../main";
+import type { OrchestrationHost } from "./host";
 import { ToolDispatcher } from "../chat/dispatcher";
 import { ConfigResolver } from "../chat/config-resolver";
 import type { ToolDefinition } from "../providers/provider";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { Tool } from "../tools/tool";
-import { buildUtils, buildLibs, buildObsidianExports } from "../extensions/runtime-context";
+import { buildLibs, buildObsidianExports } from "../extensions/runtime-context";
 import { resolveNote } from "../utils/resolve-note";
 import { NoteOpener } from "../tools/note-opener";
 import { resolveIncludeNotes } from "../include-note/resolver";
@@ -48,10 +48,10 @@ import { jumpToStepConversation } from "../ui/orchestration-modals";
  * exactly what those tools persisted.
  */
 export async function listOpenTaskKeys(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	tasksPath: string,
 ): Promise<Array<{ key: string; description: string }>> {
-	const adapter = plugin.app.vault.adapter;
+	const adapter = host.app.vault.adapter;
 	const fs: TaskFs = {
 		exists: (p) => adapter.exists(normalizePath(p)),
 		read: (p) => adapter.read(normalizePath(p)),
@@ -68,7 +68,7 @@ export async function listOpenTaskKeys(
 }
 
 /**
- * Build the {@link StepTurnExecutor} wired to the plugin's chat stack. Shared by
+ * Build the {@link StepTurnExecutor} wired to the host's chat stack. Shared by
  * a fresh launch and a recovery resume so both run on the identical runtime.
  *
  * `committedKeys` is the SHARED `once()` skip set for the whole run (seeded empty
@@ -76,7 +76,7 @@ export async function listOpenTaskKeys(
  * external effect is not re-run — FR-125 / INT-010).
  */
 export function buildExecutor(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	sessionLog: SessionLog,
 	committedKeys: Set<string>,
 	openNotesInEditor: boolean,
@@ -84,13 +84,13 @@ export function buildExecutor(
 	// INT-006: persist each step conversation (hidden from the flat list) with its
 	// orchestration_edges header into the chat history directory.
 	const stepConversationStore = new VaultStepConversationStore(
-		new VaultSessionFs(plugin.app),
-		plugin.settings.history_path,
+		new VaultSessionFs(host.app),
+		host.settings.history_path,
 	);
 	// INT-010: the deterministic code-step executor (notor-step-mode: code).
 	const codeStepExecutor = new CodeStepExecutor(
 		{
-			runtimeFactory: makeCodeStepRuntimeFactory(plugin, committedKeys, openNotesInEditor),
+			runtimeFactory: makeCodeStepRuntimeFactory(host, committedKeys, openNotesInEditor),
 			notifyError: (message: string) => new Notice(message),
 		},
 		sessionLog,
@@ -98,13 +98,13 @@ export function buildExecutor(
 	return new StepTurnExecutor(
 		{
 			personaManager: {
-				getPersonaByName: (name: string) => plugin.getPersonaManager().getPersonaByName(name),
+				getPersonaByName: (name: string) => host.getPersonaManager().getPersonaByName(name),
 			},
-			providerRegistry: plugin.getProviderRegistry(),
-			settings: plugin.settings,
+			providerRegistry: host.getProviderRegistry(),
+			settings: host.settings,
 			promptBuilder: new StepPromptBuilder(),
-			runtimeFactory: makeRuntimeFactory(plugin, openNotesInEditor),
-			memoriesPath: memoriesPath(plugin.settings.notor_dir),
+			runtimeFactory: makeRuntimeFactory(host, openNotesInEditor),
+			memoriesPath: memoriesPath(host.settings.notor_dir),
 			stepConversationStore,
 			codeStepExecutor,
 			// INT-020 / INT-021: per-turn progress Notice. The jump callback reuses
@@ -120,13 +120,13 @@ export function buildExecutor(
 					iteration,
 					emittedTopic,
 					conversationId,
-					onJumpToConversation: () => jumpToStepConversation(plugin, conversationId),
+					onJumpToConversation: () => jumpToStepConversation(host, conversationId),
 				}),
 			resolveIncludes: async (body, notePath) => {
 				const result = await resolveIncludeNotes(
 					body,
-					plugin.app.vault,
-					plugin.app.metadataCache,
+					host.app.vault,
+					host.app.metadataCache,
 					notePath,
 					"workflow",
 				);
@@ -191,56 +191,85 @@ export class VaultSessionFs implements SessionFs {
 }
 
 /**
- * Build the real per-step {@link StepRuntimeFactory} from the plugin. Each call
+ * The persona type threaded to a conversation step's dispatcher assembly (the
+ * `persona` arg of {@link StepRuntimeFactory.build}). A code step passes `null`.
+ */
+type StepPersona = Parameters<StepRuntimeFactory["build"]>[0]["persona"];
+
+/**
+ * Assemble a fresh per-step {@link ToolDispatcher} + its resolved effective
+ * config and filtered tool definitions — the assembly the conversation-step and
+ * code-step runtime factories previously duplicated byte-for-byte (F6 §4.1). The
+ * only variation is the `persona`: a conversation step pins the active persona
+ * name and resolves the effective config against it; a code step passes `null`
+ * (which leaves the dispatcher's default `activePersonaName` of `null` untouched,
+ * so passing it is behavior-neutral vs. the old omit).
+ */
+async function assembleStepDispatcher(
+	host: OrchestrationHost,
+	opts: { persona: StepPersona; openNotesInEditor: boolean },
+): Promise<{ dispatcher: ToolDispatcher; effective: EffectiveToolConfig; toolDefinitions: ToolDefinition[] }> {
+	const settings = host.settings;
+	const registry = host.getToolRegistry();
+
+	// A fresh per-step dispatcher (mirrors the sub-agent dispatcher pattern), so
+	// concurrent step turns don't share mutable dispatcher state.
+	const dispatcher = new ToolDispatcher();
+	for (const tool of registry.getAll()) {
+		dispatcher.registerTool(tool);
+	}
+	dispatcher.setSettings(settings);
+	// Honor the orchestration note-opening decision (global setting or the per-flow
+	// `notor-open-notes-in-editor` override), independent of the chat
+	// `open_notes_on_access` setting, for every tool this step dispatches.
+	dispatcher.setOpenNotesOverride(opts.openNotesInEditor);
+	dispatcher.setActivePersonaName(opts.persona?.name ?? null);
+	if (host.vaultRootPath) dispatcher.setVaultRootPath(host.vaultRootPath);
+	dispatcher.setResolveVaultPath((p: string) => {
+		const file = resolveNote(p, host.app.vault, host.app.metadataCache);
+		return file?.path ?? null;
+	});
+
+	// Filtered tool definitions via the shared ConfigResolver path.
+	const configResolver = new ConfigResolver(
+		settings,
+		host.getSystemPromptBuilder(),
+		dispatcher,
+	);
+	configResolver.setGetToolDefinitions((effective?: EffectiveToolConfig) =>
+		buildToolDefinitions(registry.getAll(), effective),
+	);
+	const { effective, toolDefinitions } = await configResolver.resolveEffectiveConfig(
+		undefined,
+		null,
+		opts.persona,
+	);
+	dispatcher.setEffectiveToolConfig(effective);
+
+	return { dispatcher, effective, toolDefinitions };
+}
+
+/**
+ * Build the real per-step {@link StepRuntimeFactory} from the host. Each call
  * to `build` composes the persona system prompt + filtered tool definitions +
  * a per-step dispatcher (with the orchestration session context bound via the
  * dispatcher's session-context seam).
  */
-export function makeRuntimeFactory(plugin: NotorPlugin, openNotesInEditor: boolean): StepRuntimeFactory {
+export function makeRuntimeFactory(host: OrchestrationHost, openNotesInEditor: boolean): StepRuntimeFactory {
 	return {
 		async build({ step, persona, resolved, mode, orchestrationContext }): Promise<StepRuntime> {
-			const settings = plugin.settings;
-			const registry = plugin.getToolRegistry();
+			const settings = host.settings;
 
-			// A fresh per-step dispatcher (mirrors the sub-agent dispatcher pattern),
-			// so concurrent step turns don't share mutable dispatcher state.
-			const dispatcher = new ToolDispatcher();
-			for (const tool of registry.getAll()) {
-				dispatcher.registerTool(tool);
-			}
-			dispatcher.setSettings(settings);
-			// Honor the orchestration note-opening decision (global setting or the
-			// per-flow `notor-open-notes-in-editor` override), independent of the chat
-			// `open_notes_on_access` setting, for every tool this step dispatches.
-			dispatcher.setOpenNotesOverride(openNotesInEditor);
-			dispatcher.setActivePersonaName(persona?.name ?? null);
-			if (plugin.vaultRootPath) dispatcher.setVaultRootPath(plugin.vaultRootPath);
-			dispatcher.setResolveVaultPath((p: string) => {
-				const file = resolveNote(p, plugin.app.vault, plugin.app.metadataCache);
-				return file?.path ?? null;
+			const { dispatcher, effective, toolDefinitions } = await assembleStepDispatcher(host, {
+				persona,
+				openNotesInEditor,
 			});
 
-			// Filtered tool definitions via the shared ConfigResolver path.
-			const configResolver = new ConfigResolver(
-				settings,
-				plugin.getSystemPromptBuilder(),
-				dispatcher,
-			);
-			configResolver.setGetToolDefinitions((effective?: EffectiveToolConfig) =>
-				buildToolDefinitions(registry.getAll(), effective),
-			);
-			const { effective, toolDefinitions } = await configResolver.resolveEffectiveConfig(
-				undefined,
-				null,
-				persona,
-			);
-			dispatcher.setEffectiveToolConfig(effective);
-
 			// Persona-composed system prompt (append/replace per the persona's mode).
-			const systemPrompt = await plugin
+			const systemPrompt = await host
 				.getSystemPromptBuilder()
 				.assemble(
-					plugin.settings.mode,
+					host.settings.mode,
 					toolDefinitions,
 					undefined,
 					undefined,
@@ -250,7 +279,7 @@ export function makeRuntimeFactory(plugin: NotorPlugin, openNotesInEditor: boole
 					settings.enable_popover_references,
 				);
 
-			const provider = plugin.getProviderRegistry().getProvider(resolved.providerId);
+			const provider = host.getProviderRegistry().getProvider(resolved.providerId);
 
 			// F2: build the per-step policy context so the step's RunLoop gates its
 			// tool calls through the pure engine (command patterns / paths /
@@ -263,9 +292,9 @@ export function makeRuntimeFactory(plugin: NotorPlugin, openNotesInEditor: boole
 				effectiveConfig: effective,
 				mode,
 				domainDenylist: settings.domain_denylist,
-				vaultRootPath: plugin.vaultRootPath ?? "",
+				vaultRootPath: host.vaultRootPath ?? "",
 				resolveVaultPath: (p: string) => {
-					const file = resolveNote(p, plugin.app.vault, plugin.app.metadataCache);
+					const file = resolveNote(p, host.app.vault, host.app.metadataCache);
 					return file?.path ?? null;
 				},
 				sessionAllowedPaths: [
@@ -298,11 +327,11 @@ export function makeRuntimeFactory(plugin: NotorPlugin, openNotesInEditor: boole
  * effects commit), shared with the conversation path.
  */
 export function makeCodeStepRuntimeFactory(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	committedKeys: Set<string>,
 	openNotesInEditor: boolean,
 ): CodeStepRuntimeFactory {
-	const adapter = plugin.app.vault.adapter;
+	const adapter = host.app.vault.adapter;
 	const scratchpadFs: ScratchpadFs = {
 		read: async (path) => {
 			const norm = normalizePath(path);
@@ -345,41 +374,23 @@ export function makeCodeStepRuntimeFactory(
 
 	return {
 		async build({ orchestrationContext, mode, abortSignal }): Promise<CodeStepRuntime> {
-			const settings = plugin.settings;
-			const registry = plugin.getToolRegistry();
+			const settings = host.settings;
 
-			// A fresh per-step dispatcher (mirrors the conversation-step pattern) so
-			// concurrent code steps don't share mutable dispatcher state.
-			const dispatcher = new ToolDispatcher();
-			for (const tool of registry.getAll()) {
-				dispatcher.registerTool(tool);
-			}
-			dispatcher.setSettings(settings);
-			// Honor the orchestration note-opening decision for tools dispatched via
-			// `orchestration.callTool` (same seam as a conversation step's LLM calls).
-			dispatcher.setOpenNotesOverride(openNotesInEditor);
-			if (plugin.vaultRootPath) dispatcher.setVaultRootPath(plugin.vaultRootPath);
-			dispatcher.setResolveVaultPath((p: string) => {
-				const file = resolveNote(p, plugin.app.vault, plugin.app.metadataCache);
-				return file?.path ?? null;
+			// A code step assembles the same per-step dispatcher as a conversation
+			// step, minus the persona pin (it passes `null`) — so
+			// `orchestration.callTool`/`callMcpTool` dispatch through the same seam as
+			// LLM tool calls and honor path enforcement + the auto-allowed scratchpad.
+			const { dispatcher, effective } = await assembleStepDispatcher(host, {
+				persona: null,
+				openNotesInEditor,
 			});
-			const configResolver = new ConfigResolver(
-				settings,
-				plugin.getSystemPromptBuilder(),
-				dispatcher,
-			);
-			configResolver.setGetToolDefinitions((effective?: EffectiveToolConfig) =>
-				buildToolDefinitions(registry.getAll(), effective),
-			);
-			const { effective } = await configResolver.resolveEffectiveConfig(undefined, null, null);
-			dispatcher.setEffectiveToolConfig(effective);
 
 			// utils/libs/obsidian — IDENTICAL to user-defined tools, except the
 			// note-opener honors the orchestration note-opening decision (a code step
 			// may call `utils.notes.open` directly, bypassing the dispatcher).
-			const utils = buildUtils(plugin);
+			const utils = host.buildExtensionUtils();
 			utils._setNoteOpener(new NoteOpener(
-				plugin.app,
+				host.app,
 				openNotesInEditor,
 				settings.focus_notes_on_access,
 			));
@@ -398,9 +409,9 @@ export function makeCodeStepRuntimeFactory(
 				effectiveConfig: effective,
 				mode,
 				domainDenylist: settings.domain_denylist,
-				vaultRootPath: plugin.vaultRootPath ?? "",
+				vaultRootPath: host.vaultRootPath ?? "",
 				resolveVaultPath: (p: string) => {
-					const file = resolveNote(p, plugin.app.vault, plugin.app.metadataCache);
+					const file = resolveNote(p, host.app.vault, host.app.metadataCache);
 					return file?.path ?? null;
 				},
 				sessionAllowedPaths: [
@@ -412,7 +423,7 @@ export function makeCodeStepRuntimeFactory(
 			};
 
 			return {
-				app: plugin.app,
+				app: host.app,
 				obsidian,
 				utils,
 				libs,

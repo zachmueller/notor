@@ -15,7 +15,7 @@
 
 import { FuzzySuggestModal, Modal, Notice, ButtonComponent } from "obsidian";
 import type { App } from "obsidian";
-import type NotorPlugin from "../main";
+import type { OrchestrationHost } from "../orchestration/host";
 import { logger } from "../utils/logger";
 import { FlowDefinitionParser } from "../orchestration/flow-parser";
 import type { OrchestrationFlow } from "../orchestration/types";
@@ -32,9 +32,9 @@ const log = logger("OrchestrationLaunch");
  * conversation that cannot be resolved surfaces the same "may have been deleted"
  * Notice the protocol handler uses.
  */
-export function jumpToStepConversation(plugin: NotorPlugin, conversationId: string): void {
-	void plugin.openChatPanel().then(() => {
-		const orchestrator = plugin.getActiveOrchestrator();
+export function jumpToStepConversation(host: OrchestrationHost, conversationId: string): void {
+	void host.openChatPanel().then(() => {
+		const orchestrator = host.getActiveOrchestrator();
 		if (!orchestrator) {
 			new Notice("No active chat panel");
 			return;
@@ -219,11 +219,11 @@ export function requestOrchestrationInput(
  * {@link FlowDefinitionParser}. Surfaced by the "Notor: Run Orchestration"
  * command (gated on `orchestration_enabled`).
  */
-export async function showOrchestrationPicker(plugin: NotorPlugin): Promise<void> {
+export async function showOrchestrationPicker(host: OrchestrationHost): Promise<void> {
 	const parser = new FlowDefinitionParser(
-		plugin.app.vault,
-		plugin.app.metadataCache,
-		plugin.settings.notor_dir,
+		host.app.vault,
+		host.app.metadataCache,
+		host.settings.notor_dir,
 	);
 
 	let parsed;
@@ -236,17 +236,17 @@ export async function showOrchestrationPicker(plugin: NotorPlugin): Promise<void
 	}
 
 	const flows = parsed.map((p) => p.flow);
-	const emptyMessage = `No orchestration flows found in ${plugin.settings.notor_dir.replace(/\/$/, "")}/orchestrations/`;
+	const emptyMessage = `No orchestration flows found in ${host.settings.notor_dir.replace(/\/$/, "")}/orchestrations/`;
 
 	new FlowPickerModal(
-		plugin.app,
+		host.app,
 		flows,
 		(flow) => {
-			new ObjectiveModal(plugin.app, flow.name, (objective) => {
-				launchOrchestration(plugin, flow, objective, {
+			new ObjectiveModal(host.app, flow.name, (objective) => {
+				launchOrchestration(host, flow, objective, {
 					origin: "user",
 					requestUserInput: (flowName, question) =>
-						requestOrchestrationInput(plugin.app, flowName, question),
+						requestOrchestrationInput(host.app, flowName, question),
 				}).catch((e) => {
 					log.error("Orchestration run failed", { flow: flow.name, error: String(e) });
 					new Notice(`Orchestration '${flow.name}' failed: ${e instanceof Error ? e.message : String(e)}`);

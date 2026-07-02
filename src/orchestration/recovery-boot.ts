@@ -12,7 +12,7 @@
  */
 
 import { Notice, ButtonComponent, normalizePath } from "obsidian";
-import type NotorPlugin from "../main";
+import type { OrchestrationHost } from "./host";
 import type { AggregateBudget, OrchestrationToolContext } from "../run-loop/types";
 import { logger } from "../utils/logger";
 import { FlowDefinitionParser } from "./flow-parser";
@@ -29,15 +29,15 @@ const log = logger("OrchestrationLaunch");
 
 /** Build the {@link RecoveryFs} the scan + child-resume read sessions through. */
 export function makeRecoveryFs(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	sessionManager: OrchestrationSessionManager,
 ): RecoveryFs {
-	const fsVault = new VaultSessionFs(plugin.app);
+	const fsVault = new VaultSessionFs(host.app);
 	const sessionsRoot = `${sessionManager.rootPath}/sessions`;
 	return {
 		listSessions: async () => {
 			if (!(await fsVault.exists(sessionsRoot))) return [];
-			const listing = await plugin.app.vault.adapter.list(normalizePath(sessionsRoot));
+			const listing = await host.app.vault.adapter.list(normalizePath(sessionsRoot));
 			return listing.folders.map((f) => f.split("/").pop() ?? f);
 		},
 		readMeta: async (sessionId) => {
@@ -73,21 +73,21 @@ export function makeRecoveryFs(
  * imports ui.
  */
 export async function recoverOrchestrations(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	requestUserInput?: RequestUserInput,
 ): Promise<void> {
-	const fsVault = new VaultSessionFs(plugin.app);
-	const sessionManager = new OrchestrationSessionManager(plugin.settings.notor_dir, fsVault);
-	const recoveryFs = makeRecoveryFs(plugin, sessionManager);
+	const fsVault = new VaultSessionFs(host.app);
+	const sessionManager = new OrchestrationSessionManager(host.settings.notor_dir, fsVault);
+	const recoveryFs = makeRecoveryFs(host, sessionManager);
 
 	// Resolve each flow's finite ceilings so the budget re-seeds from the real
 	// caps (not the engine defaults) when the flow is still discoverable.
 	let flowsByName = new Map<string, OrchestrationFlow>();
 	try {
 		const parser = new FlowDefinitionParser(
-			plugin.app.vault,
-			plugin.app.metadataCache,
-			plugin.settings.notor_dir,
+			host.app.vault,
+			host.app.metadataCache,
+			host.settings.notor_dir,
 		);
 		const parsed = await parser.discoverFlows();
 		flowsByName = new Map(parsed.map((p) => [p.flow.name, p.flow]));
@@ -127,7 +127,7 @@ export async function recoverOrchestrations(
 			continue;
 		}
 
-		// F1 Fix 2: liveness guard. A crashed plugin can leave a session
+		// F1 Fix 2: liveness guard. A crashed host can leave a session
 		// `status: "active"` while its original runner is still live (unload was
 		// unsafe before Fix 1, and the bounded unload abort is best-effort). Resuming
 		// such a session spawns a SECOND runner racing on one log. Detect the live
@@ -135,7 +135,7 @@ export async function recoverOrchestrations(
 		// runner (the log advances ≥2×/turn). A `null` stat (adapter differences) is
 		// treated as not-live. `interrupted` (paused) sessions are exempt — they are
 		// legitimately idle.
-		if (recovered.meta.status === "active" && (await isSessionLogLive(plugin, sessionManager, recovered.sessionId))) {
+		if (recovered.meta.status === "active" && (await isSessionLogLive(host, sessionManager, recovered.sessionId))) {
 			log.info("Recovery: session log is fresh — treating as live, skipping resume", {
 				sessionId: recovered.sessionId,
 				flow: flow.name,
@@ -146,7 +146,7 @@ export async function recoverOrchestrations(
 		// F1 Fix 2: resume is OFFERED, not forced — the user may have deliberately
 		// stopped Obsidian mid-run (or Stopped the flow). Surface a Notice with a
 		// Resume button; the run (and its indicator re-seed) only restarts on click.
-		offerResumeNotice(plugin, flow, recovered, sessionManager, requestUserInput);
+		offerResumeNotice(host, flow, recovered, sessionManager, requestUserInput);
 	}
 }
 
@@ -156,13 +156,13 @@ export async function recoverOrchestrations(
  * the pure {@link isSessionLogMtimeLive}.
  */
 async function isSessionLogLive(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	sessionManager: OrchestrationSessionManager,
 	sessionId: string,
 ): Promise<boolean> {
 	try {
 		const ws = sessionManager.resolveWorkspace(sessionId);
-		const stat = await plugin.app.vault.adapter.stat(normalizePath(ws.logPath));
+		const stat = await host.app.vault.adapter.stat(normalizePath(ws.logPath));
 		const mtime = stat && typeof stat.mtime === "number" ? stat.mtime : null;
 		return isSessionLogMtimeLive(mtime, Date.now());
 	} catch {
@@ -175,7 +175,7 @@ async function isSessionLogLive(
  * Fix 2). The run restarts only on click — resume is offered, not forced.
  */
 function offerResumeNotice(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	flow: OrchestrationFlow,
 	recovered: RecoverableSession,
 	sessionManager: OrchestrationSessionManager,
@@ -194,14 +194,14 @@ function offerResumeNotice(
 		.onClick(() => {
 			notice.hide();
 			// POL-004: re-seed the unified indicator so the resumed run surfaces.
-			plugin.upsertFlowRun({
+			host.upsertFlowRun({
 				type: "flow-run",
 				sessionId: recovered.sessionId,
 				flowName: flow.name,
 				status: "active",
 				startedAt: recovered.meta.started_at,
 			});
-			resumeRecoveredSession(plugin, flow, recovered, sessionManager, undefined, requestUserInput).catch((e) =>
+			resumeRecoveredSession(host, flow, recovered, sessionManager, undefined, requestUserInput).catch((e) =>
 				log.error("Orchestration resume failed", {
 					sessionId: recovered.sessionId,
 					error: String(e),
@@ -218,7 +218,7 @@ function offerResumeNotice(
  * re-seeds its budget from the rehydrated state.
  */
 export async function resumeRecoveredSession(
-	plugin: NotorPlugin,
+	host: OrchestrationHost,
 	flow: OrchestrationFlow,
 	recovered: RecoverableSession,
 	sessionManager: OrchestrationSessionManager,
@@ -228,18 +228,18 @@ export async function resumeRecoveredSession(
 	const ws = sessionManager.resolveWorkspace(recovered.sessionId);
 	await sessionManager.updateStatus(recovered.sessionId, "active").catch(() => undefined);
 
-	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(plugin.app));
+	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(host.app));
 	// Resolve the note-opening decision identically to a fresh launch (per-flow
 	// override, else the global orchestration setting).
-	const openNotes = flow.openNotesInEditor ?? plugin.settings.orchestration_open_notes_in_editor;
+	const openNotes = flow.openNotesInEditor ?? host.settings.orchestration_open_notes_in_editor;
 	// Resume: seed the once() skip set from the recovered log so an
 	// already-committed external effect is not re-run (FR-125 / INT-010).
-	const executor = buildExecutor(plugin, sessionLog, new Set(recovered.committedKeys), openNotes);
+	const executor = buildExecutor(host, sessionLog, new Set(recovered.committedKeys), openNotes);
 	// F1 Fix 1: a child resume cascades from the parent's abort signal; a ROOT
 	// resume owns its controller and registers it so the Stop UI / onunload can
 	// cancel it (children are cancelled transitively via the cascade — register
 	// root sessions only, i.e. when no `inheritedContext` was passed).
-	const registry = plugin.getOrchestrationRunRegistry();
+	const registry = host.getOrchestrationRunRegistry();
 	const rootController = inheritedContext?.abort ? null : new AbortController();
 	const abortSignal = inheritedContext?.abort ?? rootController!.signal;
 	if (rootController) {
@@ -266,7 +266,7 @@ export async function resumeRecoveredSession(
 			childEdges: [],
 		}),
 		makeConversationId: () => crypto.randomUUID(),
-		mode: plugin.settings.mode,
+		mode: host.settings.mode,
 		sessionId: recovered.sessionId,
 		abortSignal,
 		origin: recovered.meta.origin,
@@ -277,7 +277,7 @@ export async function resumeRecoveredSession(
 		inheritedContext: inheritedContext
 			? { budget: inheritedContext.budget, depth: inheritedContext.depth }
 			: undefined,
-		listOpenTasks: () => listOpenTaskKeys(plugin, ws.tasksPath),
+		listOpenTasks: () => listOpenTaskKeys(host, ws.tasksPath),
 		// INT-030: a recovered paused session re-surfaces its prompt through the
 		// same modal; supplying input resumes the loop, dismissing cancels it. The
 		// callback is injected from the composition site so this module never imports ui.
@@ -308,7 +308,7 @@ export async function resumeRecoveredSession(
 	// INT-001 + Part B: the shared finalize invariant — reflect the terminal status
 	// into session.json and write the opt-in failure report for a recovered run that
 	// ends in error, identically to a fresh launch.
-	await finalizeRun(plugin, sessionManager, recovered.sessionId, flow, result);
+	await finalizeRun(host, sessionManager, recovered.sessionId, flow, result);
 
 	return result;
 }

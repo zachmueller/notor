@@ -2,8 +2,16 @@
  * Reference flows (POL-002 / FR-161) — three first-party example flows
  * materialized into `{notor_dir}/orchestrations/` when the user enables the
  * orchestration feature group. They demonstrate the three pillars of the engine —
- * **conversation steps**, **code steps**, and **composition** — and double as the
- * fixtures for the e2e gates (TEST-007 / TEST-008).
+ * **conversation steps**, **code steps**, and **composition**.
+ *
+ * These are first-party *examples*, not e2e fixtures (F6 §4.4, verified): no e2e
+ * script uses them — all 10 `e2e/scripts/orchestration-*-test.ts` write bespoke
+ * inline flows against live Bedrock. The verifiable gate on this content is the
+ * unit-level flow-parse test (`reference-flows.test.ts`), which asserts each
+ * `materializeReferenceFlows` output parses + validates through
+ * `FlowDefinitionParser` with zero errors/warnings. A live-provider e2e for one
+ * reference flow (a real TEST-007) remains a separate team decision — the e2e
+ * harness has no provider stub today — and is deliberately out of scope here.
  *
  * Lifecycle mirrors the built-in personas: the content lives here as constants and
  * is **materialized on first enable, preserving user edits** ({@link materializeReferenceFlows}
@@ -388,7 +396,7 @@ Demonstrates **composition** (the \`run_flow\` caller side). A code-step \`dispa
 invokes the \`Code Assist\` flow via \`run_flow\` and writes its result to the scratchpad;
 a conversation \`report\` step then composes the final review from that result.
 
-Requires \`Code Assist\` to be invocable (it is, by default). This is the TEST-008 fixture.
+Requires \`Code Assist\` to be invocable (it is, by default).
 
 (This body is documentation only.)
 `,

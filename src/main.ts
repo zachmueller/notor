@@ -89,6 +89,9 @@ import { FlowCompositionManager } from "./orchestration/flow-composition-manager
 import { makeChildFlowSpawner } from "./orchestration/launch";
 import { requestOrchestrationInput } from "./ui/orchestration-modals";
 import { OrchestrationRunRegistry } from "./orchestration/run-registry";
+import type { OrchestrationHost } from "./orchestration/host";
+import { buildUtils } from "./extensions/runtime-context";
+import type { ExtensionUtils } from "./extensions/runtime-context/types";
 import type { OrchestrationFlow } from "./orchestration/types";
 
 // Extensions
@@ -143,7 +146,7 @@ import { resolveNote } from "./utils/resolve-note";
 
 const log = logger("Main");
 
-export default class NotorPlugin extends Plugin {
+export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	settings: NotorSettings;
 
 	/**
@@ -398,6 +401,16 @@ export default class NotorPlugin extends Plugin {
 	 * tracker so the open dropdown re-renders. Called by the orchestration launcher
 	 * on start/finalize and by the recovery scan.
 	 */
+	/**
+	 * Build the extension `utils` object a code step receives (F6
+	 * {@link OrchestrationHost}). Wraps `buildUtils(this)` so the host interface
+	 * stays plugin-shaped in exactly this one member instead of leaking the whole
+	 * plugin type into the orchestration layer.
+	 */
+	buildExtensionUtils(): ExtensionUtils {
+		return buildUtils(this);
+	}
+
 	upsertFlowRun(entry: FlowRunEntry): void {
 		const i = this._flowRunRegistry.findIndex((e) => e.sessionId === entry.sessionId);
 		if (i >= 0) this._flowRunRegistry[i] = entry;
