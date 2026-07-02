@@ -138,7 +138,14 @@ Gate: `grep -rn "LEGACY POLICY PATH HIT"` in captured logs empty for a full rele
 
 ## Verification (Release N)
 
-- [ ] `tsc` + suite green; arity assertions updated in the same commits as call-site changes.
-- [ ] Manual: orchestration flow → `execute_command` with a blocked pattern refused with the
-      policy error; scratchpad writes still work; plan-mode orchestration launch still permits
-      `emit_event` (classified read — unchanged).
+- [x] `tsc` + suite green (1591 tests, 107 files); arity assertions updated in the same commits
+      as call-site changes (run-loop.test.ts cascade-seam vectors + sub-agent-runner.test.ts,
+      both moved policyCtx from `undefined` to `expect.objectContaining` at position 7).
+- [ ] Manual (requires running Obsidian — not executed here): orchestration flow →
+      `execute_command` with a blocked pattern; scratchpad writes still work; plan-mode
+      orchestration launch still permits `emit_event`. **Caveat (see C.5 semantics note):** a
+      blocked command pattern in a *headless* orchestration step reverts auto-approve but, with no
+      approval callback, still warns + runs — it is NOT "refused with the policy error". A
+      hard-refusal on blocked patterns was deliberately kept out of scope. Path/enabled/plan-mode
+      violations DO hard-block (return `allowed:false`), so scratchpad-outside writes are refused
+      and plan-mode write tools are blocked as described.
