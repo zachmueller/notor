@@ -43,6 +43,7 @@ import type {
 } from "./child-flow";
 import { StepPromptBuilder } from "./step-prompt-builder";
 import { StepTurnExecutor, type StepRuntime, type StepRuntimeFactory } from "./step-turn-executor";
+import type { ToolPolicyContext } from "../chat/tool-policy";
 import { CodeStepExecutor, type CodeStepRuntime, type CodeStepRuntimeFactory } from "./code-step-executor";
 import type { ScratchpadFs } from "./orchestration-helper";
 import { SessionLog, type SessionLogWriter } from "./session-log";
@@ -288,7 +289,7 @@ async function maybeWriteFailureReport(
  */
 function makeRuntimeFactory(plugin: NotorPlugin, openNotesInEditor: boolean): StepRuntimeFactory {
 	return {
-		async build({ step, persona, resolved, orchestrationContext }): Promise<StepRuntime> {
+		async build({ step, persona, resolved, mode, orchestrationContext }): Promise<StepRuntime> {
 			const settings = plugin.settings;
 			const registry = plugin.getToolRegistry();
 
@@ -342,12 +343,33 @@ function makeRuntimeFactory(plugin: NotorPlugin, openNotesInEditor: boolean): St
 
 			const provider = plugin.getProviderRegistry().getProvider(resolved.providerId);
 
-			// The orchestrationContext is threaded into RunLoopOptions by the
-			// executor; the dispatcher reads it off ToolExecuteOptions at dispatch.
-			void orchestrationContext;
+			// F2: build the per-step policy context so the step's RunLoop gates its
+			// tool calls through the pure engine (command patterns / paths /
+			// plan-mode / denylist) — this context ran the dispatcher's legacy branch
+			// before. The scratchpad (+ a shared-handoff child's parent scratchpad)
+			// is auto-allowed IN ADDITION to each tool's configured allowed_paths,
+			// sourced from the orchestrationContext — the same construction the legacy
+			// branch performed at dispatch, but now on the pure path.
+			const policyCtx: ToolPolicyContext = {
+				effectiveConfig: effective,
+				mode,
+				domainDenylist: settings.domain_denylist,
+				vaultRootPath: plugin.vaultRootPath ?? "",
+				resolveVaultPath: (p: string) => {
+					const file = resolveNote(p, plugin.app.vault, plugin.app.metadataCache);
+					return file?.path ?? null;
+				},
+				sessionAllowedPaths: [
+					orchestrationContext.scratchpadPath,
+					...(orchestrationContext.parentScratchpadPath
+						? [orchestrationContext.parentScratchpadPath]
+						: []),
+				],
+			};
+
 			void step;
 
-			return { provider, dispatcher, toolDefinitions, systemPrompt };
+			return { provider, dispatcher, toolDefinitions, systemPrompt, policyCtx };
 		},
 	};
 }
@@ -413,7 +435,7 @@ function makeCodeStepRuntimeFactory(
 	const taskRegistry = new TaskRegistry(taskFs);
 
 	return {
-		async build({ orchestrationContext, abortSignal }): Promise<CodeStepRuntime> {
+		async build({ orchestrationContext, mode, abortSignal }): Promise<CodeStepRuntime> {
 			const settings = plugin.settings;
 			const registry = plugin.getToolRegistry();
 
@@ -459,6 +481,27 @@ function makeCodeStepRuntimeFactory(
 			const libs = buildLibs();
 			const obsidian = buildObsidianExports();
 
+			// F2: policy context for `orchestration.callTool`/`callMcpTool` dispatch —
+			// same construction as the conversation-step factory, with the scratchpad
+			// (+ parent scratchpad) auto-allowed in addition to each tool's configured
+			// allowed_paths.
+			const policyCtx: ToolPolicyContext = {
+				effectiveConfig: effective,
+				mode,
+				domainDenylist: settings.domain_denylist,
+				vaultRootPath: plugin.vaultRootPath ?? "",
+				resolveVaultPath: (p: string) => {
+					const file = resolveNote(p, plugin.app.vault, plugin.app.metadataCache);
+					return file?.path ?? null;
+				},
+				sessionAllowedPaths: [
+					orchestrationContext.scratchpadPath,
+					...(orchestrationContext.parentScratchpadPath
+						? [orchestrationContext.parentScratchpadPath]
+						: []),
+				],
+			};
+
 			return {
 				app: plugin.app,
 				obsidian,
@@ -468,6 +511,7 @@ function makeCodeStepRuntimeFactory(
 				scratchpadFs,
 				taskRegistry,
 				committedKeys,
+				policyCtx,
 			};
 		},
 	};

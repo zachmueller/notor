@@ -25,6 +25,7 @@
 
 import type { ConversationMode } from "../types";
 import type { ToolDispatcher } from "../chat/dispatcher";
+import type { ToolPolicyContext } from "../chat/tool-policy";
 import type { OrchestrationToolContext, RunContext } from "../run-loop/types";
 import { logger, type Logger } from "../utils/logger";
 import type { SessionLog } from "./session-log";
@@ -156,6 +157,13 @@ export interface BuildOrchestrationHelperArgs {
 	eventHistory: OrchestrationEvent[];
 	/** Optional message-id generator for dispatch event correlation (default: deterministic counter). */
 	makeMessageId?: () => string;
+	/**
+	 * Per-step tool-policy context (F2). Threaded into `callTool` / `callMcpTool`
+	 * dispatch so the pure policy engine gates a code step's tool calls (command
+	 * patterns / paths / plan-mode / denylist). `undefined` in unit tests → the
+	 * dispatcher's legacy branch (removed in Phase D).
+	 */
+	policyCtx?: ToolPolicyContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +217,7 @@ export function buildOrchestrationHelper(args: BuildOrchestrationHelperArgs): Or
 		sessionLog,
 		committedKeys,
 		eventHistory,
+		policyCtx,
 	} = args;
 
 	const scratchpadDir = orchestrationContext.scratchpadPath.replace(/\/+$/, "");
@@ -239,7 +248,7 @@ export function buildOrchestrationHelper(args: BuildOrchestrationHelperArgs): Or
 			makeMessageId(),
 			runContext.abort, // abortSignal — observe parent abort at await boundaries
 			undefined, // onProgress
-			undefined, // policyCtx
+			policyCtx, // F2: pure policy engine gates the code step's tool calls
 			undefined, // perCallApprovalCallback
 			undefined, // sessionContext
 			undefined, // approvalHookDispatcher

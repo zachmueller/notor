@@ -38,6 +38,7 @@
 
 import type { ChatMessage, LLMProvider, ToolDefinition } from "../providers/provider";
 import type { ToolDispatcher } from "../chat/dispatcher";
+import type { ToolPolicyContext } from "../chat/tool-policy";
 import type { ConversationMode, Persona } from "../types";
 import type { NotorSettings } from "../settings/types";
 import type { ProviderRegistry } from "../providers/index";
@@ -71,6 +72,14 @@ export interface StepRuntime {
 	dispatcher: ToolDispatcher;
 	toolDefinitions: ToolDefinition[];
 	systemPrompt: string;
+	/**
+	 * Per-step tool-policy context (F2). Built by the factory from the step's
+	 * effective config + mode + vault root + the orchestration scratchpad
+	 * allow-paths, and threaded into the step's `RunLoop` so the pure policy
+	 * engine gates its tool calls (this step ran the dispatcher's legacy branch
+	 * before). Omitted in unit tests that inject a bare runtime.
+	 */
+	policyCtx?: ToolPolicyContext;
 }
 
 /** Builds the per-step {@link StepRuntime} from a resolved persona + provider/model. */
@@ -307,6 +316,7 @@ export class StepTurnExecutor {
 			settings: this.deps.settings,
 			runContext,
 			orchestrationContext: req.orchestrationContext,
+			policyCtx: runtime.policyCtx,
 			hooks,
 			onProgress: req.onProgress,
 		});

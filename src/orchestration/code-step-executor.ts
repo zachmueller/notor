@@ -54,6 +54,7 @@ import {
 	type ScratchpadFs,
 } from "./orchestration-helper";
 import type { SessionLog } from "./session-log";
+import type { ToolPolicyContext } from "../chat/tool-policy";
 import type { StepTurnRequest, StepTurnResult } from "./step-turn-executor";
 import type { TaskRegistry } from "./task-registry";
 import { CODE_STEP_ARG_NAMES } from "./types";
@@ -88,6 +89,14 @@ export interface CodeStepRuntime {
 	 * and across a crash. Mutated in place when a guarded effect commits.
 	 */
 	committedKeys: Set<string>;
+	/**
+	 * Per-step tool-policy context (F2). Threaded into `orchestration.callTool` /
+	 * `callMcpTool` dispatch so the pure policy engine gates a code step's tool
+	 * calls (command patterns / paths / plan-mode / denylist) — these ran the
+	 * dispatcher's legacy branch before. Omitted in unit tests that inject a bare
+	 * runtime → dispatch behaves as before (legacy branch).
+	 */
+	policyCtx?: ToolPolicyContext;
 }
 
 /** Builds the per-turn {@link CodeStepRuntime} for a code step. */
@@ -95,6 +104,7 @@ export interface CodeStepRuntimeFactory {
 	build(args: {
 		step: StepTurnRequest["step"];
 		orchestrationContext: StepTurnRequest["orchestrationContext"];
+		mode: StepTurnRequest["mode"];
 		abortSignal: AbortSignal;
 	}): Promise<CodeStepRuntime>;
 }
@@ -188,6 +198,7 @@ export class CodeStepExecutor {
 			const runtime = await this.deps.runtimeFactory.build({
 				step,
 				orchestrationContext: req.orchestrationContext,
+				mode: req.mode,
 				abortSignal: req.runContext.abort,
 			});
 
@@ -205,6 +216,7 @@ export class CodeStepExecutor {
 				sessionLog: this.sessionLog,
 				committedKeys: runtime.committedKeys,
 				eventHistory: req.eventHistory,
+				policyCtx: runtime.policyCtx,
 			});
 
 			const codeEvent = projectCodeStepEvent(req.event);

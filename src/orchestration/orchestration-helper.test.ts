@@ -257,8 +257,22 @@ describe("OrchestrationHelper.callTool / callMcpTool", () => {
 		expect(call[1]).toEqual({ path: "x.md" }); // params
 		expect(call[2]).toBe("act"); // mode
 		expect(call[4]).toBe(abort); // abortSignal = runContext.abort
+		expect(call[6]).toBeUndefined(); // policyCtx (7th positional) — undefined when not supplied
 		expect(call[11]).toBe(rc); // runContext (12th positional)
 		expect(call[12]).toBe(oc); // orchestrationContext (13th positional)
+	});
+
+	it("threads the supplied policyCtx as the 7th positional arg (F2)", async () => {
+		const dispatch = vi.fn(async (..._args: unknown[]) => ok("ok"));
+		const policyCtx = {
+			effectiveConfig: { tools: {} },
+			mode: "act" as const,
+			vaultRootPath: "/vault",
+			sessionAllowedPaths: ["notor/orchestrations/sessions/sess-1/scratchpad"],
+		};
+		const o = buildOrchestrationHelper(makeArgs({ dispatcher: fakeDispatcher(dispatch), policyCtx }));
+		await o.callTool("read_note", { path: "x.md" });
+		expect(dispatch.mock.calls[0]![6]).toBe(policyCtx); // policyCtx (7th positional)
 	});
 
 	it("stringifies a non-string tool result", async () => {
