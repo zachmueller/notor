@@ -102,4 +102,35 @@ describe("OrchestrationSessionManager", () => {
 		expect(meta.prompt).toBe("obj"); // preserved
 		expect(meta.origin).toBe("user"); // preserved
 	});
+
+	it("createSession stamps schema_version: 1 on session.json", async () => {
+		const ws = await mgr.createSession({ sessionId: "sv", flowName: "F", prompt: "p", origin: "user" });
+		const meta = JSON.parse(fs.files.get(ws.metaPath)!) as OrchestrationSessionMeta;
+		expect(meta.schema_version).toBe(1);
+	});
+
+	it("readMeta defaults schema_version to 1 for legacy files without the field", async () => {
+		// Simulate a legacy session.json written before schema versioning.
+		const ws = mgr.resolveWorkspace("legacy");
+		const legacyMeta = { session_id: "legacy", flow_name: "F", status: "active", iteration: 0, active_step: null, started_at: "t", prompt: "p", parent_session_id: null, origin: "user" };
+		fs.files.set(ws.sessionDir, "dir");
+		fs.dirs.add(ws.sessionDir);
+		fs.files.set(ws.metaPath, JSON.stringify(legacyMeta));
+		const meta = await mgr.readMeta("legacy");
+		expect(meta.schema_version).toBe(1);
+	});
+
+	it("updateStatus serializes concurrent writes — both patches land", async () => {
+		await mgr.createSession({ sessionId: "race", flowName: "F", prompt: "p", origin: "user" });
+		// Fire two concurrent updateStatus calls: status=completed (iter 5) and active_step="B".
+		// The write chain must serialize them so both patches survive.
+		await Promise.all([
+			mgr.updateStatus("race", "completed", { iteration: 5 }),
+			mgr.updateStatus("race", "completed", { active_step: "B" }),
+		]);
+		const meta = await mgr.readMeta("race");
+		expect(meta.status).toBe("completed");
+		expect(meta.iteration).toBe(5);
+		expect(meta.active_step).toBe("B");
+	});
 });

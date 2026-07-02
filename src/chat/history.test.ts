@@ -14,6 +14,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { Vault } from "obsidian";
 import { HistoryManager } from "./history";
+import type { Conversation, Message } from "../types";
 
 const HISTORY = ".obsidian/plugins/notor/history/";
 
@@ -111,5 +112,142 @@ describe("HistoryManager.searchConversations — hidden-from-flat-list (INT-006)
 	it("empty query delegates to listConversations (also filtered)", async () => {
 		const results = await hm.searchConversations("   ");
 		expect(results.map((e) => e.id)).toEqual(["normal-1"]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Stateful adapter — append / process / schema_version tests
+// ---------------------------------------------------------------------------
+
+/** A stateful fake adapter that supports read, write, append, process, and exists. */
+function makeStatefulVault(initialFiles: Record<string, string> = {}): { vault: Vault; files: Record<string, string> } {
+	const files: Record<string, string> = { ...initialFiles };
+	const dirs = new Set<string>([HISTORY.replace(/\/$/, ""), HISTORY]);
+	const adapter = {
+		exists: async (p: string) => p in files || dirs.has(p),
+		mkdir: async (p: string) => { dirs.add(p); },
+		list: async () => ({ files: Object.keys(files), folders: [] }),
+		read: async (p: string) => {
+			if (!(p in files)) throw new Error(`ENOENT: ${p}`);
+			return files[p]!;
+		},
+		write: async (p: string, data: string) => { files[p] = data; },
+		append: async (p: string, data: string) => { files[p] = (files[p] ?? "") + data; },
+		process: async (p: string, fn: (content: string) => string): Promise<string> => {
+			const content = files[p] ?? "";
+			const result = fn(content);
+			files[p] = result;
+			return result;
+		},
+		stat: async () => ({ mtime: 0, size: 0 }),
+	};
+	return { vault: { adapter } as unknown as Vault, files };
+}
+
+function conv(over: Partial<Conversation> = {}): Conversation {
+	return {
+		id: "conv-1",
+		created_at: "2026-07-01T00:00:00Z",
+		updated_at: "2026-07-01T00:00:00Z",
+		provider_id: "bedrock",
+		model_id: "claude-opus-4-8",
+		total_input_tokens: 0,
+		total_output_tokens: 0,
+		estimated_cost: null,
+		mode: "act",
+		...over,
+	};
+}
+
+function msg(over: Partial<Message> = {}): Message {
+	return {
+		id: "msg-1",
+		conversation_id: "conv-1",
+		role: "user",
+		content: "hello",
+		timestamp: "2026-07-01T00:00:00Z",
+		...over,
+	};
+}
+
+describe("HistoryManager — append conversion (B.1)", () => {
+	it("appendMessage on an existing file adds exactly one line without overwriting previous content", async () => {
+		const { vault, files } = makeStatefulVault();
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		const conversation = conv();
+		await manager.createConversationFile(conversation);
+		const filePath = Object.keys(files).find((k) => k.endsWith(".jsonl"))!;
+		const linesBefore = files[filePath]!.trim().split("\n").length;
+
+		await manager.appendMessage(conversation, msg());
+		const linesAfter = files[filePath]!.trim().split("\n").length;
+		expect(linesAfter).toBe(linesBefore + 1);
+	});
+
+	it("appendMessage on a missing file creates header + message (no header-less JSONL)", async () => {
+		const { vault, files } = makeStatefulVault();
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		const conversation = conv();
+		// Do NOT call createConversationFile — simulate missing file.
+		await manager.appendMessage(conversation, msg());
+		const filePath = Object.keys(files).find((k) => k.endsWith(".jsonl"))!;
+		const lines = files[filePath]!.trim().split("\n");
+		// First line must be a conversation header.
+		const header = JSON.parse(lines[0]!);
+		expect(header._type).toBe("conversation");
+		expect(header.schema_version).toBe(1);
+		// Second line must be the message.
+		expect(JSON.parse(lines[1]!).role).toBe("user");
+	});
+
+	it("header rewrite via updateConversationHeader preserves messages and schema_version", async () => {
+		const { vault, files } = makeStatefulVault();
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		const conversation = conv();
+		await manager.createConversationFile(conversation);
+		await manager.appendMessage(conversation, msg());
+
+		const filePath = Object.keys(files).find((k) => k.endsWith(".jsonl"))!;
+		const linesBefore = files[filePath]!.trim().split("\n").length;
+
+		const updated = conv({ ...conversation, title: "Updated Title" });
+		await manager.updateConversationHeader(updated);
+
+		const linesAfter = files[filePath]!.trim().split("\n").length;
+		expect(linesAfter).toBe(linesBefore); // no lines added or removed
+
+		const header = JSON.parse(files[filePath]!.split("\n")[0]!);
+		expect(header.title).toBe("Updated Title");
+		expect(header.schema_version).toBe(1);
+	});
+
+	it("toggleFavorite preserves schema_version and unknown fields", async () => {
+		const { vault, files } = makeStatefulVault();
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		const conversation = conv();
+		await manager.createConversationFile(conversation);
+		await manager.appendMessage(conversation, msg());
+
+		const filePath = Object.keys(files).find((k) => k.endsWith(".jsonl"))!;
+		const filename = filePath.split("/").pop()!;
+		const linesBefore = files[filePath]!.trim().split("\n").length;
+
+		await manager.toggleFavorite(filename);
+
+		const linesAfter = files[filePath]!.trim().split("\n").length;
+		expect(linesAfter).toBe(linesBefore);
+
+		const header = JSON.parse(files[filePath]!.split("\n")[0]!);
+		expect(header.is_favorite).toBe(true);
+		expect(header.schema_version).toBe(1);
+	});
+
+	it("createConversationFile stamps schema_version: 1 on the header", async () => {
+		const { vault, files } = makeStatefulVault();
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		await manager.createConversationFile(conv());
+		const filePath = Object.keys(files).find((k) => k.endsWith(".jsonl"))!;
+		const header = JSON.parse(files[filePath]!.split("\n")[0]!);
+		expect(header.schema_version).toBe(1);
 	});
 });

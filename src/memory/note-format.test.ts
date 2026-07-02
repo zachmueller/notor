@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
 	serializeNote,
 	parseNote,
+	serializePendingNote,
+	parsePendingNote,
 	slugifyTitle,
 	computeFingerprint,
 	assertMemoryPath,
@@ -71,6 +73,46 @@ describe("serializeNote / parseNote round-trip", () => {
 		expect(parsed.body).toBe("# Just a heading\n\nSome body text");
 		expect(parsed.createdAt).toBe("");
 		expect(parsed.sources).toEqual([]);
+	});
+});
+
+describe("schema_version in memory notes", () => {
+	it("serializeNote emits notor-schema: 1 and parseNote reads it back", () => {
+		const serialized = serializeNote({ title: "T", body: "B", sources: [], createdAt: "c" });
+		expect(serialized).toContain("notor-schema: 1");
+		const parsed = parseNote(serialized);
+		expect(parsed.schema_version).toBe(1);
+	});
+
+	it("serializePendingNote emits notor-schema: 1 and parsePendingNote reads it back", () => {
+		const serialized = serializePendingNote({
+			title: "T", body: "B", sources: [], createdAt: "c", memoryUpdatedAt: "u",
+			approvalState: "pending", originalAction: "create",
+		});
+		expect(serialized).toContain("notor-schema: 1");
+		const parsed = parsePendingNote(serialized);
+		expect(parsed.schema_version).toBe(1);
+	});
+
+	it("parseNote defaults schema_version to 1 for legacy notes without notor-schema", () => {
+		const legacyNote = "---\nnotor-type: memory\nnotor-created-at: t\nnotor-memory-updated-at: t\nnotor-sources: []\n---\n\n# Title\n\nBody\n";
+		const parsed = parseNote(legacyNote);
+		expect(parsed.schema_version).toBe(1);
+	});
+
+	it("parsePendingNote defaults schema_version to 1 for legacy notes", () => {
+		const legacyNote = "---\nnotor-type: pending-memory\nnotor-created-at: t\nnotor-memory-updated-at: t\nnotor-sources: []\nnotor-approval-state: pending\nnotor-original-action: create\n---\n\n# Title\n\nBody\n";
+		const parsed = parsePendingNote(legacyNote);
+		expect(parsed.schema_version).toBe(1);
+	});
+
+	it("patchFrontmatterField composes with notor-schema (inserts after last notor-* line)", () => {
+		const serialized = serializeNote({ title: "T", body: "B", sources: [], createdAt: "c" });
+		const patched = patchFrontmatterField(serialized, "notor-last-useful-at", "2026-07-01T00:00:00Z");
+		// schema_version field must still be present after the patch.
+		const parsed = parseNote(patched);
+		expect(parsed.schema_version).toBe(1);
+		expect(parsed.lastUsefulAt).toBe("2026-07-01T00:00:00Z");
 	});
 });
 

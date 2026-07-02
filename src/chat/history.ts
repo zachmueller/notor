@@ -320,7 +320,15 @@ export class HistoryManager {
 			try {
 				await atomicRewrite(this.vault.adapter, filePath, (content) => {
 					const lines = content.split("\n");
+					// Parse existing header to preserve unknown/additive fields (e.g. schema_version).
+					let existingFields: Record<string, unknown> = {};
+					try {
+						existingFields = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+					} catch {
+						// Corrupt header — overwrite cleanly.
+					}
 					lines[0] = JSON.stringify({
+						...existingFields,
 						_type: "conversation",
 						...conversation,
 					});

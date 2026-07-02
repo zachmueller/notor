@@ -434,6 +434,21 @@ describe("SessionRecovery — scan", () => {
 		expect(recoverable).toHaveLength(1);
 		expect(recoverable[0]!.truncatedFinalLine).toBe(true);
 	});
+
+	it("surfaces schema_version > 1 as a recovery error (not a crash)", async () => {
+		// A log whose session.start carries schema_version: 2 — not recoverable by this version.
+		const futureLog = jsonl([
+			{ type: "session.start", session_id: "s", flow: "F", prompt: "p", origin: "user", parent_session_id: null, ts: TS, schema_version: 2 } as SessionLogEntry,
+			turnStart(1, "A", "start"),
+		]);
+		const fs = new FakeRecoveryFs({
+			"sess": { meta: meta({ session_id: "sess", origin: "user", status: "interrupted" }), log: futureLog },
+		});
+		const { recoverable, errors } = await recovery.scan(fs);
+		expect(recoverable).toHaveLength(0);
+		expect(errors).toHaveLength(1);
+		expect(errors[0]!.reason).toMatch(/schema_version 2.*not supported/i);
+	});
 });
 
 void CEIL;

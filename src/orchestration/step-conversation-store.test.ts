@@ -81,6 +81,11 @@ describe("buildStepConversationHeader", () => {
 		expect(h.title).toBe("[Code Implementation] 📋 Planner — iteration 3");
 	});
 
+	it("stamps schema_version: 1", () => {
+		const h = buildStepConversationHeader(rec());
+		expect(h.schema_version).toBe(1);
+	});
+
 	it("the marker makes the conversation hidden from the flat list (INT-006)", () => {
 		const h = buildStepConversationHeader(rec());
 		expect(isHiddenFromConversationList("orchestration_step_conv-1.jsonl", h._type as string)).toBe(true);
@@ -157,5 +162,50 @@ describe("VaultStepConversationStore — persist + edge backfill", () => {
 			(e) => e.kind === "next",
 		);
 		expect(edges1).toHaveLength(1);
+	});
+
+	it("backfillNextEdge preserves schema_version on the predecessor", async () => {
+		await store.persist(rec({ conversationId: "c1", iteration: 1, prevConversationId: null }));
+		await store.persist(rec({ conversationId: "c2", iteration: 2, prevConversationId: "c1" }));
+		// After backfill the predecessor's header must still carry schema_version: 1.
+		expect(header(fs, "c1").schema_version).toBe(1);
+	});
+
+	it("backfillNextEdge normalizes schema_version to 1 for legacy predecessor (no field)", async () => {
+		// Write a legacy-style header without schema_version.
+		const legacyPath = `${HISTORY}/orchestration_step_legacy.jsonl`;
+		const legacyHeader = {
+			_type: "orchestration_step_conversation",
+			id: "legacy",
+			created_at: "t",
+			updated_at: "t",
+			provider_id: "bedrock",
+			model_id: "m",
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			estimated_cost: null,
+			mode: "act",
+			orchestration_session_id: "sess-A",
+			orchestration_flow_name: "F",
+			orchestration_step_name: "S",
+			orchestration_iteration: 1,
+			orchestration_edges: [],
+		};
+		fs.files.set(legacyPath, JSON.stringify(legacyHeader) + "\n");
+		// Create a fresh store that knows about the legacy path.
+		const legacyStore = new VaultStepConversationStore(fs, HISTORY);
+		// Trick the store into knowing the legacy path so backfill can find it.
+		// We persist "legacy" as conv-1 first (which registers its path), then link conv-2 → legacy.
+		// Instead, directly persist a record that sets prevConversationId = "legacy".
+		// We need the pathById map to have "legacy". Do that by persisting it first.
+		const recLegacy = rec({ conversationId: "legacy", iteration: 1, prevConversationId: null });
+		// Write the file ourselves (already done above), then persist won't overwrite since it always writes.
+		await legacyStore.persist(recLegacy); // registers "legacy" in pathById, overwrites file with versioned header
+		// Now write back the legacy (unversioned) header.
+		fs.files.set(legacyPath, JSON.stringify(legacyHeader) + "\n");
+		// Now persist the successor — triggers backfillNextEdge on "legacy".
+		await legacyStore.persist(rec({ conversationId: "c-next", iteration: 2, prevConversationId: "legacy" }));
+		// The legacy header, after backfill, should have schema_version: 1.
+		expect(header(fs, "legacy").schema_version).toBe(1);
 	});
 });

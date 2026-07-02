@@ -158,4 +158,18 @@ describe("SessionLog", () => {
 			log.appendStepLog({ turn: 1, step: "A", level: "error", message: "x" }),
 		).resolves.toBeUndefined();
 	});
+
+	it("appendSessionStart stamps schema_version: 1 on the entry", async () => {
+		const writer = new FakeWriter();
+		const log = new SessionLog("l.jsonl", writer, fixedNow);
+		await log.appendSessionStart({
+			session_id: "s1",
+			flow: "Demo",
+			prompt: "go",
+			origin: "user",
+			parent_session_id: null,
+		});
+		const entry = JSON.parse(writer.content.trim());
+		expect(entry.schema_version).toBe(1);
+	});
 });

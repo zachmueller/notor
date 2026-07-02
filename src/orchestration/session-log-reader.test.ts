@@ -94,4 +94,31 @@ describe("SessionLogReader", () => {
 		expect(entries).toHaveLength(3);
 		expect(entries[1]).toMatchObject({ type: "step.log", level: "info", message: "chose A", data: { n: 3 } });
 	});
+
+	it("reads schema_version from the first session.start entry", () => {
+		const raw =
+			line({ type: "session.start", session_id: "s", flow: "F", prompt: "p", origin: "user", parent_session_id: null, ts: "t", schema_version: 1 }) + "\n" +
+			line({ type: "session.complete", ts: "t" }) + "\n";
+		const result = reader.parse(raw);
+		expect(result.schema_version).toBe(1);
+	});
+
+	it("defaults schema_version to 1 for legacy logs (no field on session.start)", () => {
+		// Legacy: session.start without schema_version
+		const raw =
+			line({ type: "session.start", session_id: "s", flow: "F", prompt: "p", origin: "user", parent_session_id: null, ts: "t" }) + "\n" +
+			line({ type: "session.complete", ts: "t" }) + "\n";
+		const result = reader.parse(raw);
+		expect(result.schema_version).toBe(1);
+	});
+
+	it("defaults schema_version to 1 when the log has no session.start (legacy/partial)", () => {
+		const raw = line({ type: "session.complete", ts: "t" }) + "\n";
+		const result = reader.parse(raw);
+		expect(result.schema_version).toBe(1);
+	});
+
+	it("defaults schema_version to 1 for an empty log", () => {
+		expect(reader.parse("").schema_version).toBe(1);
+	});
 });
