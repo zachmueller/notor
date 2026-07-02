@@ -13,7 +13,11 @@
  *   - the child returns a `structured` payload, preferred over text (INT-043);
  *   - a `child` edge links the calling step's conversation to the child entry, and
  *     a `child_run_metadata` block rides the run_flow tool result (INT-043 / INT-047);
- *   - all step conversations (parent + child) are hidden from the flat list (INT-006).
+ *   - all step conversations (parent + child) are hidden from the flat list (INT-006);
+ *   - no `LEGACY POLICY PATH HIT` tripwire fires (F2 Phase D gate): the orchestration
+ *     conversation-step, code-step, and child-spawn dispatch contexts all carry a
+ *     real policyCtx, so the dispatcher's pure-policy path (not the legacy branch)
+ *     handled every tool call.
  *
  * To keep the run deterministic and cheap, both flows use **code steps** for the
  * mechanical hops (so the only required LLM turns are the steps that must reason),
@@ -408,6 +412,29 @@ function testStepConversationsHidden(ctx: TestContext): void {
 	);
 }
 
+function testNoLegacyPolicyPathHit(ctx: TestContext): void {
+	console.log("\nTest 7: No LEGACY POLICY PATH HIT — F2 Phase D gate (orchestration contexts)");
+	// The run above exercised the orchestration conversation-step, code-step, and
+	// child-spawn dispatch contexts. If any of them dispatched a tool without a
+	// policyCtx, the dispatcher's legacy branch would have fired its tripwire
+	// (log.error from source "ToolDispatcher"). Zero hits ⇒ the pure-policy path
+	// covers these contexts and the legacy branch is safe to delete.
+	const hits = ctx.collector
+		.getLogsByLevel("error")
+		.filter((e) => e.message.includes("LEGACY POLICY PATH HIT"));
+	if (hits.length === 0) {
+		ctx.pass(
+			"no legacy policy path hit",
+			"zero LEGACY POLICY PATH HIT errors across the run_flow composition (conversation + code + child-spawn)",
+		);
+	} else {
+		ctx.fail(
+			"no legacy policy path hit",
+			`${hits.length} tripwire hit(s): ${hits.map((h) => JSON.stringify(h.data)).join("; ")}`,
+		);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -432,6 +459,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	testStructuredReturn(ctx);
 	testChildEdge(ctx);
 	testStepConversationsHidden(ctx);
+	testNoLegacyPolicyPathHit(ctx);
 }
 
 const settings = buildDefaultSettings({
