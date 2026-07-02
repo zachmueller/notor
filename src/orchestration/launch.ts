@@ -51,6 +51,7 @@ import { TaskRegistry, type TaskFs } from "./task-registry";
 import { seedMemoriesNote, memoriesPath } from "./memories";
 import { writeFailureReport, shouldWriteFailureReport } from "./failure-report";
 import { SessionRecovery, type RecoveryFs, type RecoverableSession } from "./session-recovery";
+import { isSessionLogMtimeLive } from "./recovery-liveness";
 import { VaultStepConversationStore } from "./step-conversation-store";
 import { showOrchestrationProgressNotice } from "./notices";
 import { OrchestrationRunner, type OrchestrationRunResult } from "./runner";
@@ -1151,9 +1152,11 @@ function makeRecoveryFs(
  * `origin`, missing files) are surfaced as Notices and the session is marked
  * `error` — never silently skipped.
  *
- * Resume is offered, not forced: a "Resume orchestration?" Notice summarizes
- * where each run left off. (The Phase-2 surface is a Notice + auto-resume of
- * `user`/`hook` roots; a richer prompt is a later UX task.)
+ * Resume is offered, not forced (F1 Fix 2): each recoverable root surfaces a
+ * Notice with a **Resume** button and only restarts on click, so a deliberately
+ * stopped run is not silently relaunched. A still-`active` root whose
+ * `session-log.jsonl` mtime is fresh is treated as **live** and skipped entirely
+ * (no second runner on a session the original runner is still writing).
  */
 export async function recoverOrchestrations(plugin: NotorPlugin): Promise<void> {
 	const fsVault = new VaultSessionFs(plugin.app);
@@ -1206,22 +1209,88 @@ export async function recoverOrchestrations(plugin: NotorPlugin): Promise<void> 
 			);
 			continue;
 		}
-		new Notice(`Resuming orchestration '${flow.name}' (${recovered.action.kind})…`);
-		// POL-004: re-seed the unified indicator so a recovered run surfaces.
-		plugin.upsertFlowRun?.({
-			type: "flow-run",
-			sessionId: recovered.sessionId,
-			flowName: flow.name,
-			status: "active",
-			startedAt: recovered.meta.started_at,
-		});
-		resumeRecoveredSession(plugin, flow, recovered, sessionManager).catch((e) =>
-			log.error("Orchestration resume failed", {
+
+		// F1 Fix 2: liveness guard. A crashed plugin can leave a session
+		// `status: "active"` while its original runner is still live (unload was
+		// unsafe before Fix 1, and the bounded unload abort is best-effort). Resuming
+		// such a session spawns a SECOND runner racing on one log. Detect the live
+		// case via the log's mtime — the only writer keeping it fresh is a live
+		// runner (the log advances ≥2×/turn). A `null` stat (adapter differences) is
+		// treated as not-live. `interrupted` (paused) sessions are exempt — they are
+		// legitimately idle.
+		if (recovered.meta.status === "active" && (await isSessionLogLive(plugin, sessionManager, recovered.sessionId))) {
+			log.info("Recovery: session log is fresh — treating as live, skipping resume", {
 				sessionId: recovered.sessionId,
-				error: String(e),
-			}),
-		);
+				flow: flow.name,
+			});
+			continue;
+		}
+
+		// F1 Fix 2: resume is OFFERED, not forced — the user may have deliberately
+		// stopped Obsidian mid-run (or Stopped the flow). Surface a Notice with a
+		// Resume button; the run (and its indicator re-seed) only restarts on click.
+		offerResumeNotice(plugin, flow, recovered, sessionManager);
 	}
+}
+
+/**
+ * Stat a recoverable session's `session-log.jsonl` and decide whether it is still
+ * being written by a live runner (F1 Fix 2). Delegates the freshness decision to
+ * the pure {@link isSessionLogMtimeLive}.
+ */
+async function isSessionLogLive(
+	plugin: NotorPlugin,
+	sessionManager: OrchestrationSessionManager,
+	sessionId: string,
+): Promise<boolean> {
+	try {
+		const ws = sessionManager.resolveWorkspace(sessionId);
+		const stat = await plugin.app.vault.adapter.stat(normalizePath(ws.logPath));
+		const mtime = stat && typeof stat.mtime === "number" ? stat.mtime : null;
+		return isSessionLogMtimeLive(mtime, Date.now());
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Offer to resume a recovered session via a Notice carrying a Resume button (F1
+ * Fix 2). The run restarts only on click — resume is offered, not forced.
+ */
+function offerResumeNotice(
+	plugin: NotorPlugin,
+	flow: OrchestrationFlow,
+	recovered: RecoverableSession,
+	sessionManager: OrchestrationSessionManager,
+): void {
+	const fragment = document.createDocumentFragment();
+	const wrapper = fragment.createDiv({ cls: "notor-orchestration-resume-notice" });
+	wrapper.createDiv({
+		text: `Orchestration '${flow.name}' was interrupted (${recovered.action.kind}). Resume it?`,
+	});
+	const buttonRow = wrapper.createDiv({ cls: "notor-orchestration-resume-actions" });
+	const notice = new Notice(fragment, 0);
+	new ButtonComponent(buttonRow)
+		.setButtonText("Resume")
+		.setCta()
+		.onClick(() => {
+			notice.hide();
+			// POL-004: re-seed the unified indicator so the resumed run surfaces.
+			plugin.upsertFlowRun?.({
+				type: "flow-run",
+				sessionId: recovered.sessionId,
+				flowName: flow.name,
+				status: "active",
+				startedAt: recovered.meta.started_at,
+			});
+			resumeRecoveredSession(plugin, flow, recovered, sessionManager).catch((e) =>
+				log.error("Orchestration resume failed", {
+					sessionId: recovered.sessionId,
+					error: String(e),
+				}),
+			);
+		});
+	new ButtonComponent(buttonRow).setButtonText("Dismiss").onClick(() => notice.hide());
 }
 
 /**

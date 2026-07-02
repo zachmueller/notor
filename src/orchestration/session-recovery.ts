@@ -138,7 +138,7 @@ export interface RecoveryScanOptions {
 }
 
 /** Origins the top-level scan recognizes (the discriminator domain). */
-const KNOWN_ORIGINS = new Set(["user", "hook", "run_flow", "chaining"]);
+const KNOWN_ORIGINS = new Set(["user", "hook", "schedule", "run_flow", "chaining"]);
 /** Statuses the scan considers recoverable. */
 const RECOVERABLE_STATUSES = new Set(["active", "interrupted"]);
 /** Terminal statuses (a chaining predecessor must be one of these to root its successor). */
@@ -391,7 +391,7 @@ export class SessionRecovery {
 
 	/**
 	 * Whether the top-level scan recovers `meta` as a root:
-	 *  - `user` / `hook` → always;
+	 *  - `user` / `hook` / `schedule` → always (each is a launcher-less root);
 	 *  - `chaining` → iff `parent_session_id` resolves to an already-terminal
 	 *    predecessor (the chained-successor is fire-and-forget — its predecessor
 	 *    finalized, so there is no live parent to reconcile it);
@@ -404,6 +404,10 @@ export class SessionRecovery {
 		switch (meta.origin) {
 			case "user":
 			case "hook":
+			// Bug A: a scheduled run is a root with no live launcher to reconcile it
+			// (the cron fired once, then crashed) — recover it exactly like a hook
+			// root instead of surfacing it as a loud recovery error.
+			case "schedule":
 				return true;
 			case "chaining": {
 				const parentId = meta.parent_session_id;

@@ -300,6 +300,10 @@ describe("SessionRecovery — root selection", () => {
 		expect(recovery.isRecoverableRoot(meta({ origin: "hook" }), metas)).toBe(true);
 	});
 
+	it("recovers a schedule origin as a root (Bug A — crashed scheduled run)", () => {
+		expect(recovery.isRecoverableRoot(meta({ origin: "schedule" }), metas)).toBe(true);
+	});
+
 	it("does NOT recover a run_flow child by the top-level scan", () => {
 		expect(recovery.isRecoverableRoot(meta({ origin: "run_flow", parent_session_id: "parent" }), metas)).toBe(false);
 	});
@@ -362,6 +366,19 @@ describe("SessionRecovery — scan", () => {
 		const { recoverable, errors } = await recovery.scan(fs);
 		expect(errors).toHaveLength(0);
 		expect(recoverable.map((r) => r.sessionId)).toEqual(["sess-user"]);
+		expect(recoverable[0]!.action.kind).toBe("re_emit_trigger");
+	});
+
+	it("classifies a crashed schedule-origin run as a recoverable root, not a loud error (Bug A)", async () => {
+		const fs = new FakeRecoveryFs({
+			"sess-sched": {
+				meta: meta({ session_id: "sess-sched", origin: "schedule", status: "interrupted" }),
+				log: jsonl([sessionStart("schedule"), eventEmitted(1, "build.start", "obj"), turnStart(2, "Planner", "build.start")]),
+			},
+		});
+		const { recoverable, errors } = await recovery.scan(fs);
+		expect(errors).toHaveLength(0);
+		expect(recoverable.map((r) => r.sessionId)).toEqual(["sess-sched"]);
 		expect(recoverable[0]!.action.kind).toBe("re_emit_trigger");
 	});
 

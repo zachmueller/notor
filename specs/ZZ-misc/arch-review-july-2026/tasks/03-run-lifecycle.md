@@ -15,7 +15,7 @@ by symbol.
 
 ## Phase 1 — `OrchestrationRunRegistry`: abort path, Stop UI, unload teardown (commit 1)
 
-- [ ] **1.1** New file `src/orchestration/run-registry.ts` (pure, no Obsidian imports):
+- [x] **1.1** New file `src/orchestration/run-registry.ts` (pure, no Obsidian imports):
       ```ts
       export interface OrchestrationRunHandle {
           sessionId: string;
@@ -33,23 +33,23 @@ by symbol.
           touch(sessionId): void;             // heartbeat refresh
       }
       ```
-- [ ] **1.2** `NotorPlugin` owns one instance — plain field + getter, mirroring
+- [x] **1.2** `NotorPlugin` owns one instance — plain field + getter, mirroring
       `_detachedSubAgents` placement (`main.ts:242–252`). No lazy construction needed.
-- [ ] **1.3** `launchOrchestration` registers after creating the controller (`launch.ts:569`),
+- [x] **1.3** `launchOrchestration` registers after creating the controller (`launch.ts:569`),
       unregisters in a `finally` around the `runner.start()` await. Wire the runner's
       `onProgress` seam (`runner.ts:155`, fires per step turn :402 and on pause :620; currently
       `log.debug` only at `launch.ts:616, 1244`) to `registry.touch(sessionId)`.
-- [ ] **1.4** `resumeRecoveredSession`: replace the orphan controller at `launch.ts:1212`
+- [x] **1.4** `resumeRecoveredSession`: replace the orphan controller at `launch.ts:1212`
       (`inheritedContext?.abort ?? new AbortController().signal`). Register **root sessions
       only** (when `inheritedContext` is undefined) — children are cancelled transitively via
       `cascade.abort` from the root signal.
-- [ ] **1.5** `onunload()` (`main.ts:749–851`, next to the `_detachedSubAgents` abort at
+- [x] **1.5** `onunload()` (`main.ts:749–851`, next to the `_detachedSubAgents` abort at
       :799–803): `abortAll()`, then a **bounded** await (`Promise.race` with ~1500 ms) of the
       runners' finalize writes. Best-effort by design: abort → `FLOW_CANCELLED` → finalize
       writes `cancelled` (`launch.ts:634–643`) when it completes; when it doesn't, the session
       stays `active` and Phase 2's liveness guard makes the subsequent auto-resume safe. Do not
       hang `onunload`.
-- [ ] **1.6 Stop UI:** add `onStopFlowRun?: (sessionId: string) => void` to
+- [x] **1.6 Stop UI:** add `onStopFlowRun?: (sessionId: string) => void` to
       `WorkflowActivityDropdown` (constructor-injected like `onOpenRunTree`, threaded via
       `workflow-activity-indicator.ts:130–138` and `chat-view.ts:652`). In `renderFlowRunEntry`
       (`workflow-activity-dropdown.ts:332–347`), for `status === "active"` entries render a stop
@@ -57,12 +57,12 @@ by symbol.
       `plugin.getOrchestrationRunRegistry().abort(sessionId)`. Optional cheap add: a
       `stop-orchestration` command in `src/commands/index.ts` next to `run-orchestration`
       (:326–340).
-- [ ] **1.7 Bug C (drive-by):** in the finalize upsert (`launch.ts:646–652`), stop overwriting
+- [x] **1.7 Bug C (drive-by):** in the finalize upsert (`launch.ts:646–652`), stop overwriting
       `startedAt` with the finalize timestamp — preserve the entry's original value.
 
 ## Phase 2 — Recovery liveness guard + honest resume semantics (commit 2)
 
-- [ ] **2.1 Liveness check.** In `recoverOrchestrations` (`launch.ts:1120–1187`), before
+- [x] **2.1 Liveness check.** In `recoverOrchestrations` (`launch.ts:1120–1187`), before
       resuming a recoverable root with `status: "active"`: stat `ws.logPath` via
       `plugin.app.vault.adapter.stat`. If mtime is fresher than `LIVE_SESSION_MTIME_MS` (module
       constant, **90 s**; the log advances ≥2×/turn via `turn.start`/`turn.complete`,
@@ -71,12 +71,12 @@ by symbol.
       returning `null` → treat as not-live. Rationale for mtime over lockfile/heartbeat: zero
       new writes, works retroactively, no stale-lock cleanup. Risk note: live-seen-as-stale is
       the dangerous direction (recreates the double-runner) — keep the threshold generous.
-- [ ] **2.2 Make resume offered.** Replace the auto-resume at `launch.ts:1171–1185` with a
+- [x] **2.2 Make resume offered.** Replace the auto-resume at `launch.ts:1171–1185` with a
       Notice carrying a **Resume button** (Notice accepts a DocumentFragment; `ButtonComponent`
       is already imported in launch.ts). On click → `resumeRecoveredSession(...)`, keeping the
       fire-and-forget `.catch`. Update the docstring at `launch.ts:1116–1118` ("Resume is
       offered, not forced") to finally match the code.
-- [ ] **2.3 Bug A — recover scheduled runs:** add `"schedule"` to `KNOWN_ORIGINS`
+- [x] **2.3 Bug A — recover scheduled runs:** add `"schedule"` to `KNOWN_ORIGINS`
       (`session-recovery.ts:141`) and a `case "schedule":` to `isRecoverableRoot` (:382–400)
       with the same policy as `"hook"` (root, resumable). Today a crashed scheduled run
       (origin stamped at `main.ts:1137`) surfaces as a loud recovery *error*.
