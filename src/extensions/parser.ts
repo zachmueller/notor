@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import { parseSettingsSchema } from "./settings-schema";
 import { extractPathParams } from "./param-schema";
+import { RUNTIME_API_VERSION } from "./runtime-context/version";
 
 // ---------------------------------------------------------------------------
 // Valid automation trigger values (for validation)
@@ -102,6 +103,21 @@ export function parseExtensionFile(
 	}
 	if (notorType !== "tool" && notorType !== "automation" && notorType !== "settings" && notorType !== "block") {
 		return { filePath, message: `Invalid 'notor-type': '${typeof notorType === "string" ? notorType : JSON.stringify(notorType)}'. Must be 'tool', 'automation', 'settings', or 'block'` };
+	}
+
+	// -- Validate optional notor-min-api (runtime API version handshake) --
+	// The extension declares the minimum runtime API version it requires. The
+	// runtime refuses to load an extension requiring a newer API than this build
+	// provides. Built-in scaffolds omit the key and are exempt by construction.
+	const minApi = frontmatter["notor-min-api"];
+	if (minApi !== undefined) {
+		const required = typeof minApi === "number" ? minApi : Number(minApi);
+		if (!Number.isInteger(required)) {
+			return { filePath, message: `Invalid 'notor-min-api': '${String(minApi)}'. Must be an integer.` };
+		}
+		if (required > RUNTIME_API_VERSION) {
+			return { filePath, message: `Extension requires runtime API v${required}, but this Notor build provides v${RUNTIME_API_VERSION}. Update Notor to load this extension.` };
+		}
 	}
 
 	// -- Extract YAML fence --

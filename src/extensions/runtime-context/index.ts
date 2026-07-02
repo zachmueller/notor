@@ -25,6 +25,7 @@ import { buildSubAgentUtils } from "./sub-agent-utils";
 import { buildMemoryUtils } from "./memory-utils";
 import { buildPluginUtils } from "./plugin-utils";
 import { buildOrchestrationUtils } from "./orchestration-utils";
+import { RUNTIME_API_VERSION } from "./version";
 
 // Bundled libraries (for buildLibs)
 import mammoth from "mammoth";
@@ -64,6 +65,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 	const subAgentResult = buildSubAgentUtils(ctx);
 
 	const utils: ExtensionUtils = {
+		api: { version: RUNTIME_API_VERSION },
 		...buildFileUtils(ctx),
 		...buildMediaUtils(ctx),
 		...buildWebUtils(ctx),

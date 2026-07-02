@@ -17,23 +17,23 @@ Three independently landable parts = three phases, each its own commit(s).
 
 ## Phase 1 — Runtime API v1: `utils.api.version` + `notor-min-api` (commit 1)
 
-- [ ] **1.1** `export const RUNTIME_API_VERSION = 1` in new
+- [x] **1.1** `export const RUNTIME_API_VERSION = 1` in new
       `src/extensions/runtime-context/version.ts` (tiny separate file avoids a
       parser→runtime-context import cycle).
-- [ ] **1.2** `buildUtils()` (`runtime-context/index.ts:60–93`) adds non-optional
+- [x] **1.2** `buildUtils()` (`runtime-context/index.ts:60–93`) adds non-optional
       `api: { version: RUNTIME_API_VERSION }` to `ExtensionUtils`
       (`runtime-context/types.ts:97–460`). Code steps inherit it for free (same `buildUtils`,
       `launch.ts:441`).
-- [ ] **1.3** Parser: recognize optional `notor-min-api` in `parseExtensionFile` after the
+- [x] **1.3** Parser: recognize optional `notor-min-api` in `parseExtensionFile` after the
       `notor-type` validation (`parser.ts:98–105`), before the type-specific switch (:125).
       Malformed (non-integer) or `> RUNTIME_API_VERSION` → collected
       `ExtensionError { filePath, message }` naming the file, required version, and runtime
       version. Built-in scaffolds (synthetic paths, `manager.ts:314–319`) stay keyless —
       exempt-or-correct by construction.
-- [ ] **1.4** No new error UI needed: file-watcher reload already shows a persistent per-file
+- [x] **1.4** No new error UI needed: file-watcher reload already shows a persistent per-file
       Notice (`main.ts:2581–2601`); settings "Reload extensions" shows a summary
       (`tool-shared-settings.ts:50–70`).
-- [ ] **1.5** Docs: replace the `docs/extensions.md:515` "informational only" paragraph —
+- [x] **1.5** Docs: replace the `docs/extensions.md:515` "informational only" paragraph —
       `tested-notor-version` stays informational; `notor-min-api` is the enforced key ("the
       runtime refuses to load an extension requiring a newer API"). Update the tool-creator
       persona.

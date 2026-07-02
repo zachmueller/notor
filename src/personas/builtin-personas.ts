@@ -150,6 +150,7 @@ notor-mode: read  # or "write"
 
 - \`notor-mode: read\` — safe in both Plan and Act mode, no approval needed if auto-approved
 - \`notor-mode: write\` — only available in Act mode, requires user approval by default
+- \`notor-min-api: 1\` (optional) — minimum runtime API version the extension requires. The runtime refuses to load an extension requiring a newer API than the installed build provides (\`utils.api.version\`, currently \`1\`). Omit it to load on any build. Bump it only if you rely on a surface added in a later API version.
 
 ### 2. YAML code fence (optional)
 

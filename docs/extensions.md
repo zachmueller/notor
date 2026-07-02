@@ -394,6 +394,7 @@ All extension code executes with these variables in scope:
 
 | Variable | Description |
 |---|---|
+| `utils.api.version` | Runtime API contract version (currently `1`). Declare `notor-min-api: N` in frontmatter to require at least version N — see [Runtime API version](#runtime-api-version). |
 | `utils.resolveNote(path)` | Resolve a note path (handles bare names, missing `.md`, wikilinks). Returns `TFile \| null`. |
 | `utils.staleTracker` | Record reads and check for concurrent edits before writes. |
 | `utils.checkpointManager` | Create snapshots before destructive operations for rollback. |
@@ -512,7 +513,25 @@ Notor maintains a gallery of optional extensions in the `examples/extensions/` d
 3. Reload extensions (Settings → Notor → Extensions → "Reload extensions", or command palette, or restart Obsidian).
 4. Verify the extension loaded in Settings → Notor → Extensions.
 
-Each community extension includes a `tested-notor-version` field in its frontmatter. This is informational only — the plugin does not enforce version checks at load time.
+Each community extension may include a `tested-notor-version` field in its frontmatter. This is informational only — the plugin does not enforce it at load time. The enforced version key is `notor-min-api` (see below).
+
+## Runtime API version
+
+The `utils`/`libs`/`obsidian` surface handed to extension code is versioned. `utils.api.version` reports the version this build provides (currently **1**); it is bumped only on a breaking change to that surface.
+
+An extension can require a minimum runtime API version by declaring an integer `notor-min-api` in its frontmatter:
+
+```yaml
+---
+notor-type: tool
+notor-tool-name: my_tool
+notor-description: ...
+notor-mode: read
+notor-min-api: 1
+---
+```
+
+The runtime **refuses to load** an extension whose `notor-min-api` exceeds the version this build provides — it collects a load error naming the file, the required version, and the runtime version, surfaced as a persistent Notice (file-watcher reload) or a summary (Settings → "Reload extensions"). A non-integer `notor-min-api` is likewise a load error. The key is optional: an extension that omits it loads on any build (and is responsible for its own compatibility). Built-in tools do not declare it.
 
 ## Security
 

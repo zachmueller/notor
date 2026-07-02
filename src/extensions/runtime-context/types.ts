@@ -95,6 +95,12 @@ export interface WebviewElement {
 
 /** Shape of the `utils` object injected into extension functions. */
 export interface ExtensionUtils {
+	/**
+	 * Runtime API contract version. Bump on any breaking change to the
+	 * utils/libs/obsidian surface. Extensions declare `notor-min-api: N` in
+	 * frontmatter to require at least version N.
+	 */
+	api: { version: number };
 	resolveNote: (path: string) => TFile | null;
 	staleTracker: StaleContentTracker;
 	checkpointManager: CheckpointManager;

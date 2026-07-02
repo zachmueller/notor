@@ -379,6 +379,52 @@ return "ok";
 });
 
 // ---------------------------------------------------------------------------
+// parseExtensionFile — notor-min-api version handshake
+// ---------------------------------------------------------------------------
+
+describe("parseExtensionFile — notor-min-api", () => {
+	const content = "text\n```ts\nreturn 1;\n```\n";
+	const baseFrontmatter = {
+		"notor-type": "tool",
+		"notor-tool-name": "versioned_tool",
+		"notor-description": "A versioned tool",
+		"notor-mode": "read",
+	};
+
+	it("loads when notor-min-api is absent", () => {
+		const result = parseExtensionFile(content, baseFrontmatter, "file.md", parseYAML);
+		expect("name" in result).toBe(true);
+	});
+
+	it("loads when notor-min-api equals the runtime version (1)", () => {
+		const fm = { ...baseFrontmatter, "notor-min-api": 1 };
+		const result = parseExtensionFile(content, fm, "file.md", parseYAML);
+		expect("name" in result).toBe(true);
+	});
+
+	it("returns ExtensionError naming file + versions when notor-min-api exceeds the runtime version", () => {
+		const fm = { ...baseFrontmatter, "notor-min-api": 2 };
+		const result = parseExtensionFile(content, fm, "notor/tools/versioned.md", parseYAML);
+		expect("message" in result).toBe(true);
+		if ("message" in result) {
+			expect(result.filePath).toBe("notor/tools/versioned.md");
+			expect(result.message).toContain("v2");
+			expect(result.message).toContain("v1");
+		}
+	});
+
+	it("returns ExtensionError for a malformed (non-integer) notor-min-api", () => {
+		const fm = { ...baseFrontmatter, "notor-min-api": "abc" };
+		const result = parseExtensionFile(content, fm, "file.md", parseYAML);
+		expect("message" in result).toBe(true);
+		if ("message" in result) {
+			expect(result.message).toContain("notor-min-api");
+			expect(result.message).toContain("integer");
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
 // parseExtensionFile — automation
 // ---------------------------------------------------------------------------
 
