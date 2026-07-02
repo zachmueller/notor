@@ -165,9 +165,10 @@ doc comment at `launch.ts:794–798` already promises.
 
 ## Verification
 
-- [ ] `tsc` + full suite green.
+- [x] `tsc` + full suite green. (1,566 tests pass; baseline was 1,546 + 20 new across the phases.)
 - [ ] Manual: long flow → Stop button appears in the activity dropdown and works; disable plugin
       mid-run → re-enable → no duplicate runner (liveness skip logged), Resume offered once
-      truly idle.
-- [ ] Grep gate: `grep -n 'new AbortController' src/orchestration/launch.ts` — every hit flows
-      into the registry or a parent cascade.
+      truly idle. **(Human verification — not run in this pass.)**
+- [x] Grep gate: `grep -n 'new AbortController' src/orchestration/launch.ts` — two hits, both flow
+      into the registry (launch @ ~600 registers root controllers; resume @ ~1401 registers a root
+      controller only, children inherit the parent cascade).
