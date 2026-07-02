@@ -95,8 +95,8 @@ export type PersonaDisablesEmitEvent = (personaName: string) => boolean;
 /** Synthesized re-trigger topics auto-subscribed at runtime (FEAT-003 / FR-123). */
 const SYNTHESIZED_TOPICS = new Set(["flow.tasks_remaining", "flow.requirements_unmet"]);
 
-/** Runtime-only failure-channel suffixes handled by the default failure handler (Issue-10). */
-const FAILURE_CHANNEL_SUFFIXES = [".capped", ".no_emit", ".code_error"];
+/** Runtime-only failure-channel suffixes handled by the default failure handler (Issue-10; `.stream_error` per F3). */
+const FAILURE_CHANNEL_SUFFIXES = [".capped", ".no_emit", ".code_error", ".stream_error"];
 
 function isFailureChannelTopic(topic: string): boolean {
 	return FAILURE_CHANNEL_SUFFIXES.some((suffix) => topic.endsWith(suffix));

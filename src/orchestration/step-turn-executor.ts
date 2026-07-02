@@ -326,8 +326,14 @@ export class StepTurnExecutor {
 		// makes the ceiling accurate going forward.
 		this.reconcileWorkflowInvocations(runContext, req.orchestrationContext);
 
-		// (6/7) Capture the emission, or synthesize default_publishes / {step}.capped.
-		const emission = this.resolveEmission(step, req.orchestrationContext, result.stopReason);
+		// (6/7) Capture the emission, or synthesize default_publishes / {step}.capped /
+		// {step}.stream_error.
+		const emission = this.resolveEmission(
+			step,
+			req.orchestrationContext,
+			result.stopReason,
+			result.errorMessage,
+		);
 
 		// (Issue-13e) Flush any within-turn overwrite audit entries.
 		await this.flushEmissionOverwrites(step.name, req.iteration, req.orchestrationContext);
@@ -407,13 +413,22 @@ export class StepTurnExecutor {
 	 *  - a captured `emit_event` always wins;
 	 *  - else, a `completed` turn synthesizes `default_publishes` (or `{step}.no_emit`
 	 *    when none is declared);
-	 *  - else (non-`completed` / cut-off), synthesizes `{step}.capped` carrying the
-	 *    stop reason — a cut-off turn never masquerades as success (FR-117a).
+	 *  - else a stream `error`/`cancelled` synthesizes `{step}.stream_error` carrying
+	 *    the raw provider/parser message — a provider outage or user Stop never
+	 *    masquerades as success, and is kept DISTINCT from `.capped` (a budget/limit
+	 *    cut-off, which authors may legitimately route to a summarize-what-you-have
+	 *    step; a provider outage is a retry-shaped failure). Routing `cancelled` here
+	 *    also closes the gap where a mid-stream user Stop published a bogus success
+	 *    event before the runner's between-turn abort check caught it;
+	 *  - else (other non-`completed` / cut-off cap), synthesizes `{step}.capped`
+	 *    carrying the stop reason — a cut-off turn never masquerades as success
+	 *    (FR-117a).
 	 */
 	private resolveEmission(
 		step: StepDefinition,
 		ctx: OrchestrationToolContext,
 		stopReason: string,
+		errorMessage?: string,
 	): { topic: string; payload: string; structured?: unknown } {
 		if (ctx.pendingEmission) {
 			return ctx.pendingEmission;
@@ -426,6 +441,15 @@ export class StepTurnExecutor {
 			return {
 				topic: `${step.name}.no_emit`,
 				payload: `Step '${step.name}' completed its turn without emitting an event and declares no default_publishes.`,
+			};
+		}
+		// Provider/parser stream error or mid-stream cancellation: {step}.stream_error.
+		// Payload deliberately mirrors {step}.code_error's { step, error, stack } so
+		// the failure report's findCodeError picks it up with a one-suffix extension.
+		if (stopReason === "error" || stopReason === "cancelled") {
+			return {
+				topic: `${step.name}.stream_error`,
+				payload: JSON.stringify({ step: step.name, stopReason, error: errorMessage ?? null, stack: null }),
 			};
 		}
 		// Cut-off turn (iteration/token/context/cost/depth cap): {step}.capped.

@@ -453,6 +453,7 @@ return orchestration.emit("chunk.build", \`conversations:\${convos.length}\`);
 The engine has **no semantic verifier** — a step that emits its success topic is taken at face value (a \`completed\`-but-wrong emission still advances the flow). So:
 - **Wire a verifier on a step's output edge.** The canonical pattern is \`[Builder] → [Verify Tests] (code step) → tests.passed → [Critic]\` / \`tests.failed → [Builder]\`. Conversation steps **do** work; code steps **verify** it.
 - **Route distinct outcomes through distinct topics**, driven by a **deterministic code-step router** — don't re-fire one topic and rely on the stale-loop guard.
+- **Runtime failure channels (\`{step}.…\`).** The engine synthesizes a failure event when a step ends without a clean emission — subscribe a step to any of these to catch + recover instead of terminating the flow (an unsubscribed one becomes a \`FLOW_ERROR\`): \`{step}.capped\` (a budget/iteration/context cut-off — often routed to a summarize-what-you-have step), \`{step}.no_emit\` (a \`completed\` turn that emitted nothing and declares no \`default_publishes\`), \`{step}.code_error\` (a code step threw — carries the stack), and \`{step}.stream_error\` (a provider/parser stream error or mid-stream cancellation — a retry-shaped failure, kept distinct from \`.capped\`). Their suffixes are reserved: publishing/subscribing them is exempt from the static-orphan validator.
 
 ## Composition
 

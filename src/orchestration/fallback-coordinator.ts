@@ -11,9 +11,9 @@
  * Orphan-prone topologies are caught earlier by the FEAT-002 load-time
  * validator; this coordinator is the loud, deterministic last line of defense.
  * It also exposes a **default failure handler** for the recognized failure
- * channels (`{step}.capped` / `{step}.no_emit` / `{step}.code_error`, Issue-10),
- * producing a *diagnosable* `FLOW_ERROR` naming the originating step rather than
- * an anonymous orphan.
+ * channels (`{step}.capped` / `{step}.no_emit` / `{step}.code_error` /
+ * `{step}.stream_error`, Issue-10 + F3), producing a *diagnosable* `FLOW_ERROR`
+ * naming the originating step rather than an anonymous orphan.
  *
  * The coordinator is registered by the runner against the engine's `*` slot and
  * cannot be overridden (a concrete subscriber for a topic always wins).
@@ -27,8 +27,8 @@ import { FLOW_ERROR, type OrchestrationEvent, type OrchestrationFlow } from "./t
 
 const log = logger("FallbackCoordinator");
 
-/** Runtime-only failure-channel suffixes (Issue-10). */
-const FAILURE_CHANNEL_SUFFIXES = [".capped", ".no_emit", ".code_error"];
+/** Runtime-only failure-channel suffixes (Issue-10; `.stream_error` per F3). */
+const FAILURE_CHANNEL_SUFFIXES = [".capped", ".no_emit", ".code_error", ".stream_error"];
 
 function isFailureChannelTopic(topic: string): boolean {
 	return FAILURE_CHANNEL_SUFFIXES.some((suffix) => topic.endsWith(suffix));
@@ -41,9 +41,9 @@ export class FallbackCoordinator {
 	 * carrying the orphan as context. Deterministic and synchronous — no LLM, no
 	 * payload-based intent inference.
 	 *
-	 * A **failure-channel** topic (`{step}.capped` / `.no_emit` / `.code_error`)
-	 * is recognized and produces a *diagnosable* `FLOW_ERROR` that names the
-	 * originating step, rather than an anonymous orphan.
+	 * A **failure-channel** topic (`{step}.capped` / `.no_emit` / `.code_error` /
+	 * `.stream_error`) is recognized and produces a *diagnosable* `FLOW_ERROR`
+	 * that names the originating step, rather than an anonymous orphan.
 	 */
 	handle(event: OrchestrationEvent, flow: OrchestrationFlow): OrchestrationEvent {
 		const stamp = (payload: string): OrchestrationEvent => ({

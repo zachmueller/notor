@@ -190,13 +190,15 @@ interface CodeErrorInfo {
 }
 
 /**
- * Scan the log's emitted events for the most recent `{step}.code_error`, whose
- * payload is `JSON.stringify({ step, error, stack })` (see code-step-executor).
+ * Scan the log's emitted events for the most recent `{step}.code_error` or
+ * `{step}.stream_error`, whose payload is `JSON.stringify({ step, error, stack })`
+ * (see code-step-executor / step-turn-executor). A stream error carries a null
+ * `stack` but the same `step`/`error` shape.
  */
 function findCodeError(entries: SessionLogEntry[]): CodeErrorInfo | null {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const e = entries[i]!;
-		if (e.type === "event.emitted" && e.topic.endsWith(".code_error")) {
+		if (e.type === "event.emitted" && (e.topic.endsWith(".code_error") || e.topic.endsWith(".stream_error"))) {
 			try {
 				const parsed = JSON.parse(e.payload) as Partial<CodeErrorInfo>;
 				return {
@@ -236,6 +238,7 @@ function isTerminalLike(topic: string): boolean {
 		topic === "FLOW_CANCELLED" ||
 		topic === "FLOW_COMPLETE" ||
 		topic.endsWith(".code_error") ||
+		topic.endsWith(".stream_error") ||
 		topic.endsWith(".capped")
 	);
 }
