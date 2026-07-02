@@ -19,6 +19,7 @@ import {
 	buildDefaultSettings,
 	waitForSelector,
 	VAULT_PATH,
+	writeCleanWorkspace,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -560,6 +561,10 @@ runTest(
 	{
 		name: "extension-block-reload-test",
 		settings: buildDefaultSettings(),
+		// Deferred views (Obsidian 1.12): pin a chat leaf so .notor-chat-container mounts.
+		setupVault: (vaultPath: string) => {
+			writeCleanWorkspace(vaultPath);
+		},
 	},
 	tests,
 );

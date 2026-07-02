@@ -38,6 +38,7 @@ import {
 	buildDefaultSettings,
 	RESPONSE_TIMEOUT_MS,
 	POLL_INTERVAL_MS,
+	writeCleanWorkspace,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -547,6 +548,10 @@ runTest(
 				manage_tags: true,
 			},
 		}),
+		// Deferred views (Obsidian 1.12): pin a chat leaf so .notor-chat-container mounts.
+		setupVault: (vaultPath: string) => {
+			writeCleanWorkspace(vaultPath);
+		},
 	},
 	tests,
 );

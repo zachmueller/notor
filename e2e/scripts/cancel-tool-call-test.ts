@@ -41,6 +41,7 @@ import {
 	getLastAssistantMessage,
 	RESPONSE_TIMEOUT_MS,
 	POLL_INTERVAL_MS,
+	writeCleanWorkspace,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -600,6 +601,8 @@ runTest(
 		name: "cancel-tool-call",
 		settings,
 		setupVault: (vaultPath: string) => {
+			// Deferred views (Obsidian 1.12): pin a chat leaf so .notor-chat-container mounts.
+			writeCleanWorkspace(vaultPath);
 			// Create a fixture note for the read_note tool call
 			const fixturePath = path.join(vaultPath, "cancel-test-fixture.md");
 			fs.writeFileSync(

@@ -45,6 +45,7 @@ import {
 	setMode,
 	ensureCleanState,
 	VAULT_PATH,
+	writeCleanWorkspace,
 } from "../lib/test-helpers";
 import type { LogCollector, LogEntry } from "../lib/log-collector";
 
@@ -1281,6 +1282,8 @@ runTest(
 		name: "user-extensions",
 		settings,
 		setupVault: (vaultPath) => {
+			// Deferred views (Obsidian 1.12): pin a chat leaf so .notor-chat-container mounts.
+			writeCleanWorkspace(vaultPath);
 			// Clean and recreate extension directories to remove stale files from prior runs
 			const toolsDir = path.join(vaultPath, "notor", "tools");
 			const automationsDir = path.join(vaultPath, "notor", "automations");

@@ -30,6 +30,7 @@ import {
 	BUILD_DIR,
 	VAULT_PATH,
 	PLUGIN_DATA_PATH,
+	writeCleanWorkspace,
 } from "../lib/test-helpers";
 
 const HISTORY_DIR = path.join(BUILD_DIR, "history");
@@ -533,6 +534,10 @@ runTest(
 	{
 		name: "webview-tool",
 		settings,
+		// Deferred views (Obsidian 1.12): pin a chat leaf so .notor-chat-container mounts.
+		setupVault: (vaultPath: string) => {
+			writeCleanWorkspace(vaultPath);
+		},
 	},
 	tests,
 );
