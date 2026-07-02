@@ -99,10 +99,16 @@ Fakes ready for reuse: `FakeSessionFs` (`session-manager.test.ts:16–33`), `Fak
 `mockProvider` (`run-loop.test.ts:25–40`), canned-executor runner harness
 (`runner.test.ts:~95–140`).
 
-- [ ] **3.1** `child-spawn.test.ts` — ledger replay + ordinal matching: **written by Task 03**;
-      extend if gaps remain after the move.
-- [ ] **3.2** Emission matrix — **written by Task 02** at the step-turn-executor level; do not
-      duplicate.
+- [x] **3.1** `child-spawn.test.ts` — ledger replay + ordinal matching. **Discrepancy vs. task
+      file:** Task 03 landed only `child-ledger.test.ts` (the pure `matchChildInLedger`); the
+      *spawner* path that consumes it (reuse-vs-respawn, no-double-execute) was untested. Added
+      `child-spawn.test.ts` over a fake ledger fs + spy launcher (added behavior-preserving
+      `ChildSpawnDeps` seams — `ledgerFs`/`resolveFlow`/`launch`): fresh spawn on empty ledger;
+      reuse a recorded terminal child WITHOUT re-launching; ordinal (not via_tool_call_id)
+      matching for two same-(step, flow) dispatches; old-format entry → fresh spawn; non-invocable
+      flow → error, no launch.
+- [x] **3.2** Emission matrix — **written by Task 02** at the step-turn-executor level
+      (`step-turn-executor.emission.test.ts` verified present); not duplicated.
 - [x] **3.3** `run-lifecycle.test.ts` — the chaining gate (`chainToSuccessor`; frontmatter key
       `notor-on-complete-flow` → `flow.onCompleteFlow`, `flow-parser.ts:427–428`; gate logic:
       `depth + 1 >= maxDepth || iterationsRemaining <= 0 || costRemainingUsd <= 0`). Asserts:
@@ -122,11 +128,11 @@ Fakes ready for reuse: `FakeSessionFs` (`session-manager.test.ts:16–33`), `Fak
       seams (`recoveryFs`/`resolveFlows`/`isLive`/`offerResume`) to `recoverOrchestrations` so
       the scan's branch logic is testable without a runner or the DOM; the error-marking test
       exercises the real `updateStatus` path over an in-memory vault adapter.
-- [ ] **3.5** Reference-flow parse gate (cheap version): extend `reference-flows.test.ts` to
-      assert each `materializeReferenceFlows` output parses through `FlowDefinitionParser` with
-      zero errors/warnings. A live-provider e2e for one reference flow is a separate
-      team decision (the e2e harness has no provider stub; all 10 scripts hit live Bedrock) —
-      record it in the reference-flows comment either way.
+- [x] **3.5** Reference-flow parse gate (cheap version): extended `reference-flows.test.ts` with
+      a test asserting each `materializeReferenceFlows` output parses through
+      `FlowDefinitionParser` with zero errors AND zero warnings. The live-provider-e2e decision
+      is recorded in the reference-flows header comment (2.7) as a separate team decision / out
+      of scope here.
 
 ## Phase 4 — Optional follow-up
 

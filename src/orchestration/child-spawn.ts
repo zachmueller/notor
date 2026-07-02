@@ -45,6 +45,21 @@ export interface ChildLedgerFs {
 }
 
 /**
+ * Behavior-preserving test seams for {@link makeChildFlowSpawner} (production
+ * defaults built inline). Injecting these lets the reuse/no-double-spawn/ordinal
+ * paths (F1 Fix 3 / F6 §5.1) be driven over a fake ledger without a vault or a
+ * live runner.
+ */
+export interface ChildSpawnDeps {
+	/** The `(exists/read)` ledger reader (defaults to the `VaultSessionFs` seam). */
+	ledgerFs?: ChildLedgerFs;
+	/** Resolve the callee flow by name (defaults to `FlowCompositionManager`). */
+	resolveFlow?: (flowName: string) => Promise<OrchestrationFlow | null>;
+	/** Launch the child run (defaults to {@link launchOrchestration}). */
+	launch?: typeof launchOrchestration;
+}
+
+/**
  * Build the {@link SpawnChildFlow} callback injected into `RunFlowTool`.
  * Closes over the host; for each `run_flow` call it:
  *  1. resolves the parent session's depth (from the parent's `RunContext` cascade,
@@ -79,6 +94,7 @@ export interface ChildLedgerFs {
 export function makeChildFlowSpawner(
 	host: OrchestrationHost,
 	requestUserInput?: RequestUserInput,
+	deps?: ChildSpawnDeps,
 ): SpawnChildFlow {
 	const fsVault = new VaultSessionFs(host.app);
 	const sessionManager = new OrchestrationSessionManager(host.settings.notor_dir, fsVault);
@@ -86,10 +102,19 @@ export function makeChildFlowSpawner(
 	// resolution read through (F1 Fix 3 — injected so both are unit-testable). A
 	// `RecoveryFs`-shaped reader (exists/read); routed through the `VaultSessionFs`
 	// seam rather than the raw adapter so child-spawn holds no direct vault I/O.
-	const ledgerFs: ChildLedgerFs = {
+	const ledgerFs: ChildLedgerFs = deps?.ledgerFs ?? {
 		exists: (p) => fsVault.exists(p),
 		read: (p) => fsVault.read(p),
 	};
+	const resolveFlow =
+		deps?.resolveFlow ??
+		((flowName: string) =>
+			new FlowCompositionManager(
+				host.app.vault,
+				host.app.metadataCache,
+				host.settings.notor_dir,
+			).resolveFlow(flowName));
+	const launch = deps?.launch ?? launchOrchestration;
 	// The single owner for step-conversation header surgery (F6 §4.2) — the
 	// reciprocal `parent`-edge backfill goes through the store's atomic fs seam
 	// instead of raw adapter I/O.
@@ -98,12 +123,7 @@ export function makeChildFlowSpawner(
 	return async (req: SpawnChildFlowRequest): Promise<SpawnChildFlowResult> => {
 		// Resolve the callee flow (the tool already validated it is invocable, but
 		// re-resolve so the spawner is self-contained / testable).
-		const composition = new FlowCompositionManager(
-			host.app.vault,
-			host.app.metadataCache,
-			host.settings.notor_dir,
-		);
-		const flow = await composition.resolveFlow(req.flowName);
+		const flow = await resolveFlow(req.flowName);
 		if (!flow) {
 			return childErrorResult(req, `Flow '${req.flowName}' is not invocable.`);
 		}
@@ -112,7 +132,7 @@ export function makeChildFlowSpawner(
 		const parentLog = new SessionLog(parentWs.logPath, new VaultSessionLogWriter(host.app));
 
 		// --- Recovery reuse/resume (INT-044 / F1 Fix 3) --------------------------
-		const reconciled = await reconcileChildLedger(host, req, ledgerFs, sessionManager, requestUserInput);
+		const reconciled = await reconcileChildLedger(host, req, ledgerFs, sessionManager, requestUserInput, resolveFlow);
 		if (reconciled) return reconciled;
 
 		// --- Fresh spawn ---------------------------------------------------------
@@ -135,7 +155,7 @@ export function makeChildFlowSpawner(
 
 		let result: OrchestrationRunResult;
 		try {
-			result = await launchOrchestration(host, flow, req.payload, {
+			result = await launch(host, flow, req.payload, {
 				origin: "run_flow",
 				parentSessionId: req.parentSessionId,
 				sessionId: childSessionId,
@@ -210,7 +230,8 @@ async function reconcileChildLedger(
 	req: SpawnChildFlowRequest,
 	fs: ChildLedgerFs,
 	sessionManager: OrchestrationSessionManager,
-	requestUserInput?: RequestUserInput,
+	requestUserInput: RequestUserInput | undefined,
+	resolveFlow: (flowName: string) => Promise<OrchestrationFlow | null>,
 ): Promise<SpawnChildFlowResult | null> {
 	// Without a step identity (defensive — real step turns always thread one) there
 	// is no stable key, so never match: fall through to a fresh spawn.
@@ -254,12 +275,7 @@ async function reconcileChildLedger(
 
 	// Non-terminal child → RESUME it in place (replay its own log), never respawn.
 	log.info("run_flow recovery: resuming non-terminal child in place", { childSessionId });
-	const composition = new FlowCompositionManager(
-		host.app.vault,
-		host.app.metadataCache,
-		host.settings.notor_dir,
-	);
-	const flow = await composition.resolveFlow(req.flowName);
+	const flow = await resolveFlow(req.flowName);
 	if (!flow) return childErrorResult(req, `Flow '${req.flowName}' is no longer invocable.`, childSessionId);
 
 	const recovery = new SessionRecovery();

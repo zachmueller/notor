@@ -173,6 +173,21 @@ describe("reference flows (POL-002)", () => {
 		}
 	});
 
+	it("each materializeReferenceFlows output parses with ZERO errors AND zero warnings (F6 §5.5 gate)", async () => {
+		// The cheap, verifiable gate on the reference-flow content (F6 §4.4 / §5.5):
+		// each first-party example must parse AND validate clean — no hard error
+		// (parseFlowByDir throws on those) and no non-blocking topology warning.
+		const files = await materializeToMap();
+		const { vault, metadataCache } = buildFakeVault(files);
+		const parser = new FlowDefinitionParser(vault, metadataCache, "notor");
+
+		for (const flow of REFERENCE_FLOWS) {
+			const dir = `notor/orchestrations/${flow.slug}`;
+			const result = await parser.parseFlowByDir(dir);
+			expect(result.warnings, `${flow.slug} produced parse warnings`).toEqual([]);
+		}
+	});
+
 	it("discovers all three flows via discoverFlows() (the picker path)", async () => {
 		const files = await materializeToMap();
 		const { vault, metadataCache } = buildFakeVault(files);
