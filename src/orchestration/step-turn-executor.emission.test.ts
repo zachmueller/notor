@@ -113,6 +113,7 @@ function flow(steps: StepDefinition[]): OrchestrationFlow {
 		maxDepth: null,
 		maxCostUsd: 5,
 		openNotesInEditor: null,
+		allowConcurrent: false,
 	};
 }
 

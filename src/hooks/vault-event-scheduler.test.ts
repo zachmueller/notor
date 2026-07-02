@@ -34,6 +34,7 @@ function makeFlow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
 		maxDepth: null,
 		maxCostUsd: 5,
 		openNotesInEditor: null,
+		allowConcurrent: false,
 		...over,
 	};
 }

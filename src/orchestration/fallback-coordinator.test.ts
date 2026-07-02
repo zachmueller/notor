@@ -34,6 +34,7 @@ function fakeFlow(): OrchestrationFlow {
 		maxDepth: null,
 		maxCostUsd: 5,
 		openNotesInEditor: null,
+		allowConcurrent: false,
 	};
 }
 

@@ -11,14 +11,16 @@
  *  3. **stale-loop detection** (self-loops) — the same `(topic, source_step)`
  *     pair (payload deliberately excluded) for `STALE_REPEAT_THRESHOLD` (4)
  *     consecutive events over a rolling window of the last `STALE_WINDOW_SIZE`.
- *  4. **thrashing detection** — a task re-queued after abandonment
- *     `THRASHING_ABANDON_THRESHOLD` (3)+ times.
  *
- * The guards are **pure predicates** over the event history + a small counters
- * object — no I/O, no loop ownership (the runner consults them each turn). The
- * detector predicates take the window / counters as inputs, so they work
- * identically whether the state was accumulated live or **rehydrated from replay
- * on reload** (Issue-6; replay is INT-005).
+ * FEAT-008 thrashing guard removed as dead code — see F1 spec. Its live half was
+ * never built (the runner never supplied a `taskKey`, and `abandonCounts` was only
+ * written during resume rehydration, never during a live run). Reviving it is a
+ * feature needing real task-registry abandon instrumentation, not a fix.
+ *
+ * The guards are **pure predicates** over the event history — no I/O, no loop
+ * ownership (the runner consults them each turn). The detector predicates take the
+ * window as input, so they work identically whether the state was accumulated live
+ * or **rehydrated from replay on reload** (Issue-6; replay is INT-005).
  *
  * Boundary ownership: the **completion no-progress guard** (Issue-9) and the
  * **breadth-first FIFO fan-out drain** (Issue-11) are NOT here — they live at the
@@ -28,22 +30,16 @@
  * @see specs/ZZ-misc/orchestration/contracts/event-engine.md — Loop Safety Guards
  */
 
-import {
-	STALE_REPEAT_THRESHOLD,
-	THRASHING_ABANDON_THRESHOLD,
-} from "./constants";
+import { STALE_REPEAT_THRESHOLD } from "./constants";
 import type { OrchestrationEvent, OrchestrationFlow } from "./types";
 
 /** A terminal verdict from a guard (or `null` when no guard fires). */
 export interface SafetyGuardResult {
 	/** Which guard fired. */
-	guard: "iteration_cap" | "runtime_cap" | "stale_loop" | "thrashing";
+	guard: "iteration_cap" | "runtime_cap" | "stale_loop";
 	/** Human-readable reason (carried into the terminal `FLOW_ERROR`). */
 	reason: string;
 }
-
-/** Per-task abandonment counters the runner maintains and the thrashing guard reads. */
-export type ThrashingCounters = Map<string, number>;
 
 /**
  * Stale-loop detection (pure). Returns true iff the most recent
@@ -82,30 +78,20 @@ export class LoopSafetyGuards {
 		return isStale(history);
 	}
 
-	/**
-	 * Thrashing detection (FR-117). Fires when `taskKey` has been abandoned
-	 * (started then re-queued without being closed) `THRASHING_ABANDON_THRESHOLD`
-	 * (3)+ times.
-	 */
-	isThrashing(taskKey: string, abandonCounts: ThrashingCounters): boolean {
-		return (abandonCounts.get(taskKey) ?? 0) >= THRASHING_ABANDON_THRESHOLD;
-	}
+	// FEAT-008 thrashing guard removed as dead code — see F1 spec.
 
 	/**
 	 * The combined per-turn check the runner calls. Returns the first firing
-	 * guard's terminal verdict, or `null` when the flow is healthy. `taskKey` is
-	 * optional — thrashing is checked only when a task key is supplied.
+	 * guard's terminal verdict, or `null` when the flow is healthy.
 	 */
 	evaluate(args: {
 		flow: OrchestrationFlow;
 		llmTurns: number;
 		startedAtMs: number;
 		history: OrchestrationEvent[];
-		abandonCounts?: ThrashingCounters;
-		taskKey?: string;
 		nowMs?: number;
 	}): SafetyGuardResult | null {
-		const { flow, llmTurns, startedAtMs, history, abandonCounts, taskKey, nowMs } = args;
+		const { flow, llmTurns, startedAtMs, history, nowMs } = args;
 
 		if (this.checkIteration(llmTurns, flow)) {
 			return {
@@ -126,14 +112,6 @@ export class LoopSafetyGuards {
 				reason:
 					`Flow '${flow.name}' is stuck in a self-loop: step '${last.source_step}' re-fired ` +
 					`'${last.topic}' ${STALE_REPEAT_THRESHOLD} times in a row.`,
-			};
-		}
-		if (taskKey && abandonCounts && this.isThrashing(taskKey, abandonCounts)) {
-			return {
-				guard: "thrashing",
-				reason:
-					`Flow '${flow.name}' is thrashing on task '${taskKey}' ` +
-					`(re-queued after abandonment ${abandonCounts.get(taskKey)} times).`,
 			};
 		}
 		return null;

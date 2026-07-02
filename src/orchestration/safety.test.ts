@@ -1,19 +1,16 @@
 /**
  * TEST-002 (part 3) — `LoopSafetyGuards` unit tests (FEAT-008).
  *
- * Pure predicates over event history + counters: stale-loop (payload-independent),
- * runtime cap, iteration cap, thrashing. The detectors take the window/counters
- * as inputs, so they work identically whether state was accumulated live or
- * rehydrated on reload.
+ * Pure predicates over event history: stale-loop (payload-independent), runtime
+ * cap, iteration cap. The detectors take the window as input, so they work
+ * identically whether state was accumulated live or rehydrated on reload.
+ * (FEAT-008 thrashing guard removed as dead code — see F1 spec.)
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-1-engine.md — TEST-002
  */
 
 import { describe, it, expect } from "vitest";
-import {
-	STALE_REPEAT_THRESHOLD,
-	THRASHING_ABANDON_THRESHOLD,
-} from "./constants";
+import { STALE_REPEAT_THRESHOLD } from "./constants";
 import { LoopSafetyGuards, isStale } from "./safety";
 import type { OrchestrationEvent, OrchestrationFlow } from "./types";
 
@@ -43,6 +40,7 @@ function flow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
 		maxDepth: null,
 		maxCostUsd: 5,
 		openNotesInEditor: null,
+		allowConcurrent: false,
 		...over,
 	};
 }
@@ -95,15 +93,6 @@ describe("LoopSafetyGuards", () => {
 		const started = 1_000_000;
 		expect(guards.checkRuntime(started, f, started + 9 * 60_000)).toBe(false);
 		expect(guards.checkRuntime(started, f, started + 11 * 60_000)).toBe(true);
-	});
-
-	it("isThrashing fires at the abandonment threshold", () => {
-		const counts = new Map<string, number>();
-		counts.set("task-1", THRASHING_ABANDON_THRESHOLD - 1);
-		expect(guards.isThrashing("task-1", counts)).toBe(false);
-		counts.set("task-1", THRASHING_ABANDON_THRESHOLD);
-		expect(guards.isThrashing("task-1", counts)).toBe(true);
-		expect(guards.isThrashing("unknown", counts)).toBe(false);
 	});
 
 	it("evaluate returns the firing guard's terminal verdict (iteration cap)", () => {

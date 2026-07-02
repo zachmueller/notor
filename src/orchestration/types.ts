@@ -89,6 +89,15 @@ export interface OrchestrationFlow {
 	 * behavior for this flow regardless of the setting.
 	 */
 	openNotesInEditor: boolean | null;
+	/**
+	 * `notor-flow-allow-concurrent` (default `false`) — opt out of the per-flow
+	 * single-instance guard (F1 Fix 4). When `false` a launch is skipped-with-Notice
+	 * if another session of the same flow is already live (mirrors
+	 * `isWorkflowRunning`); `true` permits concurrent launches. `run_flow` children
+	 * and `chaining` self-succession are exempt regardless (legal depth/budget-bounded
+	 * recursion).
+	 */
+	allowConcurrent: boolean;
 }
 
 // ---------------------------------------------------------------------------

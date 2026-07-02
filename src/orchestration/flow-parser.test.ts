@@ -341,6 +341,17 @@ describe("FlowDefinitionParser", () => {
 		expect(flow.openNotesInEditor).toBe(false);
 	});
 
+	it("defaults notor-flow-allow-concurrent to false when absent (F1 Fix 4)", async () => {
+		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		expect(flow.allowConcurrent).toBe(false);
+	});
+
+	it("parses notor-flow-allow-concurrent: true to opt out of the single-instance guard (F1 Fix 4)", async () => {
+		const files = validFlowFiles({ "notor-flow-allow-concurrent": true });
+		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		expect(flow.allowConcurrent).toBe(true);
+	});
+
 	it("rejects an invalid notor-handoff-isolation with a clear load error (INT-040)", async () => {
 		const files = validFlowFiles({ "notor-handoff-isolation": "sandboxed" });
 		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(

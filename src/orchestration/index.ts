@@ -30,7 +30,6 @@ export {
 	DEFAULT_MAX_COST_USD,
 	STALE_REPEAT_THRESHOLD,
 	STALE_WINDOW_SIZE,
-	THRASHING_ABANDON_THRESHOLD,
 	COMPLETION_NOPROGRESS_THRESHOLD,
 	EVENT_HISTORY_PROMPT_LIMIT,
 } from "./constants";
@@ -48,7 +47,7 @@ export { FallbackCoordinator } from "./fallback-coordinator";
 export { StepPromptBuilder } from "./step-prompt-builder";
 export type { StepPromptBuildArgs } from "./step-prompt-builder";
 export { LoopSafetyGuards, isStale } from "./safety";
-export type { SafetyGuardResult, ThrashingCounters } from "./safety";
+export type { SafetyGuardResult } from "./safety";
 export { StepTurnExecutor } from "./step-turn-executor";
 export { OrchestrationRunner } from "./runner";
 export type { OrchestrationRunResult } from "./runner";

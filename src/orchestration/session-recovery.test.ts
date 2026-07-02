@@ -254,19 +254,9 @@ describe("SessionRecovery — safety-state rehydration", () => {
 		expect(recovered.safety.history.filter((e) => e.topic === "loop").length).toBe(1);
 	});
 
-	it("rebuilds per-task abandonment counters from flow.tasks_remaining payloads", () => {
-		const remaining = (keys: string[]) =>
-			eventEmitted(0, "flow.tasks_remaining", JSON.stringify({ remaining_tasks: keys.map((k) => ({ key: k })) }), "Planner");
-		const entries = [
-			sessionStart("user"),
-			remaining(["t1", "t2"]),
-			remaining(["t1"]),
-			remaining(["t1"]),
-		];
-		const { abandonCounts } = recovery.rehydrateSafetyState(entries);
-		expect(abandonCounts.get("t1")).toBe(3);
-		expect(abandonCounts.get("t2")).toBe(1);
-	});
+	// FEAT-008 thrashing guard removed as dead code — see F1 spec. The former
+	// "rebuilds per-task abandonment counters" test was deleted with it (rehydrate
+	// no longer produces abandonCounts).
 });
 
 // ---------------------------------------------------------------------------

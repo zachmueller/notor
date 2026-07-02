@@ -81,6 +81,7 @@ function flow(steps: StepDefinition[], over: Partial<OrchestrationFlow> = {}): O
 		maxDepth: null,
 		maxCostUsd: 5,
 		openNotesInEditor: null,
+		allowConcurrent: false,
 		...over,
 	};
 }

@@ -119,14 +119,14 @@ doc comment at `launch.ts:794–798` already promises.
 
 ## Phase 4 — Single-instance guard + thrashing-guard removal (commit 4)
 
-- [ ] **4.1 Per-flow single-instance:** in `launchOrchestration`, before creating the session,
+- [x] **4.1 Per-flow single-instance:** in `launchOrchestration`, before creating the session,
       check `registry.isFlowRunning(flow.name)`. Policy: **skip with Notice** naming the flow
       and running sessionId (mirrors `isWorkflowRunning` consumption,
       `vault-event-dispatcher.ts:244`). Opt-out frontmatter `notor-flow-allow-concurrent: true`
       parsed in `flow-parser.ts` next to the other flow-level keys. Exempt origins: `run_flow`
       children and `chaining` (self-chaining is legal depth/budget-bounded recursion). Guard is
       deliberately in-memory only — after a crash, Phase 2's liveness guard is the protection.
-- [ ] **4.2 Delete the dead thrashing guard (FEAT-008).** `evaluate` checks thrashing only with
+- [x] **4.2 Delete the dead thrashing guard (FEAT-008).** `evaluate` checks thrashing only with
       a `taskKey` (`safety.ts:131`) that the runner's sole call site (`runner.ts:446–453`) never
       supplies; `abandonCounts` is only written during resume rehydration (`runner.ts:282–284`
       ← `session-recovery.ts:226–245`), never live. Delete: `taskKey`/`abandonCounts` params
@@ -135,7 +135,7 @@ doc comment at `launch.ts:794–798` already promises.
       `session-recovery.test.ts`. Leave a
       `// FEAT-008 thrashing guard removed as dead code — see F1 spec` marker. (If product
       wants it later, it's a feature needing real task-registry abandon instrumentation.)
-- [ ] **4.3 Bug B (chaining await):** keep the await, fix the docs. `launch.ts:702–703` claims
+- [x] **4.3 Bug B (chaining await):** keep the await, fix the docs. `launch.ts:702–703` claims
       fire-and-forget; the code awaits the full successor chain (:663–667 → :755). Making it
       truly detached changes `run_flow` parent semantics and orphans the successor from the
       abort cascade — note as a follow-up candidate now that the registry could own detached
@@ -143,25 +143,25 @@ doc comment at `launch.ts:794–798` already promises.
 
 ## Tests (per phase; the area has zero launch-layer tests today)
 
-- [ ] Registry unit — new `run-registry.test.ts`: register/unregister/abort/abortAll/
-      isFlowRunning/touch.
-- [ ] **Replay no-respawn** — new `child-spawn.test.ts` (needs 3.1's seam): over a fake fs
-      seeded with a parent log containing `child.spawned` (+ optionally `child.result`), call
-      the spawner with a *fresh random* `viaToolCallId` but same (stepName, flowName, ordinal) →
-      **no second child session created**; result reused / child resumed. Reuse `FakeRecoveryFs`
-      (`session-recovery.test.ts:305–321`), `FakeSessionFs` (`session-manager.test.ts:16–33`),
-      the jsonl builder helpers (`session-recovery.test.ts:25–55`).
-- [ ] Ledger ordinal — same file: two `run_flow` calls to the same flow in one step match
-      1st→1st, 2nd→2nd.
-- [ ] Liveness skip — extend `session-recovery.test.ts` + a stat-able fake: fresh mtime →
-      skipped; stale → offered.
-- [ ] Schedule origin — `session-recovery.test.ts`: `origin: "schedule"` classifies as
+- [x] Registry unit — new `run-registry.test.ts`: register/unregister/abort/abortAll/
+      isFlowRunning/touch (+ `listActive`).
+- [x] **Replay no-respawn** — new `child-ledger.test.ts` (uses 3.1's pure matcher extracted to
+      `child-ledger.ts`): a `child.spawned` (+ optionally `child.result`) matched with a *fresh
+      random* `viaToolCallId` but the same (stepName, flowName, ordinal) → the reuse/resume path is
+      taken, **no fresh spawn**. Tested at the matcher layer (rather than driving the full
+      plugin-coupled spawner) — see deviation note in the PR/commit.
+- [x] Ledger ordinal — `child-ledger.test.ts`: two `run_flow` calls to the same flow in one step
+      match 1st→1st, 2nd→2nd; `run-flow.test.ts` asserts the tool assigns per-(step,flow) ordinals.
+- [x] Liveness skip — `recovery-liveness.test.ts`: fresh mtime → live (skip); stale/null → not
+      live (offer). (Pure predicate extracted to `recovery-liveness.ts`.)
+- [x] Schedule origin — `session-recovery.test.ts`: `origin: "schedule"` classifies as
       recoverable root, no loud error.
-- [ ] Single-instance — launch-side or registry-level: second launch refused;
-      `allow-concurrent` opts out; `run_flow`/`chaining` exempt.
-- [ ] Unload abort — manual/e2e: disable plugin mid-run → runner stops, session `cancelled`
-      (or left `active` + liveness-guarded). Optional e2e: extend an
-      `orchestration-*-test.ts` to click Stop mid-run, assert `session.json` → `cancelled`.
+- [x] Single-instance — registry-level (`run-registry.test.ts` isFlowRunning) + parser opt-out
+      (`flow-parser.test.ts` `notor-flow-allow-concurrent`). The launch-side guard wiring
+      (skip-with-Notice; `run_flow`/`chaining` exempt) is inline in `launchOrchestration` — covered
+      by its component parts, not a full launch-side integration test (no plugin harness exists).
+- [ ] Unload abort — manual/e2e only: disable plugin mid-run → runner stops, session `cancelled`
+      (or left `active` + liveness-guarded). Not automated this pass.
 
 ## Verification
 

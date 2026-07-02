@@ -76,12 +76,14 @@ export type RecoveryAction =
 	| { kind: "still_paused"; step: string; prompt: string; turn: number }
 	| { kind: "none" };
 
-/** The rehydrated safety-guard state derived from a replayed log. */
+/**
+ * The rehydrated safety-guard state derived from a replayed log. (FEAT-008
+ * thrashing guard removed as dead code — see F1 spec; only the stale-window event
+ * history is rehydrated now.)
+ */
 export interface RehydratedSafetyState {
 	/** Event history (newest last) the stale detector's rolling window reads. */
 	history: OrchestrationEvent[];
-	/** Per-task abandonment counters the thrashing guard reads. */
-	abandonCounts: Map<string, number>;
 }
 
 /** A session selected for recovery, with its rebuilt runtime state. */
@@ -228,15 +230,12 @@ export class SessionRecovery {
 
 	/**
 	 * Rehydrate the safety-guard state from the replayed log: the event history
-	 * (drives the stale-loop rolling window) and per-task abandonment counters
-	 * (drive the thrashing guard). Counters count how many times each task key
-	 * re-surfaced in a `flow.tasks_remaining` payload — a proxy for re-queue after
-	 * a blocked completion. So a near-stale self-loop fires on the **next** repeat
-	 * post-reload, not N more.
+	 * that drives the stale-loop rolling window. (FEAT-008 thrashing guard removed
+	 * as dead code — see F1 spec; per-task abandonment counters are no longer
+	 * rebuilt.)
 	 */
 	rehydrateSafetyState(entries: SessionLogEntry[]): RehydratedSafetyState {
 		const history: OrchestrationEvent[] = [];
-		const abandonCounts = new Map<string, number>();
 		for (const e of entries) {
 			if (e.type !== "event.emitted") continue;
 			history.push({
@@ -246,13 +245,8 @@ export class SessionRecovery {
 				turn: e.turn,
 				ts: e.ts,
 			});
-			if (e.topic === "flow.tasks_remaining") {
-				for (const key of extractRemainingTaskKeys(e.payload)) {
-					abandonCounts.set(key, (abandonCounts.get(key) ?? 0) + 1);
-				}
-			}
 		}
-		return { history, abandonCounts };
+		return { history };
 	}
 
 	/** Collect the set of `side_effect.committed` keys (FR-125 — `once()` skip set). */
@@ -402,11 +396,11 @@ export class SessionRecovery {
 		metas: Map<string, OrchestrationSessionMeta>,
 	): boolean {
 		switch (meta.origin) {
+			// `user` / `hook` / `schedule` are all launcher-less roots with no live
+			// parent to reconcile them. Bug A: `schedule` was omitted, so a crashed
+			// scheduled run surfaced as a loud recovery error instead of resuming.
 			case "user":
 			case "hook":
-			// Bug A: a scheduled run is a root with no live launcher to reconcile it
-			// (the cron fired once, then crashed) — recover it exactly like a hook
-			// root instead of surfacing it as a loud recovery error.
 			case "schedule":
 				return true;
 			case "chaining": {
@@ -458,23 +452,4 @@ function dropLastEventEmitted(entries: SessionLogEntry[]): SessionLogEntry[] {
 		}
 	}
 	return entries;
-}
-
-/** Extract task keys from a `flow.tasks_remaining` payload (`{ remaining_tasks: [{key}] }`). */
-function extractRemainingTaskKeys(payload: string): string[] {
-	try {
-		const parsed = JSON.parse(payload) as {
-			remaining_tasks?: Array<{ key?: string }>;
-			missing?: string[];
-		};
-		if (Array.isArray(parsed.remaining_tasks)) {
-			return parsed.remaining_tasks.map((t) => t.key).filter((k): k is string => typeof k === "string");
-		}
-		if (Array.isArray(parsed.missing)) {
-			return parsed.missing.filter((k): k is string => typeof k === "string");
-		}
-	} catch {
-		// Non-JSON payload — no task keys.
-	}
-	return [];
 }

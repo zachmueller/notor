@@ -56,6 +56,8 @@ import { matchChildInLedger, parseLedgerEntries } from "./child-ledger";
 import { VaultStepConversationStore } from "./step-conversation-store";
 import { showOrchestrationProgressNotice } from "./notices";
 import { OrchestrationRunner, type OrchestrationRunResult } from "./runner";
+import { newRootBudget } from "../run-loop/budget";
+import { FLOW_CANCELLED } from "./types";
 import type { OrchestrationFlow, OrchestrationSessionMeta } from "./types";
 
 const log = logger("OrchestrationLaunch");
@@ -535,6 +537,28 @@ export async function launchOrchestration(
 	const sharedParentScratchpad =
 		flow.handoffIsolation === "shared" ? options?.parentScratchpadPath : undefined;
 
+	// F1 Fix 4: per-flow single-instance guard. Skip-with-Notice when another live
+	// session is already running this flow (mirrors WorkflowConcurrencyManager's
+	// isWorkflowRunning consumption). Exempt `run_flow` children and `chaining`
+	// self-succession — both are legal depth/budget-bounded recursion, and a flow
+	// legitimately calling or chaining to itself must not be blocked. Opt out
+	// per-flow with `notor-flow-allow-concurrent: true`. In-memory only: after a
+	// crash the recovery liveness guard (Fix 2) is the protection.
+	if (origin !== "run_flow" && origin !== "chaining" && !flow.allowConcurrent) {
+		const registry = plugin.getOrchestrationRunRegistry();
+		if (registry.isFlowRunning(flow.name)) {
+			const running = registry.listActive().find((h) => h.flowName === flow.name);
+			log.info("Skipping launch — flow already running", {
+				flow: flow.name,
+				runningSessionId: running?.sessionId,
+			});
+			new Notice(
+				`Orchestration '${flow.name}' is already running (${running?.sessionId ?? "active"}); skipped.`,
+			);
+			return skippedRunResult(flow);
+		}
+	}
+
 	// INT-001: create the session workspace (dir + scratchpad/ + tasks/ +
 	// session.json status `active`) before the first turn runs.
 	const sessionManager = new OrchestrationSessionManager(
@@ -688,10 +712,11 @@ export async function launchOrchestration(
 
 	// INT-045: chaining / one-way handoff. On successful completion, if the flow
 	// declares `notor-on-complete-flow`, launch the successor INSTEAD of returning
-	// to any caller — fire-and-forget. The handoff is gated exactly like a
-	// run_flow spawn over the SAME shared budget cell + depth, so an A → B → A
-	// on-complete cycle terminates at max_depth / the aggregate budget. A blocked
-	// handoff is a loud FLOW_ERROR (the chain has no caller to return to).
+	// to any caller. Bug B (F1): the successor is AWAITED here (not fire-and-forget)
+	// — a run_flow parent transitively awaits the whole chain. The handoff is gated
+	// exactly like a run_flow spawn over the SAME shared budget cell + depth, so an
+	// A → B → A on-complete cycle terminates at max_depth / the aggregate budget. A
+	// blocked handoff is a loud FLOW_ERROR (the chain has no caller to return to).
 	if (result.status === "completed" && flow.onCompleteFlow) {
 		await chainToSuccessor(plugin, flow, result, sessionId).catch((e) =>
 			log.error("Chaining handoff failed", { flow: flow.name, error: String(e) }),
@@ -699,6 +724,32 @@ export async function launchOrchestration(
 	}
 
 	return result;
+}
+
+/**
+ * The synthetic terminal result returned when a launch is skipped by the per-flow
+ * single-instance guard (F1 Fix 4). Reported as `cancelled` with a `FLOW_CANCELLED`
+ * terminal so a caller (e.g. a scheduler) treats it as a benign no-op, not an
+ * error — no session was created.
+ */
+function skippedRunResult(flow: OrchestrationFlow): OrchestrationRunResult {
+	return {
+		status: "cancelled",
+		terminal: {
+			topic: FLOW_CANCELLED,
+			payload: `Skipped: '${flow.name}' is already running.`,
+			source_step: null,
+			turn: 0,
+			ts: new Date().toISOString(),
+		},
+		iterations: 0,
+		structured: null,
+		text: "",
+		subtreeConsumed: { costUsd: 0, iterations: 0, maxDepthReached: 0 },
+		tokenUsage: { input: 0, output: 0 },
+		budget: newRootBudget(flow.maxIterations, flow.maxCostUsd),
+		depth: 0,
+	};
 }
 
 /**
@@ -730,8 +781,16 @@ async function resolveSuccessorInputs(
  * a blocked handoff terminates the chain with `FLOW_ERROR` (status `error`) — a
  * loud, diagnosable stop, since chaining has no caller to return a tool error to.
  * The successor is launched as a recovery **root**-able `origin: "chaining"` run
- * (it is recovered as a root once this predecessor is terminal — INT-005), so this
- * call is fire-and-forget: it does not block the predecessor's own return.
+ * (it is recovered as a root once this predecessor is terminal — INT-005).
+ *
+ * **Bug B (F1):** this handoff is **awaited**, not fire-and-forget — the caller
+ * (`launchOrchestration`) awaits `chainToSuccessor`, which awaits the full successor
+ * `launchOrchestration`, so a `run_flow` parent transitively awaits the entire
+ * chain. That is the current, intended semantics (a `run_flow` caller sees the
+ * whole chain's result). Making it truly detached would change those semantics and
+ * orphan the successor from the abort cascade; it is a follow-up candidate now that
+ * the run registry (Fix 1) could own a detached chain. Docstring corrected to match
+ * the code rather than the code changed.
  */
 async function chainToSuccessor(
 	plugin: NotorPlugin,

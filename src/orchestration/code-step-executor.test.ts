@@ -135,6 +135,7 @@ function flow(): OrchestrationFlow {
 		maxDepth: null,
 		maxCostUsd: 5,
 		openNotesInEditor: null,
+		allowConcurrent: false,
 	};
 }
 

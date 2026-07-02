@@ -34,8 +34,8 @@ export const STALE_REPEAT_THRESHOLD = 4;
 /** Rolling-window size the stale detector inspects (holds 5 for context; trigger is 4 consecutive). */
 export const STALE_WINDOW_SIZE = 5;
 
-/** Thrashing detection (FEAT-008): a task re-queued after abandonment this many times terminates the flow. */
-export const THRASHING_ABANDON_THRESHOLD = 3;
+// FEAT-008 thrashing guard removed as dead code — see F1 spec. The former
+// THRASHING_ABANDON_THRESHOLD constant was deleted with it.
 
 /**
  * Completion no-progress guard (FEAT-003 / FEAT-010, Issue-9): terminate with

@@ -432,6 +432,7 @@ export class FlowDefinitionParser {
 			maxDepth: parseMaxDepth(fm["notor-max-depth"]),
 			maxCostUsd: parseFiniteNumberOrDefault(fm["notor-max-cost-usd"], DEFAULT_MAX_COST_USD),
 			openNotesInEditor: parseBoolOrNull(fm["notor-open-notes-in-editor"]),
+			allowConcurrent: parseBool(fm["notor-flow-allow-concurrent"], false),
 		};
 
 		// Two layers of load-time validation.

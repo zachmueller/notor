@@ -40,7 +40,7 @@ import { newRootBudget } from "../run-loop/budget";
 import { logger } from "../utils/logger";
 import { FallbackCoordinator } from "./fallback-coordinator";
 import { OrchestrationEventEngine } from "./event-engine";
-import { LoopSafetyGuards, type ThrashingCounters } from "./safety";
+import { LoopSafetyGuards } from "./safety";
 import type { SessionLog } from "./session-log";
 import type { RecoverableSession } from "./session-recovery";
 import type { StepTurnExecutor } from "./step-turn-executor";
@@ -179,7 +179,6 @@ export class OrchestrationRunner {
 	private readonly engine = new OrchestrationEventEngine();
 	private readonly fallback = new FallbackCoordinator();
 	private readonly guards = new LoopSafetyGuards();
-	private readonly abandonCounts: ThrashingCounters = new Map();
 
 	/** Engine hop counter (every executed step, code or conversation). */
 	private iteration = 0;
@@ -277,11 +276,9 @@ export class OrchestrationRunner {
 		);
 
 		this.wireSubscriptions(flow);
-		// Rehydrate the stale-window history + abandonment counters before resuming.
+		// Rehydrate the stale-window history before resuming (FEAT-008 thrashing
+		// guard removed as dead code — see F1 spec; no abandon counters to restore).
 		this.engine.rehydrateHistory(recovered.safety.history);
-		for (const [key, count] of recovered.safety.abandonCounts) {
-			this.abandonCounts.set(key, count);
-		}
 		// Advance the hop counter past the pre-crash turns (display/sequence).
 		this.iteration = recovered.meta.iteration;
 
@@ -454,7 +451,6 @@ export class OrchestrationRunner {
 				llmTurns: this.llmTurns,
 				startedAtMs: this.startedAtMs,
 				history: this.engine.getEventHistory(),
-				abandonCounts: this.abandonCounts,
 				nowMs: Date.now(),
 			});
 			if (guard) {

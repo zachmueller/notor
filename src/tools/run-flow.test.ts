@@ -40,6 +40,7 @@ function flow(name: string, over: Partial<OrchestrationFlow> = {}): Orchestratio
 		maxDepth: null,
 		maxCostUsd: 5,
 		openNotesInEditor: null,
+		allowConcurrent: false,
 		...over,
 	};
 }
