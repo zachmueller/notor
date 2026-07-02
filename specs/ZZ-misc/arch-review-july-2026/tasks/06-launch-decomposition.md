@@ -116,9 +116,12 @@ Fakes ready for reuse: `FakeSessionFs` (`session-manager.test.ts:16–33`), `Fak
       unit-testable without a vault or runner. Added minimal `Modal`/`FuzzySuggestModal`/
       `ButtonComponent` stubs to `src/__mocks__/obsidian.ts` (the ui module is pulled in
       transitively through launch-wiring).
-- [ ] **3.4** `recovery-boot.test.ts` — over `FakeRecoveryFs` + a stubbed host: recoverable
+- [x] **3.4** `recovery-boot.test.ts` — over `FakeRecoveryFs` + a stubbed host: recoverable
       root → resume invoked with rebuilt budget/committedKeys; error sessions marked; liveness
-      skip and offered-resume paths (from Task 03).
+      skip and offered-resume paths (from Task 03). Added behavior-preserving `RecoverDeps`
+      seams (`recoveryFs`/`resolveFlows`/`isLive`/`offerResume`) to `recoverOrchestrations` so
+      the scan's branch logic is testable without a runner or the DOM; the error-marking test
+      exercises the real `updateStatus` path over an in-memory vault adapter.
 - [ ] **3.5** Reference-flow parse gate (cheap version): extend `reference-flows.test.ts` to
       assert each `materializeReferenceFlows` output parses through `FlowDefinitionParser` with
       zero errors/warnings. A live-provider e2e for one reference flow is a separate

@@ -71,31 +71,57 @@ export function makeRecoveryFs(
  * `requestUserInput` is injected from the composition site (main.ts) so a resumed
  * paused session re-surfaces its prompt through the same modal — this module never
  * imports ui.
+ *
+ * `deps` are behavior-preserving test seams (production defaults built inline): a
+ * fake recovery fs, a stubbed flow set, the liveness predicate, and the offer-resume
+ * hook, so the scan's decision logic is unit-testable without a vault, a runner, or
+ * the DOM.
  */
+export interface RecoverDeps {
+	recoveryFs?: RecoveryFs;
+	/** The discoverable flows keyed by name (defaults to a live `discoverFlows()`). */
+	resolveFlows?: () => Promise<Map<string, OrchestrationFlow>>;
+	/** Whether a still-`active` session's log looks live (defaults to the mtime check). */
+	isLive?: (sessionId: string) => Promise<boolean>;
+	/** Offer to resume one recoverable root (defaults to the Resume-button Notice). */
+	offerResume?: (flow: OrchestrationFlow, recovered: RecoverableSession) => void;
+}
+
 export async function recoverOrchestrations(
 	host: OrchestrationHost,
 	requestUserInput?: RequestUserInput,
+	deps?: RecoverDeps,
 ): Promise<void> {
 	const fsVault = new VaultSessionFs(host.app);
 	const sessionManager = new OrchestrationSessionManager(host.settings.notor_dir, fsVault);
-	const recoveryFs = makeRecoveryFs(host, sessionManager);
+	const recoveryFs = deps?.recoveryFs ?? makeRecoveryFs(host, sessionManager);
 
 	// Resolve each flow's finite ceilings so the budget re-seeds from the real
 	// caps (not the engine defaults) when the flow is still discoverable.
-	let flowsByName = new Map<string, OrchestrationFlow>();
-	try {
-		const parser = new FlowDefinitionParser(
-			host.app.vault,
-			host.app.metadataCache,
-			host.settings.notor_dir,
-		);
-		const parsed = await parser.discoverFlows();
-		flowsByName = new Map(parsed.map((p) => [p.flow.name, p.flow]));
-	} catch (e) {
-		log.warn("Flow discovery during recovery failed; using engine-default ceilings", {
-			error: String(e),
+	const resolveFlows =
+		deps?.resolveFlows ??
+		(async () => {
+			try {
+				const parser = new FlowDefinitionParser(
+					host.app.vault,
+					host.app.metadataCache,
+					host.settings.notor_dir,
+				);
+				const parsed = await parser.discoverFlows();
+				return new Map(parsed.map((p) => [p.flow.name, p.flow]));
+			} catch (e) {
+				log.warn("Flow discovery during recovery failed; using engine-default ceilings", {
+					error: String(e),
+				});
+				return new Map<string, OrchestrationFlow>();
+			}
 		});
-	}
+	const flowsByName = await resolveFlows();
+	const isLive = deps?.isLive ?? ((sessionId: string) => isSessionLogLive(host, sessionManager, sessionId));
+	const offerResume =
+		deps?.offerResume ??
+		((flow: OrchestrationFlow, recovered: RecoverableSession) =>
+			offerResumeNotice(host, flow, recovered, sessionManager, requestUserInput));
 
 	const recovery = new SessionRecovery();
 	const scan = await recovery.scan(recoveryFs, {
@@ -135,7 +161,7 @@ export async function recoverOrchestrations(
 		// runner (the log advances ≥2×/turn). A `null` stat (adapter differences) is
 		// treated as not-live. `interrupted` (paused) sessions are exempt — they are
 		// legitimately idle.
-		if (recovered.meta.status === "active" && (await isSessionLogLive(host, sessionManager, recovered.sessionId))) {
+		if (recovered.meta.status === "active" && (await isLive(recovered.sessionId))) {
 			log.info("Recovery: session log is fresh — treating as live, skipping resume", {
 				sessionId: recovered.sessionId,
 				flow: flow.name,
@@ -146,7 +172,7 @@ export async function recoverOrchestrations(
 		// F1 Fix 2: resume is OFFERED, not forced — the user may have deliberately
 		// stopped Obsidian mid-run (or Stopped the flow). Surface a Notice with a
 		// Resume button; the run (and its indicator re-seed) only restarts on click.
-		offerResumeNotice(host, flow, recovered, sessionManager, requestUserInput);
+		offerResume(flow, recovered);
 	}
 }
 
