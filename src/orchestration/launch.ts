@@ -1057,6 +1057,7 @@ async function backfillParentEdge(
 		const headerLine = nl >= 0 ? content.slice(0, nl) : content;
 		const rest = nl >= 0 ? content.slice(nl) : "";
 		const header = JSON.parse(headerLine) as Record<string, unknown>;
+		header.schema_version ??= 1;
 		const edges = Array.isArray(header.orchestration_edges)
 			? (header.orchestration_edges as Array<Record<string, unknown>>)
 			: [];

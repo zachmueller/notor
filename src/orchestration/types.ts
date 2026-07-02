@@ -166,6 +166,8 @@ export interface OrchestrationSessionMeta {
 	parent_session_id: string | null;
 	/** Always set at creation — the recovery discriminator. */
 	origin: "user" | "hook" | "schedule" | "run_flow" | "chaining";
+	/** Format version — stamped at creation, default-on-read for legacy files. */
+	schema_version?: number;
 }
 
 // ---------------------------------------------------------------------------

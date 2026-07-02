@@ -90,7 +90,17 @@ export class CheckpointStorage {
 			if (!exists) return null;
 
 			const raw = await this.vault.adapter.read(filePath);
-			return JSON.parse(raw) as Checkpoint;
+			const parsed = JSON.parse(raw) as Partial<Checkpoint>;
+			if (!parsed.id || !parsed.conversation_id || !parsed.note_path || parsed.content === undefined) {
+				log.warn("Skipping malformed checkpoint (missing required fields)", { conversationId, checkpointId });
+				return null;
+			}
+			parsed.schema_version ??= 1;
+			if (parsed.schema_version > 1) {
+				log.warn("Skipping checkpoint with unsupported schema_version", { conversationId, checkpointId, schema_version: parsed.schema_version });
+				return null;
+			}
+			return parsed as Checkpoint;
 		} catch (e) {
 			log.error("Failed to load checkpoint", { conversationId, checkpointId, error: String(e) });
 			return null;
@@ -114,7 +124,17 @@ export class CheckpointStorage {
 				if (!filePath.endsWith(".json")) continue;
 				try {
 					const raw = await this.vault.adapter.read(filePath);
-					checkpoints.push(JSON.parse(raw) as Checkpoint);
+					const parsed = JSON.parse(raw) as Partial<Checkpoint>;
+					if (!parsed.id || !parsed.conversation_id || !parsed.note_path || parsed.content === undefined) {
+						log.warn("Skipping malformed checkpoint (missing required fields)", { filePath });
+						continue;
+					}
+					parsed.schema_version ??= 1;
+					if (parsed.schema_version > 1) {
+						log.warn("Skipping checkpoint with unsupported schema_version", { filePath, schema_version: parsed.schema_version });
+						continue;
+					}
+					checkpoints.push(parsed as Checkpoint);
 				} catch (e) {
 					log.warn("Skipping malformed checkpoint file", { filePath, error: String(e) });
 				}

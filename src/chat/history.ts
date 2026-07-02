@@ -170,6 +170,7 @@ export class HistoryManager {
 		return this.enqueueWrite(filePath, async () => {
 			const headerLine = JSON.stringify({
 				_type: "conversation",
+				schema_version: 1,
 				...conversation,
 			});
 
@@ -206,6 +207,7 @@ export class HistoryManager {
 				log.warn("Conversation file not found, creating", { path: filePath });
 				const headerLine = JSON.stringify({
 					_type: "conversation",
+					schema_version: 1,
 					...conversation,
 				});
 				await this.vault.adapter.write(filePath, headerLine + "\n" + line + "\n");
@@ -397,7 +399,7 @@ export class HistoryManager {
 		return this.enqueueWrite(filePath, async () => {
 			const lines: string[] = [];
 
-			lines.push(JSON.stringify({ _type: "conversation", ...conversation }));
+			lines.push(JSON.stringify({ _type: "conversation", schema_version: 1, ...conversation }));
 
 			for (const msg of messages) {
 				lines.push(JSON.stringify({ _type: "message", ...msg }));
@@ -451,6 +453,7 @@ export class HistoryManager {
 
 			lines.push(JSON.stringify({
 				_type: "sub_agent_conversation",
+				schema_version: 1,
 				...metadata,
 			}));
 
@@ -545,6 +548,7 @@ export class HistoryManager {
 
 		const { _type: _headerType, ...conversationData } = headerObj;
 		const conversation = conversationData as unknown as Conversation;
+		conversation.schema_version ??= 1;
 
 		// Parse messages (remaining lines — skip non-message line types like stale_state)
 		const messages: Message[] = [];
@@ -648,6 +652,8 @@ export class HistoryManager {
 				const headerType = (headerObj._type as string | undefined) ?? "conversation";
 				if (headerType !== "conversation") continue;
 				if (isHiddenFromConversationList(fname, headerType)) continue;
+
+				headerObj.schema_version ??= 1;
 
 				const convId = headerObj.id as string | undefined;
 				const convUpdatedAt = headerObj.updated_at as string | undefined;

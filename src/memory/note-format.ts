@@ -9,6 +9,8 @@ export interface MemoryNote {
 	lastUsefulAt?: string;
 	lastRecalledAt?: string;
 	sources: string[];
+	/** Format version read from frontmatter; defaults to 1 for legacy notes. */
+	schema_version?: number;
 }
 
 export function serializeNote(args: {
@@ -25,6 +27,7 @@ export function serializeNote(args: {
 	return [
 		"---",
 		"notor-type: memory",
+		"notor-schema: 1",
 		`notor-created-at: ${args.createdAt}`,
 		`notor-memory-updated-at: ${now}`,
 		`notor-sources: ${sourcesYaml}`,
@@ -58,6 +61,7 @@ export function parseNote(markdown: string): MemoryNote {
 	const lastUsefulAt = extractField(frontmatter, "notor-last-useful-at") ?? undefined;
 	const lastRecalledAt = extractField(frontmatter, "notor-last-recalled-at") ?? undefined;
 	const sources = extractArrayField(frontmatter, "notor-sources");
+	const schema_version = parseInt(extractField(frontmatter, "notor-schema") ?? "1", 10) || 1;
 
 	const titleMatch = rest.match(/^#\s+(.+)$/m);
 	const title = titleMatch ? titleMatch[1]!.trim() : "";
@@ -67,7 +71,7 @@ export function parseNote(markdown: string): MemoryNote {
 		: 0;
 	const body = rest.slice(bodyStart).trim();
 
-	return { title, body, createdAt, memoryUpdatedAt, lastLinkedToAt, lastUsefulAt, lastRecalledAt, sources };
+	return { title, body, createdAt, memoryUpdatedAt, lastLinkedToAt, lastUsefulAt, lastRecalledAt, sources, schema_version };
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +97,7 @@ export function serializePendingNote(note: PendingMemoryNote): string {
 	const lines = [
 		"---",
 		"notor-type: pending-memory",
+		"notor-schema: 1",
 		`notor-created-at: ${note.createdAt}`,
 		`notor-memory-updated-at: ${now}`,
 		`notor-sources: ${sourcesYaml}`,
@@ -133,13 +138,14 @@ export function parsePendingNote(markdown: string): PendingMemoryNote {
 	const targetPath = rawTargetPath
 		? rawTargetPath.replace(/^\s*"\s*\[\[/, "").replace(/\]\]\s*"\s*$/, "").trim() || undefined
 		: undefined;
+	const schema_version = parseInt(extractField(frontmatter, "notor-schema") ?? "1", 10) || 1;
 
 	const titleMatch = rest.match(/^#\s+(.+)$/m);
 	const title = titleMatch ? titleMatch[1]!.trim() : "";
 	const bodyStart = titleMatch ? rest.indexOf(titleMatch[0]) + titleMatch[0].length : 0;
 	const body = rest.slice(bodyStart).trim();
 
-	return { title, body, createdAt, memoryUpdatedAt, sources, approvalState: "pending", originalAction, targetPath };
+	return { title, body, createdAt, memoryUpdatedAt, sources, approvalState: "pending", originalAction, targetPath, schema_version };
 }
 
 // ---------------------------------------------------------------------------

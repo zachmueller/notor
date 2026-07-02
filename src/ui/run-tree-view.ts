@@ -69,6 +69,7 @@ interface ScannedHeader {
 	id: string;
 	title?: string;
 	_type?: string;
+	schema_version?: number;
 	orchestration_session_id?: string;
 	orchestration_flow_name?: string;
 	orchestration_step_name?: string;
@@ -216,6 +217,7 @@ export class OrchestrationRunTreeView extends ItemView {
 				const headerLine = nl >= 0 ? content.slice(0, nl) : content;
 				if (!headerLine.trim()) continue;
 				const h = JSON.parse(headerLine) as ScannedHeader;
+				h.schema_version ??= 1;
 				if (h.id) headers.set(h.id, h);
 			} catch (e) {
 				log.debug("Skipping unreadable run-tree header", { file, error: String(e) });

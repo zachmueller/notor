@@ -145,6 +145,8 @@ export interface Conversation {
 	 * @see specs/ZZ-misc/orchestration/contracts/edges.md — §1 Conversation Header Extensions
 	 */
 	_type?: "conversation" | "orchestration_step_conversation";
+	/** Format version — stamped at creation, default-on-read for legacy files. */
+	schema_version?: number;
 	/** Owning orchestration session (`sessions/{id}/`). Step conversations only. */
 	orchestration_session_id?: string;
 	/** `notor-flow-name` of the running flow. Step conversations only. */
@@ -403,6 +405,8 @@ export interface Checkpoint {
 	tool_name: string;
 	/** The message ID of the tool call that triggered this checkpoint. */
 	message_id: string;
+	/** Format version — stamped at creation, default-on-read for legacy files. */
+	schema_version: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -41,6 +41,8 @@ export interface SessionStartEntry extends BaseEntry {
 	prompt: string;
 	origin: "user" | "hook" | "schedule" | "run_flow" | "chaining";
 	parent_session_id: string | null;
+	/** Format version of this session-log stream — read by the reader, default 1 for legacy. */
+	schema_version?: number;
 }
 
 export interface TurnStartEntry extends BaseEntry {
@@ -201,8 +203,8 @@ export class SessionLog {
 
 	// -- Append helpers ------------------------------------------------------
 
-	appendSessionStart(entry: Omit<SessionStartEntry, "type" | "ts">): Promise<void> {
-		return this.write({ type: "session.start", ts: this.now(), ...entry });
+	appendSessionStart(entry: Omit<SessionStartEntry, "type" | "ts" | "schema_version">): Promise<void> {
+		return this.write({ type: "session.start", ts: this.now(), schema_version: 1, ...entry });
 	}
 
 	appendTurnStart(entry: Omit<TurnStartEntry, "type" | "ts">): Promise<void> {

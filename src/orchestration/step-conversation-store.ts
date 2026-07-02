@@ -85,6 +85,7 @@ export function buildStepConversationHeader(record: StepConversationRecord): Rec
 	const isoCreated = new Date(record.createdAtMs).toISOString();
 	return {
 		_type: "orchestration_step_conversation",
+		schema_version: 1,
 		id: record.conversationId,
 		title: `[${record.flowName}] ${record.stepName} — iteration ${record.iteration}`,
 		created_at: isoCreated,
@@ -159,6 +160,7 @@ export class VaultStepConversationStore implements StepConversationStore {
 			const headerLine = newline >= 0 ? content.slice(0, newline) : content;
 			const rest = newline >= 0 ? content.slice(newline) : "";
 			const header = JSON.parse(headerLine) as Record<string, unknown>;
+			header.schema_version ??= 1;
 			const edges = Array.isArray(header.orchestration_edges)
 				? (header.orchestration_edges as OrchestrationEdge[])
 				: [];

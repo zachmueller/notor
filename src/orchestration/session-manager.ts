@@ -138,6 +138,7 @@ export class OrchestrationSessionManager {
 			prompt: args.prompt,
 			parent_session_id: args.parentSessionId ?? null,
 			origin: args.origin,
+			schema_version: 1,
 		};
 		await this.writeMeta(ws, meta);
 
@@ -153,7 +154,9 @@ export class OrchestrationSessionManager {
 	async readMeta(sessionId: string): Promise<OrchestrationSessionMeta> {
 		const ws = this.resolveWorkspace(sessionId);
 		const raw = await this.fs.read(ws.metaPath);
-		return JSON.parse(raw) as OrchestrationSessionMeta;
+		const meta = JSON.parse(raw) as OrchestrationSessionMeta;
+		meta.schema_version ??= 1;
+		return meta;
 	}
 
 	/** Overwrite `session.json` with `meta`. */

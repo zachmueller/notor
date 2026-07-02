@@ -278,7 +278,9 @@ export class SessionRecovery {
 				continue;
 			}
 			try {
-				metas.set(id, JSON.parse(raw) as OrchestrationSessionMeta);
+				const meta = JSON.parse(raw) as OrchestrationSessionMeta;
+				meta.schema_version ??= 1;
+				metas.set(id, meta);
 			} catch (e) {
 				errors.push({
 					sessionId: id,
@@ -341,7 +343,12 @@ export class SessionRecovery {
 		logRaw: string,
 		options?: RecoveryScanOptions,
 	): RecoverableSession {
-		const { entries, truncatedFinalLine } = this.reader.parse(logRaw);
+		const { entries, truncatedFinalLine, schema_version } = this.reader.parse(logRaw);
+		if (schema_version > 1) {
+			throw new Error(
+				`session-log schema_version ${schema_version} is not supported by this version of Notor (max 1). Cannot recover session.`,
+			);
+		}
 		const ceilings =
 			options?.resolveCeilings?.(meta.flow_name) ?? {
 				maxIterations: DEFAULT_MAX_ITERATIONS,

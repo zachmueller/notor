@@ -103,6 +103,7 @@ export class CheckpointManager {
 			description: this.buildDescription(toolName, notePath),
 			tool_name: toolName,
 			message_id: messageId,
+			schema_version: 1,
 		};
 
 		try {
