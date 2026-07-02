@@ -232,4 +232,47 @@ describe("chainToSuccessor — chaining gate (F6 §5.3)", () => {
 		);
 		expect(calls[0]!.options.parentScratchpadPath).toBeUndefined();
 	});
+
+	// Bug B (F1) regression: the handoff is AWAITED, not fire-and-forget. This is
+	// the documented, intended semantics (a run_flow parent transitively sees the
+	// whole chain complete). Locking it here so a future refactor that drops the
+	// await — silently detaching the successor — fails loudly instead. If detaching
+	// ever becomes desired, it must be a deliberate change that also updates this
+	// test and the run_flow parent-semantics + abort-cascade wiring.
+	it("awaits the successor launch — does not resolve until the successor run completes", async () => {
+		const calls: string[] = [];
+		let releaseSuccessor: (() => void) | undefined;
+		const successorDone = new Promise<void>((resolve) => {
+			releaseSuccessor = resolve;
+		});
+		// A launcher that only resolves once we release it, so we can observe whether
+		// chainToSuccessor waits for it.
+		const launch: ChainLauncher = vi.fn(async () => {
+			calls.push("launch:start");
+			await successorDone;
+			calls.push("launch:resolved");
+			return result();
+		});
+
+		const chainPromise = chainToSuccessor(
+			fakeHost(),
+			flow({ onCompleteFlow: "Successor" }),
+			result(),
+			"sess-p",
+			undefined,
+			{ resolveSuccessor: async () => flow({ name: "Successor" }), launch },
+		).then(() => {
+			calls.push("chain:resolved");
+		});
+
+		// Let microtasks flush: the launcher has started but is still pending.
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(calls).toEqual(["launch:start"]);
+
+		// Release the successor; only now may the chain resolve.
+		releaseSuccessor!();
+		await chainPromise;
+		expect(calls).toEqual(["launch:start", "launch:resolved", "chain:resolved"]);
+	});
 });
