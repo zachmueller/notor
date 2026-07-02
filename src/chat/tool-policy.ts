@@ -32,6 +32,15 @@ export interface ToolPolicyContext {
 	vaultRootPath: string;
 	/** Optional resolver for vault note paths (3-step resolution). Returns canonical path or null. */
 	resolveVaultPath?: (path: string) => string | null;
+	/**
+	 * Orchestration scratchpad auto-allow (INT-001 / FR-121): extra allowed roots
+	 * for this session, layered on top of the tool's configured `allowed_paths`
+	 * without mutating the shared/global config. The orchestration call sites
+	 * source these from the active `OrchestrationToolContext` (scratchpad +
+	 * optional parent scratchpad). Non-orchestration callers omit it and behave
+	 * exactly as today. `blocked_paths` still takes precedence.
+	 */
+	sessionAllowedPaths?: string[];
 }
 
 /**
@@ -53,17 +62,24 @@ export interface PolicyDecision {
 
 /**
  * Human-readable descriptions for write tools blocked in Plan mode.
- * Mirrors the private helper in dispatcher.ts for the policy extraction.
+ *
+ * Single home for the plan-mode message map — the dispatcher's legacy branch
+ * imports this too (until that branch is deleted, F2 Phase D). Names are the
+ * plugin's real write tools; the fallback covers everything else.
  */
-function getWriteToolDescription(toolName: string): string {
+export function getWriteToolDescription(toolName: string): string {
 	const descriptions: Record<string, string> = {
-		create_file: "create files",
-		edit_file: "edit files",
-		rename_file: "rename files",
-		delete_file: "delete files",
-		create_folder: "create folders",
+		write_note: "create or modify notes",
+		replace_in_note: "edit notes",
+		update_frontmatter: "modify note frontmatter",
+		manage_tags: "modify note tags",
+		execute_command: "run shell commands",
+		write_file: "write files",
+		delete_note: "delete notes",
+		move_note: "move notes",
+		apply_template: "apply templates",
 	};
-	return descriptions[toolName] ?? `use ${toolName}`;
+	return descriptions[toolName] ?? "perform write operations";
 }
 
 /**
@@ -169,6 +185,7 @@ export function evaluateToolPolicy(
 			toolEntry,
 			ctx.vaultRootPath,
 			ctx.resolveVaultPath,
+			ctx.sessionAllowedPaths,
 		);
 		if (pathError) {
 			return {

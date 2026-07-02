@@ -19,7 +19,7 @@ import { isDomainBlocked } from "../utils/domain-denylist";
 import { enforcePathConstraints } from "../tool-config/path-enforcer";
 import { resolveAutoApprove } from "../personas/auto-approve-resolver";
 import { isMcpTool, McpRegisteredTool } from "../mcp/mcp-tool-adapter";
-import { evaluateToolPolicy, type ToolPolicyContext } from "./tool-policy";
+import { evaluateToolPolicy, getWriteToolDescription, type ToolPolicyContext } from "./tool-policy";
 import type { ParseStreamOpts } from "./stream-utils";
 import { logger } from "../utils/logger";
 
@@ -535,7 +535,7 @@ export class ToolDispatcher {
 				// FEAT-001: MCP tools get a specific error message format per spec FR-59
 				const planModeError = isMcpTool(toolName)
 					? `Tool '${toolName}' is write-only and blocked in Plan mode. Switch to Act mode to use this tool.`
-					: `${toolName} is not available in Plan mode. Switch to Act mode to ${this.getWriteToolDescription(toolName)}.`;
+					: `${toolName} is not available in Plan mode. Switch to Act mode to ${getWriteToolDescription(toolName)}.`;
 
 				const result: ToolResult = {
 					tool_name: toolName,
@@ -821,22 +821,4 @@ export class ToolDispatcher {
 		return this.tools.has(toolName);
 	}
 
-	// -----------------------------------------------------------------------
-	// Helpers
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Get a human-readable description of what a write tool does.
-	 * Used in Plan mode error messages.
-	 */
-	private getWriteToolDescription(toolName: string): string {
-		const descriptions: Record<string, string> = {
-			write_note: "create or modify notes",
-			replace_in_note: "edit notes",
-			update_frontmatter: "modify note frontmatter",
-			manage_tags: "modify note tags",
-			execute_command: "run shell commands",
-		};
-		return descriptions[toolName] ?? "perform write operations";
-	}
 }
