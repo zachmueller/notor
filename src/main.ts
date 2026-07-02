@@ -87,6 +87,7 @@ import { UpdateTasksTool } from "./tools/update-tasks";
 import { RunFlowTool, RUN_FLOW_TOOL_NAME } from "./tools/run-flow";
 import { FlowCompositionManager } from "./orchestration/flow-composition-manager";
 import { makeChildFlowSpawner } from "./orchestration/launch";
+import { requestOrchestrationInput } from "./ui/orchestration-modals";
 import { OrchestrationRunRegistry } from "./orchestration/run-registry";
 import type { OrchestrationFlow } from "./orchestration/types";
 
@@ -753,7 +754,11 @@ export default class NotorPlugin extends Plugin {
 			// never blocks load. Loud recovery errors surface as Notices.
 			if (this.settings.orchestration_enabled) {
 				import("./orchestration/launch")
-					.then(({ recoverOrchestrations }) => recoverOrchestrations(this))
+					.then(({ recoverOrchestrations }) =>
+					recoverOrchestrations(this, (flowName, question) =>
+						requestOrchestrationInput(this.app, flowName, question),
+					),
+				)
 					.catch((e) => log.warn("Orchestration recovery scan failed", { error: String(e) }));
 			}
 		});
@@ -1073,7 +1078,11 @@ export default class NotorPlugin extends Plugin {
 								new Notice(`Orchestration flow '${ref}' not found; hook skipped.`);
 								return;
 							}
-							await launchOrchestration(this, match.flow, objective, { origin: "hook" });
+							await launchOrchestration(this, match.flow, objective, {
+								origin: "hook",
+								requestUserInput: (flowName, question) =>
+									requestOrchestrationInput(this.app, flowName, question),
+							});
 						}
 					: undefined,
 			};
@@ -1162,7 +1171,11 @@ export default class NotorPlugin extends Plugin {
 				if (!this.settings.orchestration_enabled) return;
 				const { launchOrchestration } = await import("./orchestration/launch");
 				const objective = `Scheduled run of orchestration flow '${flow.name}'.`;
-				await launchOrchestration(this, flow, objective, { origin: "schedule" });
+				await launchOrchestration(this, flow, objective, {
+					origin: "schedule",
+					requestUserInput: (flowName, question) =>
+						requestOrchestrationInput(this.app, flowName, question),
+				});
 			},
 		);
 
@@ -1705,7 +1718,12 @@ export default class NotorPlugin extends Plugin {
 			this.app.metadataCache,
 			this.settings.notor_dir,
 		);
-		const runFlowTool = new RunFlowTool(composition, makeChildFlowSpawner(this));
+		const runFlowTool = new RunFlowTool(
+			composition,
+			makeChildFlowSpawner(this, (flowName, question) =>
+				requestOrchestrationInput(this.app, flowName, question),
+			),
+		);
 		registry.register(runFlowTool);
 		// Prime the invocable-flow cache (hot-reloaded again at each execute()).
 		runFlowTool.refreshInvocableFlows().catch((e) =>
