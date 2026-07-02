@@ -87,6 +87,7 @@ import { UpdateTasksTool } from "./tools/update-tasks";
 import { RunFlowTool, RUN_FLOW_TOOL_NAME } from "./tools/run-flow";
 import { FlowCompositionManager } from "./orchestration/flow-composition-manager";
 import { makeChildFlowSpawner } from "./orchestration/launch";
+import { OrchestrationRunRegistry } from "./orchestration/run-registry";
 import type { OrchestrationFlow } from "./orchestration/types";
 
 // Extensions
@@ -249,6 +250,20 @@ export default class NotorPlugin extends Plugin {
 	/** Unregister a detached sub-agent controller (called in the finally block after completion). */
 	unregisterDetachedSubAgent(controller: AbortController): void {
 		this._detachedSubAgents.delete(controller);
+	}
+
+	/**
+	 * In-memory registry of live orchestration runs (F1 Fix 1). A launched flow
+	 * registers its abort controller here for the life of the run so the Stop UI,
+	 * the per-flow single-instance guard, and `onunload` teardown all have a
+	 * lifecycle handle. Deliberately not persisted — after a crash the recovery
+	 * liveness guard is the protection.
+	 */
+	private _orchestrationRunRegistry = new OrchestrationRunRegistry();
+
+	/** The live orchestration-run registry (F1 Fix 1). */
+	getOrchestrationRunRegistry(): OrchestrationRunRegistry {
+		return this._orchestrationRunRegistry;
 	}
 
 	// -----------------------------------------------------------------------
@@ -801,6 +816,19 @@ export default class NotorPlugin extends Plugin {
 		}
 		this._detachedSubAgents.clear();
 		log.info("Detached sub-agents aborted");
+
+		// F1 Fix 1: abort every live orchestration run so its runner stops between
+		// turns and its finalize write flips session.json → cancelled
+		// (launch.ts maps abort → FLOW_CANCELLED → finalize). Best-effort by design:
+		// onunload() is synchronous, so we cannot block on the runners' finalize
+		// writes here — we fire the abort and let the finalize race on its own. If a
+		// runner does not finalize before the process tears down the session stays
+		// `active`; Fix 2's recovery liveness guard makes the subsequent auto-resume
+		// safe. Never hang onunload.
+		const abortedRuns = this._orchestrationRunRegistry.abortAll();
+		if (abortedRuns.length > 0) {
+			log.info("Aborted live orchestration runs on unload", { count: abortedRuns.length });
+		}
 
 		// Clean up spillover temp files
 		this._tempOutputSpiller?.cleanup().catch((e) => {

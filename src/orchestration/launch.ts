@@ -556,12 +556,13 @@ export async function launchOrchestration(
 
 	// POL-004: surface this run in the unified activity indicator as an active
 	// `flow-run` entry (session-file-backed registry).
+	const flowRunStartedAt = new Date().toISOString();
 	plugin.upsertFlowRun?.({
 		type: "flow-run",
 		sessionId,
 		flowName: flow.name,
 		status: "active",
-		startedAt: new Date().toISOString(),
+		startedAt: flowRunStartedAt,
 	});
 
 	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(plugin.app));
@@ -573,6 +574,20 @@ export async function launchOrchestration(
 
 	const abortController = new AbortController();
 	const abortSignal = options?.abortSignal ?? abortController.signal;
+
+	// F1 Fix 1: give this run a lifecycle handle so the Stop UI, the single-instance
+	// guard, and onunload teardown can find and cancel it. A child / chaining run
+	// that inherits a parent abort signal (`options.abortSignal`) is cancelled
+	// transitively via the cascade, so only register the controller we own here.
+	const registry = plugin.getOrchestrationRunRegistry();
+	if (!options?.abortSignal) {
+		registry.register({
+			sessionId,
+			flowName: flow.name,
+			controller: abortController,
+			lastProgressAt: Date.now(),
+		});
+	}
 
 	// INT-045: if this flow chains (`notor-on-complete-flow`), resolve the
 	// successor's `notor-flow-inputs` so the prompt builder injects the HANDOFF
@@ -618,7 +633,12 @@ export async function launchOrchestration(
 		// INT-030: mirror session.json status while paused so a crash-while-paused
 		// is recovered as a dangling user.input.required tail ("still paused").
 		setSessionStatus: (status) => sessionManager.updateStatus(sessionId, status),
-		onProgress: (status) => log.debug("orchestration progress", { status }),
+		// F1 Fix 1: refresh this run's registry heartbeat each turn (the recovery
+		// liveness guard reads it); a no-op for a child run we did not register.
+		onProgress: (status) => {
+			registry.touch(sessionId);
+			log.debug("orchestration progress", { status });
+		},
 	});
 
 	log.info("Launching orchestration flow", { flow: flow.name, sessionId, origin });
@@ -633,6 +653,10 @@ export async function launchOrchestration(
 			.updateStatus(sessionId, "interrupted")
 			.catch(() => undefined);
 		throw e;
+	} finally {
+		// F1 Fix 1: release the lifecycle handle once the run settles (success,
+		// cancel, or crash) — a no-op for a child run we did not register.
+		registry.unregister(sessionId);
 	}
 
 	// INT-001: reflect the terminal status into session.json (recovery entry
@@ -647,13 +671,15 @@ export async function launchOrchestration(
 		.updateStatus(sessionId, finalStatus, { iteration: result.iterations })
 		.catch((e) => log.warn("Failed to finalize session.json status", { error: String(e) }));
 
-	// POL-004: reflect the terminal status into the unified indicator's flow-run entry.
+	// POL-004: reflect the terminal status into the unified indicator's flow-run
+	// entry. Bug C: preserve the entry's original `startedAt` (overwriting it with
+	// the finalize timestamp mis-sorted completed entries).
 	plugin.upsertFlowRun?.({
 		type: "flow-run",
 		sessionId,
 		flowName: flow.name,
 		status: finalStatus,
-		startedAt: new Date().toISOString(),
+		startedAt: flowRunStartedAt,
 	});
 
 	// Part B: opt-in failed-run debug note (no-op unless status is error + setting on).
@@ -1221,7 +1247,21 @@ async function resumeRecoveredSession(
 	// Resume: seed the once() skip set from the recovered log so an
 	// already-committed external effect is not re-run (FR-125 / INT-010).
 	const executor = buildExecutor(plugin, sessionLog, new Set(recovered.committedKeys), openNotes);
-	const abortSignal = inheritedContext?.abort ?? new AbortController().signal;
+	// F1 Fix 1: a child resume cascades from the parent's abort signal; a ROOT
+	// resume owns its controller and registers it so the Stop UI / onunload can
+	// cancel it (children are cancelled transitively via the cascade — register
+	// root sessions only, i.e. when no `inheritedContext` was passed).
+	const registry = plugin.getOrchestrationRunRegistry();
+	const rootController = inheritedContext?.abort ? null : new AbortController();
+	const abortSignal = inheritedContext?.abort ?? rootController!.signal;
+	if (rootController) {
+		registry.register({
+			sessionId: recovered.sessionId,
+			flowName: flow.name,
+			controller: rootController,
+			lastProgressAt: Date.now(),
+		});
+	}
 
 	const runner = new OrchestrationRunner({
 		executor,
@@ -1253,7 +1293,12 @@ async function resumeRecoveredSession(
 		// same modal; supplying input resumes the loop, dismissing cancels it.
 		requestUserInput: (promptText) => requestOrchestrationInput(plugin.app, flow.name, promptText),
 		setSessionStatus: (status) => sessionManager.updateStatus(recovered.sessionId, status),
-		onProgress: (status) => log.debug("orchestration resume progress", { status }),
+		// F1 Fix 1: refresh the registry heartbeat each turn (a no-op for a child
+		// resume we did not register).
+		onProgress: (status) => {
+			registry.touch(recovered.sessionId);
+			log.debug("orchestration resume progress", { status });
+		},
 	});
 
 	let result: OrchestrationRunResult;
@@ -1262,6 +1307,10 @@ async function resumeRecoveredSession(
 	} catch (e) {
 		await sessionManager.updateStatus(recovered.sessionId, "interrupted").catch(() => undefined);
 		throw e;
+	} finally {
+		// F1 Fix 1: release the lifecycle handle once the resume settles (a no-op
+		// for a child resume we did not register).
+		if (rootController) registry.unregister(recovered.sessionId);
 	}
 	const finalStatus =
 		result.status === "completed"

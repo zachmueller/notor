@@ -46,6 +46,8 @@ export class WorkflowActivityIndicator {
 	private onNavigateToConversation: NavigateToConversationCallback | null = null;
 	/** Callback for opening the run-tree view from a flow-run entry (POL-004). */
 	private onOpenRunTree: ((sessionId: string) => void) | null = null;
+	/** Callback for stopping a live flow run from its flow-run entry (F1 Fix 1). */
+	private onStopFlowRun: ((sessionId: string) => void) | null = null;
 	/** Optional accessor for active foreground conversation sessions (Phase 3). */
 	private readonly getActiveSessions?: () => ConversationSession[];
 	/** Optional accessor for the conversation ID currently shown in THIS panel. */
@@ -136,6 +138,9 @@ export class WorkflowActivityIndicator {
 			this.getCurrentConversationId,
 			(sessionId: string) => {
 				this.onOpenRunTree?.(sessionId);
+			},
+			(sessionId: string) => {
+				this.onStopFlowRun?.(sessionId);
 			},
 		);
 
@@ -249,6 +254,14 @@ export class WorkflowActivityIndicator {
 	 */
 	setOnOpenRunTree(callback: (sessionId: string) => void): void {
 		this.onOpenRunTree = callback;
+	}
+
+	/**
+	 * Wire the stop callback for live `flow-run` entries (F1 Fix 1). Wired by
+	 * `chat-view.ts` to the plugin's `OrchestrationRunRegistry.abort`.
+	 */
+	setOnStopFlowRun(callback: (sessionId: string) => void): void {
+		this.onStopFlowRun = callback;
 	}
 
 	// -----------------------------------------------------------------------

@@ -652,6 +652,11 @@ export class NotorChatView extends ItemView {
 		this.workflowActivityIndicator.setOnOpenRunTree((sessionId: string) => {
 			void this.plugin.openRunTreeView({ sessionId });
 		});
+		// F1 Fix 1: a live flow-run entry's Stop button aborts the run via the registry.
+		this.workflowActivityIndicator.setOnStopFlowRun((sessionId: string) => {
+			const stopped = this.plugin.getOrchestrationRunRegistry().abort(sessionId);
+			if (stopped) new Notice("Stopping orchestration flow…");
+		});
 
 		this.workflowActivityIndicator.render();
 	}

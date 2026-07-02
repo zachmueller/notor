@@ -34,6 +34,13 @@ export type NavigateToConversationCallback = (conversationId: string) => void;
 export type OpenRunTreeCallback = (sessionId: string) => void;
 
 /**
+ * Callback to stop a live orchestration flow run (F1 Fix 1). Wired to the
+ * plugin's `OrchestrationRunRegistry.abort(sessionId)`; surfaced as a stop
+ * icon-button on `active` flow-run rows.
+ */
+export type StopFlowRunCallback = (sessionId: string) => void;
+
+/**
  * Workflow activity dropdown component.
  *
  * Renders a positioned popover below the activity indicator icon showing
@@ -74,18 +81,23 @@ export class WorkflowActivityDropdown {
 	/** Optional run-tree opener for `flow-run` entries (POL-004). */
 	private readonly onOpenRunTree?: OpenRunTreeCallback;
 
+	/** Optional stop callback for live `flow-run` entries (F1 Fix 1). */
+	private readonly onStopFlowRun?: StopFlowRunCallback;
+
 	constructor(
 		tracker: WorkflowActivityTracker,
 		onNavigate: NavigateToConversationCallback,
 		getActiveSessions?: () => ConversationSession[],
 		getCurrentConversationId?: () => string | null,
 		onOpenRunTree?: OpenRunTreeCallback,
+		onStopFlowRun?: StopFlowRunCallback,
 	) {
 		this.tracker = tracker;
 		this.onNavigate = onNavigate;
 		this.getActiveSessions = getActiveSessions;
 		this.getCurrentConversationId = getCurrentConversationId;
 		this.onOpenRunTree = onOpenRunTree;
+		this.onStopFlowRun = onStopFlowRun;
 	}
 
 	// -----------------------------------------------------------------------
@@ -336,6 +348,20 @@ export class WorkflowActivityDropdown {
 		topRow.createSpan({ cls: "workflow-name", text: run.flowName });
 		const badgeEl = topRow.createSpan({ cls: `status-badge status-${run.status}` });
 		badgeEl.textContent = run.status;
+
+		// F1 Fix 1: a live (`active`) run gets a stop icon-button that aborts it via
+		// the run registry. `stopPropagation` keeps the row's open-run-tree click
+		// from firing when the user clicks Stop.
+		if (run.status === "active" && this.onStopFlowRun) {
+			const stopBtn = topRow.createSpan({ cls: "notor-flow-run-stop-button" });
+			stopBtn.setAttr("role", "button");
+			stopBtn.setAttr("aria-label", "Stop flow run");
+			setIcon(stopBtn, "square");
+			stopBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this.onStopFlowRun?.(run.sessionId);
+			});
+		}
 
 		const bottomRow = entryEl.createDiv({ cls: "notor-workflow-activity-entry-bottom" });
 		bottomRow.createSpan({ cls: "trigger-source", text: "orchestration flow" });

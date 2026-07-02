@@ -1,5 +1,7 @@
-import { MarkdownView, Notice } from "obsidian";
+import { FuzzySuggestModal, MarkdownView, Notice } from "obsidian";
+import type { App } from "obsidian";
 import type NotorPlugin from "../main";
+import type { OrchestrationRunHandle } from "../orchestration/run-registry";
 import { NotorChatView } from "../ui/chat-view";
 import {
 	showWorkflowPicker,
@@ -14,6 +16,30 @@ import { MemoryApprovalModal } from "../ui/memory-approval-modal";
 import { logger } from "../utils/logger";
 
 const log = logger("Commands");
+
+/** Fuzzy picker over live orchestration runs for the Stop Orchestration command. */
+class OrchestrationRunStopModal extends FuzzySuggestModal<OrchestrationRunHandle> {
+	constructor(
+		app: App,
+		private readonly runs: OrchestrationRunHandle[],
+		private readonly onChoose: (sessionId: string, flowName: string) => void,
+	) {
+		super(app);
+		this.setPlaceholder("Select a running orchestration flow to stop…");
+	}
+
+	getItems(): OrchestrationRunHandle[] {
+		return this.runs;
+	}
+
+	getItemText(run: OrchestrationRunHandle): string {
+		return `${run.flowName} (${run.sessionId})`;
+	}
+
+	onChooseItem(run: OrchestrationRunHandle): void {
+		this.onChoose(run.sessionId, run.flowName);
+	}
+}
 
 export function registerCommands(plugin: NotorPlugin): void {
 	plugin.addCommand({
@@ -335,6 +361,31 @@ export function registerCommands(plugin: NotorPlugin): void {
 					new Notice(`Run Orchestration failed: ${e instanceof Error ? e.message : String(e)}`);
 				}),
 			);
+			return true;
+		},
+	});
+
+	// Stop Orchestration — abort a live flow run via the run registry (F1 Fix 1).
+	// The activity dropdown is the canonical Stop surface; this command is a cheap
+	// picker over the currently-live registry entries.
+	plugin.addCommand({
+		id: "stop-orchestration",
+		name: "Stop orchestration",
+		checkCallback: (checking: boolean) => {
+			if (!plugin.settings.orchestration_enabled) return false;
+			const registry = plugin.getOrchestrationRunRegistry();
+			const live = registry.listActive();
+			if (live.length === 0) return false;
+			if (checking) return true;
+			if (live.length === 1) {
+				registry.abort(live[0]!.sessionId);
+				new Notice(`Stopping orchestration '${live[0]!.flowName}'…`);
+				return true;
+			}
+			new OrchestrationRunStopModal(plugin.app, live, (sessionId, flowName) => {
+				registry.abort(sessionId);
+				new Notice(`Stopping orchestration '${flowName}'…`);
+			}).open();
 			return true;
 		},
 	});
