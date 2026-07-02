@@ -91,31 +91,31 @@ provider-issued LLM tool-call id is no better (replay = new LLM call = new `tool
 replay-stable key is **occurrence order per (step name, callee flowName)** — exactly what the
 doc comment at `launch.ts:794–798` already promises.
 
-- [ ] **3.1 Inject the fs seam.** `reconcileChildLedger` (`launch.ts:900–993`) and
+- [x] **3.1 Inject the fs seam.** `reconcileChildLedger` (`launch.ts:900–993`) and
       `resolveChildEntryConversationId` (:1017–1043) currently read the parent log via
       `plugin.app.vault.adapter` directly (:911–913). Change both to accept a minimal injected
       reader (reuse the `RecoveryFs` shape — `exists`/`read`). `makeChildFlowSpawner` builds the
       vault-backed adapter in production. Prerequisite for the replay test; aligns with Task
       06's child-spawn module.
-- [ ] **3.2 Enrich `ChildSpawnedEntry`** (`session-log.ts:91–97`): populate `turn` with the real
+- [x] **3.2 Enrich `ChildSpawnedEntry`** (`session-log.ts:91–97`): populate `turn` with the real
       turn number (hardcoded 0 today, `launch.ts:831`) and `step` with the real step name (holds
       the random per-turn conversation UUID today); add `flow_name: string` (callee) and
       `ordinal: number` (Nth `run_flow` dispatch for this (step, flow) within the step's
       execution). Keep `via_tool_call_id` for observability; stop matching on it.
-- [ ] **3.3 Thread the step identity:** add `stepName` (+ turn) to `SpawnChildFlowRequest`
+- [x] **3.3 Thread the step identity:** add `stepName` (+ turn) to `SpawnChildFlowRequest`
       (`child-flow.ts:30–45`); the executor knows `req.step.name` — pass it into
       `OrchestrationToolContext` (`run-loop/types.ts:136–208`) alongside the scratchpad fields
       so `run-flow.ts` copies it into the spawn request.
-- [ ] **3.4 Ordinal computation:** per-step in-memory counter on the per-step
+- [x] **3.4 Ordinal computation:** per-step in-memory counter on the per-step
       `OrchestrationToolContext` keyed by (stepName, flowName). v1 runs `run_flow` serially
       within a step (per the existing comment) so a plain increment is correct.
-- [ ] **3.5 New matcher** in `reconcileChildLedger`: find the Nth `child.spawned` with matching
+- [x] **3.5 New matcher** in `reconcileChildLedger`: find the Nth `child.spawned` with matching
       `(step === stepName, flow_name === flowName, ordinal === n)`. On hit with a matching
       `child.result` → **reuse** (branch at :941–954 becomes live); spawned without result →
       **resume** via `resumeChildSession` (:956–993 becomes live; it inherits the parent cascade
       at :1277–1289 — verify the budget cell passes by reference). No hit → fresh spawn. Old
       logs lacking the new fields → non-matching → fresh spawn (today's behavior; safe).
-- [ ] **3.6** Fix the doc comment at `launch.ts:794–798` to describe the now-real mechanism.
+- [x] **3.6** Fix the doc comment at `launch.ts:794–798` to describe the now-real mechanism.
 
 ## Phase 4 — Single-instance guard + thrashing-guard removal (commit 4)
 

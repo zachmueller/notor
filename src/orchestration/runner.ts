@@ -397,6 +397,12 @@ export class OrchestrationRunner {
 			// can write the `child` edge (calling step → child entry conversation)
 			// onto this turn's carriage; conversation steps persist it.
 			ctx.conversationId = conversationId;
+			// F1 Fix 3: expose the dispatching step identity + a fresh per-step
+			// run_flow ordinal counter so a `run_flow` call records a replay-stable
+			// `(step, flow_name, ordinal)` key on its `child.spawned` ledger entry.
+			ctx.stepName = job.step.name;
+			ctx.turn = turn;
+			ctx.childSpawnOrdinals = new Map<string, number>();
 			const runContext = this.makeRunContext(flow);
 
 			this.deps.onProgress?.(`${flow.name}: ${job.step.name} (iteration ${turn})`);

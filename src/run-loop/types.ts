@@ -143,6 +143,28 @@ export interface OrchestrationToolContext {
 	/** Present for `shared`-handoff children (auto-allowed too; FR-174). */
 	parentScratchpadPath?: string;
 	/**
+	 * The name of the step whose turn owns this carriage (F1 Fix 3). `run_flow`
+	 * copies it into the child spawn request so the `child.spawned` ledger entry
+	 * records the real dispatching step — half of the replay-stable match key
+	 * `(stepName, flowName, ordinal)`. `undefined` for sub-agents / non-orchestration
+	 * carriages.
+	 */
+	stepName?: string;
+	/**
+	 * The step-turn / hop number of this carriage (F1 Fix 3). Recorded on the
+	 * `child.spawned` entry alongside {@link stepName}. `undefined` for sub-agents /
+	 * non-orchestration carriages.
+	 */
+	turn?: number;
+	/**
+	 * Per-step `run_flow` dispatch counters keyed by callee `flowName` (F1 Fix 3).
+	 * The `run_flow` tool reads-then-increments this to assign each spawn a stable
+	 * 0-based `ordinal` per `(stepName, flowName)`. Fresh per turn (v1 runs
+	 * `run_flow` serially within a step, so a plain increment is a replay-stable
+	 * occurrence-order key). `undefined` for sub-agents / non-orchestration carriages.
+	 */
+	childSpawnOrdinals?: Map<string, number>;
+	/**
 	 * The calling step's conversation id for this turn (INT-043). `run_flow` reads
 	 * it to write the `child` edge (calling step → child flow's entry conversation)
 	 * and to pass the reciprocal `parent` back-link into the child session.

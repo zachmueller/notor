@@ -52,11 +52,11 @@ import { seedMemoriesNote, memoriesPath } from "./memories";
 import { writeFailureReport, shouldWriteFailureReport } from "./failure-report";
 import { SessionRecovery, type RecoveryFs, type RecoverableSession } from "./session-recovery";
 import { isSessionLogMtimeLive } from "./recovery-liveness";
+import { matchChildInLedger, parseLedgerEntries } from "./child-ledger";
 import { VaultStepConversationStore } from "./step-conversation-store";
 import { showOrchestrationProgressNotice } from "./notices";
 import { OrchestrationRunner, type OrchestrationRunResult } from "./runner";
 import type { OrchestrationFlow, OrchestrationSessionMeta } from "./types";
-import type { ChildResultEntry, ChildSpawnedEntry, SessionLogEntry } from "./session-log";
 
 const log = logger("OrchestrationLaunch");
 
@@ -804,6 +804,17 @@ async function chainToSuccessor(
 // ---------------------------------------------------------------------------
 
 /**
+ * The minimal read surface the child-ledger reconciliation + entry-conversation
+ * resolution need (F1 Fix 3). Mirrors the `exists`/`read` half of `RecoveryFs`;
+ * `makeChildFlowSpawner` builds the vault-backed adapter in production, and tests
+ * inject a fake so the replay path is unit-testable without a plugin.
+ */
+export interface ChildLedgerFs {
+	exists(path: string): Promise<boolean>;
+	read(path: string): Promise<string>;
+}
+
+/**
  * Build the {@link SpawnChildFlow} callback injected into {@link RunFlowTool}.
  * Closes over the plugin; for each `run_flow` call it:
  *  1. resolves the parent session's depth (from the parent's `RunContext` cascade,
@@ -815,25 +826,33 @@ async function chainToSuccessor(
  *  4. backfills the reciprocal `parent` edge on the child entry conversation;
  *  5. returns the child's `structured`/`text` + the aggregate-subtree rollup.
  *
- * **Recovery reuse/resume (INT-044 / FR-125).** Before spawning, it scans the
- * parent log for a `child.spawned` with this `via_tool_call_id`:
+ * **Recovery reuse/resume (INT-044 / FR-125, F1 Fix 3).** Before spawning, it
+ * scans the parent log for the Nth `child.spawned` matching the replay-stable key
+ * `(step === stepName, flow_name === flowName, ordinal === n)`:
  *  - a matching **`child.result`** (terminal child) ⇒ **reuse** the recorded result
  *    (no re-spawn) — the parent's replay must not double-execute the child;
  *  - a `child.spawned` with **no** `child.result` (non-terminal child) ⇒ **resume**
  *    that child session in place (replay its own log) and await it — never
  *    tombstone-and-respawn, so the child's `once()` markers survive.
  *
- * The match is by `via_tool_call_id`; a re-run parent mints the SAME id only if the
- * tool re-issues an identical call. To make reuse deterministic across a crash the
- * parent's replay re-runs the step from fresh context, so it re-dispatches the same
- * `run_flow` — the ledger is matched by occurrence order within the step (v1 runs
- * `run_flow` serially, so order is stable).
+ * The match is **occurrence order per (step name, callee flowName)**, NOT
+ * `via_tool_call_id`: recovery re-runs the step from fresh context and the LLM
+ * re-issues `run_flow` with a brand-new `via_tool_call_id` (and new provider
+ * `tool_use` ids), so an id-keyed match could never hit. v1 runs `run_flow`
+ * serially within a step, so the per-step ordinal is a stable cross-replay key.
+ * Old logs lacking the enriched fields never match → fresh spawn (today's behavior).
  */
 export function makeChildFlowSpawner(plugin: NotorPlugin): SpawnChildFlow {
 	const sessionManager = new OrchestrationSessionManager(
 		plugin.settings.notor_dir,
 		new VaultSessionFs(plugin.app),
 	);
+	// The vault-backed reader the ledger reconciliation + entry-conversation
+	// resolution read through (F1 Fix 3 — injected so both are unit-testable).
+	const ledgerFs: ChildLedgerFs = {
+		exists: (p) => plugin.app.vault.adapter.exists(normalizePath(p)),
+		read: (p) => plugin.app.vault.adapter.read(normalizePath(p)),
+	};
 
 	return async (req: SpawnChildFlowRequest): Promise<SpawnChildFlowResult> => {
 		// Resolve the callee flow (the tool already validated it is invocable, but
@@ -851,18 +870,23 @@ export function makeChildFlowSpawner(plugin: NotorPlugin): SpawnChildFlow {
 		const parentWs = sessionManager.resolveWorkspace(req.parentSessionId);
 		const parentLog = new SessionLog(parentWs.logPath, new VaultSessionLogWriter(plugin.app));
 
-		// --- Recovery reuse/resume (INT-044) -------------------------------------
-		const reconciled = await reconcileChildLedger(plugin, req);
+		// --- Recovery reuse/resume (INT-044 / F1 Fix 3) --------------------------
+		const reconciled = await reconcileChildLedger(plugin, req, ledgerFs, sessionManager);
 		if (reconciled) return reconciled;
 
 		// --- Fresh spawn ---------------------------------------------------------
 		const childSessionId = newSessionId();
 
-		// child.spawned BEFORE launch (the recovery anchor).
+		// child.spawned BEFORE launch (the recovery anchor). F1 Fix 3: record the
+		// real turn + step name + callee flow_name + per-step ordinal so a recovery
+		// replay can match this dispatch deterministically (via_tool_call_id is kept
+		// for observability only).
 		await parentLog
 			.appendChildSpawned({
-				turn: 0,
-				step: req.parentConversationId ?? "",
+				turn: req.turn ?? 0,
+				step: req.stepName ?? "",
+				flow_name: req.flowName,
+				ordinal: req.ordinal ?? 0,
 				via_tool_call_id: req.viaToolCallId,
 				child_session_id: childSessionId,
 			})
@@ -890,7 +914,7 @@ export function makeChildFlowSpawner(plugin: NotorPlugin): SpawnChildFlow {
 		// drawn down live, but the root's OWN log never recorded the child's spend.
 		await parentLog
 			.appendChildResult({
-				turn: 0,
+				turn: req.turn ?? 0,
 				child_session_id: childSessionId,
 				structured: result.structured ?? undefined,
 				text: result.text,
@@ -900,7 +924,7 @@ export function makeChildFlowSpawner(plugin: NotorPlugin): SpawnChildFlow {
 			})
 			.catch((e) => log.warn("child.result append failed", { error: String(e) }));
 
-		const entryConversationId = await resolveChildEntryConversationId(plugin, childSessionId);
+		const entryConversationId = await resolveChildEntryConversationId(ledgerFs, sessionManager, childSessionId);
 		// Backfill the reciprocal `parent` edge on the child entry conversation.
 		if (entryConversationId && req.parentConversationId) {
 			await backfillParentEdge(
@@ -930,55 +954,50 @@ export function makeChildFlowSpawner(plugin: NotorPlugin): SpawnChildFlow {
 
 /**
  * Reconcile a `run_flow` child against the parent's durable ledger on a recovery
- * re-run (INT-044). Returns a reuse/resume result when the parent already has a
- * `child.spawned` for this `via_tool_call_id`; `null` for a fresh spawn (the
- * common live case).
+ * re-run (INT-044 / F1 Fix 3). Returns a reuse/resume result when the parent
+ * already has a `child.spawned` for this dispatch's replay-stable key
+ * `(step === stepName, flow_name === flowName, ordinal === ordinal)`; `null` for a
+ * fresh spawn (the common live case, and any old log lacking the enriched fields).
+ *
+ * The match is occurrence-order per (step, flow), NOT `via_tool_call_id` — a
+ * recovery replay re-runs the step and re-issues `run_flow` with a fresh id, so an
+ * id-keyed match could never hit and the child would double-execute.
  */
 async function reconcileChildLedger(
 	plugin: NotorPlugin,
 	req: SpawnChildFlowRequest,
+	fs: ChildLedgerFs,
+	sessionManager: OrchestrationSessionManager,
 ): Promise<SpawnChildFlowResult | null> {
-	const sessionManager = new OrchestrationSessionManager(
-		plugin.settings.notor_dir,
-		new VaultSessionFs(plugin.app),
-	);
+	// Without a step identity (defensive — real step turns always thread one) there
+	// is no stable key, so never match: fall through to a fresh spawn.
+	if (req.stepName === undefined || req.ordinal === undefined) return null;
+
 	const parentWs = sessionManager.resolveWorkspace(req.parentSessionId);
 	let raw: string;
 	try {
-		if (!(await plugin.app.vault.adapter.exists(normalizePath(parentWs.logPath)))) return null;
-		raw = await plugin.app.vault.adapter.read(normalizePath(parentWs.logPath));
+		if (!(await fs.exists(parentWs.logPath))) return null;
+		raw = await fs.read(parentWs.logPath);
 	} catch {
 		return null;
 	}
 
-	const entries = raw
-		.split("\n")
-		.filter((l) => l.trim().length > 0)
-		.map((l): SessionLogEntry | null => {
-			try {
-				return JSON.parse(l) as SessionLogEntry;
-			} catch {
-				return null;
-			}
-		})
-		.filter((e): e is SessionLogEntry => e !== null);
+	// F1 Fix 3: match on the replay-stable (step, flow_name, ordinal) key. An old
+	// `child.spawned` lacking `flow_name`/`ordinal` never matches → fresh spawn.
+	const match = matchChildInLedger(parseLedgerEntries(raw), {
+		stepName: req.stepName,
+		flowName: req.flowName,
+		ordinal: req.ordinal,
+	});
+	if (!match) return null; // fresh spawn
 
-	const spawned = entries.find(
-		(e): e is ChildSpawnedEntry =>
-			e.type === "child.spawned" && e.via_tool_call_id === req.viaToolCallId,
-	);
-	if (!spawned) return null; // fresh spawn
-
-	const childSessionId = spawned.child_session_id;
-	const childResult = entries.find(
-		(e): e is ChildResultEntry =>
-			e.type === "child.result" && e.child_session_id === childSessionId,
-	);
+	const childSessionId = match.spawned.child_session_id;
+	const childResult = match.result;
 
 	if (childResult) {
 		// Terminal child → REUSE the recorded result (no re-spawn).
 		log.info("run_flow recovery: reusing terminal child result", { childSessionId });
-		const entryConversationId = await resolveChildEntryConversationId(plugin, childSessionId);
+		const entryConversationId = await resolveChildEntryConversationId(fs, sessionManager, childSessionId);
 		return {
 			status: childResult.stop_reason === "FLOW_CANCELLED" ? "cancelled" : "completed",
 			structured: childResult.structured ?? null,
@@ -1012,7 +1031,7 @@ async function reconcileChildLedger(
 		resolveCeilings: () => ({ maxIterations: flow.maxIterations, maxCostUsd: flow.maxCostUsd }),
 	});
 	const result = await resumeChildSession(plugin, flow, recovered, sessionManager, req.cascade);
-	const entryConversationId = await resolveChildEntryConversationId(plugin, childSessionId);
+	const entryConversationId = await resolveChildEntryConversationId(fs, sessionManager, childSessionId);
 	return {
 		status: result.status,
 		structured: result.structured,
@@ -1050,19 +1069,18 @@ function childErrorResult(
  * Resolve the **entry** (first) step conversation id of a child session from its
  * log — the `turn.start` `conversation_id` of the first conversation turn (the
  * `child` edge target). `null` when the child ran only code steps (no conversation).
+ * Reads through the injected {@link ChildLedgerFs} (F1 Fix 3) so it is testable
+ * over a fake fs.
  */
 async function resolveChildEntryConversationId(
-	plugin: NotorPlugin,
+	fs: ChildLedgerFs,
+	sessionManager: OrchestrationSessionManager,
 	childSessionId: string,
 ): Promise<string | null> {
-	const sessionManager = new OrchestrationSessionManager(
-		plugin.settings.notor_dir,
-		new VaultSessionFs(plugin.app),
-	);
 	const ws = sessionManager.resolveWorkspace(childSessionId);
 	try {
-		if (!(await plugin.app.vault.adapter.exists(normalizePath(ws.logPath)))) return null;
-		const raw = await plugin.app.vault.adapter.read(normalizePath(ws.logPath));
+		if (!(await fs.exists(ws.logPath))) return null;
+		const raw = await fs.read(ws.logPath);
 		for (const line of raw.split("\n")) {
 			if (!line.trim()) continue;
 			try {

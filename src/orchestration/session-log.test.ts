@@ -96,6 +96,8 @@ describe("SessionLog", () => {
 		await log.appendChildSpawned({
 			turn: 1,
 			step: "Caller",
+			flow_name: "ChildFlow",
+			ordinal: 0,
 			via_tool_call_id: "toolu_1",
 			child_session_id: "child-1",
 		});

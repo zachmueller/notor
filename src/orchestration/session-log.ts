@@ -92,8 +92,24 @@ export interface SideEffectCommittedEntry extends BaseEntry {
 
 export interface ChildSpawnedEntry extends BaseEntry {
 	type: "child.spawned";
+	/** The real step-turn / hop number this `run_flow` dispatched on (was hardcoded 0). */
 	turn: number;
+	/** The real dispatching step NAME (was the per-turn conversation UUID). */
 	step: string;
+	/**
+	 * The callee flow's `notor-flow-name` (F1 Fix 3). Half of the replay-stable
+	 * match key: recovery re-runs the step from fresh context and re-dispatches the
+	 * same `run_flow`, so the child is matched by occurrence order per
+	 * `(step, flow_name)` — NOT by `via_tool_call_id`, which is re-minted per run.
+	 */
+	flow_name: string;
+	/**
+	 * The 0-based Nth `run_flow` dispatch for this `(step, flow_name)` within the
+	 * step's execution (F1 Fix 3). v1 runs `run_flow` serially within a step, so a
+	 * plain per-step increment is a stable occurrence-order key across a crash/replay.
+	 */
+	ordinal: number;
+	/** Kept for observability only — the ledger no longer matches on it (F1 Fix 3). */
 	via_tool_call_id: string;
 	child_session_id: string;
 }

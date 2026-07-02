@@ -194,6 +194,28 @@ describe("RunFlowTool", () => {
 		expect(result.result).toBe("the report text");
 	});
 
+	it("threads step identity + a per-step ordinal into the spawn request (F1 Fix 3)", async () => {
+		const spawn: SpawnChildFlow = vi.fn(async () => spawnResult());
+		const tool = new RunFlowTool(fakeComposition([flow("Alpha"), flow("Beta")]), spawn);
+		// One carriage (one step turn) with its ordinal counter.
+		const ctx = orchestrationContext({
+			stepName: "Caller",
+			turn: 7,
+			childSpawnOrdinals: new Map<string, number>(),
+		});
+		const opts = { orchestrationContext: ctx, runContext: runContext() };
+
+		await tool.execute({ flow: "Alpha", payload: "x" }, opts);
+		await tool.execute({ flow: "Alpha", payload: "y" }, opts);
+		await tool.execute({ flow: "Beta", payload: "z" }, opts);
+
+		// Two Alpha dispatches get ordinals 0, 1; Beta restarts at 0 (per (step, flow)).
+		const calls = vi.mocked(spawn).mock.calls;
+		expect(calls[0]![0]).toMatchObject({ flowName: "Alpha", stepName: "Caller", turn: 7, ordinal: 0 });
+		expect(calls[1]![0]).toMatchObject({ flowName: "Alpha", stepName: "Caller", turn: 7, ordinal: 1 });
+		expect(calls[2]![0]).toMatchObject({ flowName: "Beta", stepName: "Caller", turn: 7, ordinal: 0 });
+	});
+
 	it("maps a child error status to a failed tool result (not a throw)", async () => {
 		const spawn = vi.fn(async () =>
 			spawnResult({ status: "error", structured: null, text: "boom", stopReason: "error" }),

@@ -146,6 +146,14 @@ export class RunFlowTool implements Tool {
 		// (3) Spawn the child flow to its terminal event (child session, child
 		// RunLoop, child.spawned/child.result ledger — all behind the callback).
 		const viaToolCallId = `runflow-${crypto.randomUUID().slice(0, 12)}`;
+		// F1 Fix 3: assign a replay-stable ordinal — the Nth run_flow dispatch for
+		// this (step, flow) within the step's execution. Read-then-increment the
+		// per-step counter on the carriage (v1 runs run_flow serially, so the count
+		// is deterministic across a crash/replay). The recovered ledger is matched by
+		// (stepName, flowName, ordinal), NOT viaToolCallId (which is re-minted).
+		const ordinals = orchestrationContext.childSpawnOrdinals;
+		const ordinal = ordinals?.get(flow.name) ?? 0;
+		if (ordinals) ordinals.set(flow.name, ordinal + 1);
 		let spawned;
 		try {
 			spawned = await this.spawnChildFlow({
@@ -154,6 +162,9 @@ export class RunFlowTool implements Tool {
 				parentSessionId: orchestrationContext.sessionId,
 				parentScratchpadPath: orchestrationContext.scratchpadPath,
 				parentConversationId: orchestrationContext.conversationId,
+				stepName: orchestrationContext.stepName,
+				turn: orchestrationContext.turn,
+				ordinal,
 				viaToolCallId,
 				cascade: runContext
 					? { budget: runContext.budget, depth: runContext.depth, abort: runContext.abort }

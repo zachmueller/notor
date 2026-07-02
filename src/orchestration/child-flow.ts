@@ -38,7 +38,22 @@ export interface SpawnChildFlowRequest {
 	parentScratchpadPath: string;
 	/** The calling step's conversation id (the `child` edge's source / the child's `parent` back-link target). */
 	parentConversationId?: string;
-	/** Synthetic correlation id for the parent's `child.spawned`/`child.result` ledger (recovery anchor). */
+	/**
+	 * The dispatching step's NAME (F1 Fix 3). Recorded on the parent's
+	 * `child.spawned` entry and half of the replay-stable ledger match key
+	 * `(stepName, flowName, ordinal)`. `undefined` only outside a real step turn
+	 * (defensive) — an unnamed dispatch falls back to a fresh spawn on replay.
+	 */
+	stepName?: string;
+	/** The dispatching step-turn / hop number (F1 Fix 3) — recorded on `child.spawned`. */
+	turn?: number;
+	/**
+	 * The 0-based Nth `run_flow` dispatch for this `(stepName, flowName)` within the
+	 * step's execution (F1 Fix 3). The other half of the replay-stable match key —
+	 * the spawner writes it on `child.spawned` and matches on it during recovery.
+	 */
+	ordinal?: number;
+	/** Synthetic correlation id for observability on the ledger (no longer the match key — F1 Fix 3). */
 	viaToolCallId: string;
 	/** Inherited cascade context (shared budget cell + depth + abort). */
 	cascade: ChildSpawnContext;
