@@ -250,4 +250,73 @@ describe("HistoryManager — append conversion (B.1)", () => {
 		const header = JSON.parse(files[filePath]!.split("\n")[0]!);
 		expect(header.schema_version).toBe(1);
 	});
+
+	// F4 (task 01) verification: a pre-change conversation whose header predates
+	// schema_version must still load with its messages intact, and toggling favorite
+	// must ADD the field without dropping messages. Seeds a genuinely legacy file
+	// (no schema_version, no is_favorite) rather than one createConversationFile stamped.
+	it("loads a legacy conversation lacking schema_version and defaults it to 1", async () => {
+		const legacyPath = `${HISTORY}legacy.jsonl`;
+		const legacyHeader = {
+			_type: "conversation",
+			id: "legacy-1",
+			created_at: "2026-01-01T00:00:00Z",
+			updated_at: "2026-01-01T00:00:00Z",
+			provider_id: "bedrock",
+			model_id: "claude-opus-4-8",
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			estimated_cost: null,
+			mode: "act",
+			// deliberately no schema_version, no is_favorite
+		};
+		const legacyLine =
+			JSON.stringify({ _type: "message", id: "m1", conversation_id: "legacy-1", role: "user", content: "hello", timestamp: "2026-01-01T00:00:01Z" });
+		const { vault } = makeStatefulVault({
+			[legacyPath]: JSON.stringify(legacyHeader) + "\n" + legacyLine + "\n",
+		});
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+
+		const { conversation, messages } = await manager.loadConversation("legacy.jsonl");
+
+		expect(conversation.id).toBe("legacy-1");
+		expect(conversation.schema_version).toBe(1); // defaulted on load
+		expect(messages).toHaveLength(1);
+		expect(messages[0]!.content).toBe("hello");
+	});
+
+	it("toggleFavorite on a legacy (schema_version-less) file adds the field and keeps messages", async () => {
+		const legacyPath = `${HISTORY}legacy-fav.jsonl`;
+		const legacyHeader = {
+			_type: "conversation",
+			id: "legacy-2",
+			created_at: "2026-01-01T00:00:00Z",
+			updated_at: "2026-01-01T00:00:00Z",
+			provider_id: "bedrock",
+			model_id: "claude-opus-4-8",
+			total_input_tokens: 0,
+			total_output_tokens: 0,
+			estimated_cost: null,
+			mode: "act",
+		};
+		const legacyLine =
+			JSON.stringify({ _type: "message", id: "m1", conversation_id: "legacy-2", role: "user", content: "hello", timestamp: "2026-01-01T00:00:01Z" });
+		const { vault, files } = makeStatefulVault({
+			[legacyPath]: JSON.stringify(legacyHeader) + "\n" + legacyLine + "\n",
+		});
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		const linesBefore = files[legacyPath]!.trim().split("\n").length;
+
+		const newValue = await manager.toggleFavorite("legacy-fav.jsonl");
+
+		expect(newValue).toBe(true);
+		const linesAfter = files[legacyPath]!.trim().split("\n").length;
+		expect(linesAfter).toBe(linesBefore); // message preserved
+		const header = JSON.parse(files[legacyPath]!.split("\n")[0]!);
+		expect(header.is_favorite).toBe(true);
+		// The favorite toggle is a raw-header rewrite and does NOT stamp schema_version.
+		// That is by design: F4's reader-side default (loadConversation: `??= 1`) is the
+		// safety net for legacy files, so a missing on-disk stamp remains tolerated.
+		expect(header.schema_version).toBeUndefined();
+	});
 });
