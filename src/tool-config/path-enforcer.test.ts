@@ -459,4 +459,44 @@ describe("enforcePathConstraints", () => {
 			).toBeNull();
 		});
 	});
+
+	// -- F2 B.5: empty-root behavior (mobile gate) ----------------------------
+	// The legacy branch already passes `this.vaultRootPath ?? ""` on mobile, so an
+	// empty root is precedented. Lock the behavior so the pure path can pass
+	// `vaultRootPath: ""` on mobile (removing the mobile legacy fallback) with a
+	// verified contract rather than a guess.
+	describe("empty vaultRootPath (mobile — no basePath)", () => {
+		it("vault-namespace enforcement is unaffected by an empty root (prefix match, no root join)", () => {
+			// Vault-namespace paths never touch vaultRootPath, so allow/block work as usual.
+			const entry = makeEntry({ allowed_paths: ["notes/"] });
+			expect(enforcePathConstraints("read_note", { path: "notes/x.md" }, entry, "")).toBeNull();
+			expect(
+				enforcePathConstraints("read_note", { path: "journal/x.md" }, entry, ""),
+			).not.toBeNull();
+		});
+
+		it("vault-namespace blocked_paths still win with an empty root", () => {
+			const entry = makeEntry({ blocked_paths: ["private/"] });
+			expect(
+				enforcePathConstraints("write_note", { path: "private/secret.md" }, entry, ""),
+			).not.toBeNull();
+		});
+
+		it("no path constraints → allowed regardless of root", () => {
+			const entry = makeEntry();
+			expect(enforcePathConstraints("read_file", { path: "anything/x.txt" }, entry, "")).toBeNull();
+		});
+
+		it("filesystem-namespace with an absolute allowed_path still enforces under an empty root", () => {
+			// Absolute paths resolve without the root; a matching path is allowed and a
+			// non-matching one is blocked — the empty root does not silently open access.
+			const entry = makeEntry({ allowed_paths: ["/Users/test/vault/docs"] });
+			expect(
+				enforcePathConstraints("read_file", { path: "/Users/test/vault/docs/f.txt" }, entry, ""),
+			).toBeNull();
+			expect(
+				enforcePathConstraints("read_file", { path: "/etc/passwd" }, entry, ""),
+			).not.toBeNull();
+		});
+	});
 });

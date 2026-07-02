@@ -291,7 +291,10 @@ async function safeDispatch(
 		// neither, so `dispatch()` is invoked with EXACTLY the historical 11
 		// positional arguments — keeping the RunLoop Regression Gate's
 		// `toHaveBeenCalledWith(...)` arity assertions byte-identical (vitest fails
-		// on any extra trailing arg, even `undefined`).
+		// on any extra trailing arg, even `undefined`). F2 note: `policyCtx` (the
+		// 7th positional) is WITHIN those 11 args, so it now carries a real ctx on
+		// every path without changing the arity — the regression gate asserts the
+		// ctx at position 7, not `undefined`.
 		const result = (runContext !== undefined || orchestrationContext !== undefined)
 			? await dispatcher.dispatch(
 				call.toolName,

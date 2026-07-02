@@ -1089,13 +1089,14 @@ export class WorkflowExecutor {
 				// must never clear an execution in this phase.
 				concurrencyManager.markInToolCall(execution.id);
 
-				// Dispatch the tool with session-scoped policy context and approval
-				const policyCtx = vaultRootPath
-					? session.buildPolicyContext(this.deps.getSettings(), vaultRootPath, (path: string) => {
-						const file = resolveNote(path, this.deps.app.vault, this.deps.app.metadataCache);
-						return file?.path ?? null;
-					})
-					: undefined;
+				// Dispatch the tool with session-scoped policy context and approval.
+				// F2: always build the ctx — on mobile (no basePath) pass "" (path
+				// enforcement is verified safe with an empty root), removing the former
+				// mobile legacy-branch fallback for background workflows.
+				const policyCtx = session.buildPolicyContext(this.deps.getSettings(), vaultRootPath ?? "", (path: string) => {
+					const file = resolveNote(path, this.deps.app.vault, this.deps.app.metadataCache);
+					return file?.path ?? null;
+				});
 				// Approval-required hooks can still gate background tool calls. There
 				// is no interaction channel in a headless run, so interactionCallback
 				// is intentionally left undefined (ask_user errors out cleanly).

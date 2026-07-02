@@ -283,7 +283,17 @@ describe("RunLoop — abort cascade", () => {
 // ---------------------------------------------------------------------------
 
 describe("RunLoop — cascade seam threading", () => {
-	it("sub-agent runs (maxDepth 0, no orchestrationContext) dispatch with EXACTLY 11 positional args", async () => {
+	// A minimal but real ToolPolicyContext, threaded via RunLoopOptions.policyCtx.
+	// F2: policyCtx now rides as the 7th positional arg to dispatch() on BOTH
+	// branches (sub-agent 11-arg and flow 13-arg). The regression gate asserts the
+	// exact vector deliberately — policyCtx moved from `undefined` to a real ctx.
+	const POLICY_CTX = {
+		effectiveConfig: { tools: {} },
+		mode: "act" as ConversationMode,
+		vaultRootPath: "/vault",
+	};
+
+	it("sub-agent runs (maxDepth 0, no orchestrationContext) dispatch with EXACTLY 11 positional args (policyCtx 7th)", async () => {
 		const dispatch = vi.fn(async (): Promise<ToolResult> => ({ tool_name: "search_vault", success: true, result: "ok" }));
 		const streams = [ toolCallStream("tc", "search_vault", { q: "x" }), textStream("Done.") ];
 		const loop = new RunLoop(buildOptions({
@@ -291,15 +301,17 @@ describe("RunLoop — cascade seam threading", () => {
 			dispatcher: mockDispatcher(searchTools(), dispatch),
 			toolDefinitions: [searchToolDef],
 			runContext: makeRunContext({ maxDepth: 0 }),
+			policyCtx: POLICY_CTX,
 		}));
 		await loop.run("go");
 		expect(dispatch).toHaveBeenCalledWith(
 			"search_vault", { q: "x" }, "act", "tc", expect.anything(),
-			undefined, undefined, undefined, undefined, undefined, undefined,
+			undefined, expect.objectContaining({ vaultRootPath: "/vault" }),
+			undefined, undefined, undefined, undefined,
 		);
 	});
 
-	it("flow runs (maxDepth ≥ 1) thread runContext as the 12th positional arg to dispatch", async () => {
+	it("flow runs (maxDepth ≥ 1) thread policyCtx (7th) + runContext (12th) positional args to dispatch", async () => {
 		const dispatch = vi.fn(async (): Promise<ToolResult> => ({ tool_name: "search_vault", success: true, result: "ok" }));
 		const streams = [ toolCallStream("tc", "search_vault", { q: "x" }), textStream("Done.") ];
 		const ctx = makeRunContext({ maxDepth: 2 });
@@ -308,11 +320,13 @@ describe("RunLoop — cascade seam threading", () => {
 			dispatcher: mockDispatcher(searchTools(), dispatch),
 			toolDefinitions: [searchToolDef],
 			runContext: ctx,
+			policyCtx: POLICY_CTX,
 		}));
 		await loop.run("go");
 		expect(dispatch).toHaveBeenCalledWith(
 			"search_vault", { q: "x" }, "act", "tc", expect.anything(),
-			undefined, undefined, undefined, undefined, undefined, undefined,
+			undefined, expect.objectContaining({ vaultRootPath: "/vault" }),
+			undefined, undefined, undefined, undefined,
 			ctx, undefined,
 		);
 	});

@@ -25,6 +25,7 @@
 import type { LLMProvider, ChatMessage, ToolDefinition } from "../providers/provider";
 import type { ConversationMode } from "../types";
 import type { ToolDispatcher } from "./dispatcher";
+import type { ToolPolicyContext } from "./tool-policy";
 import { RunLoop } from "../run-loop/run-loop";
 import { newRootBudget, deriveChildContext } from "../run-loop/budget";
 import type { RunContext } from "../run-loop/types";
@@ -99,6 +100,15 @@ export interface SubAgentRunnerOptions {
 	 * a fresh `maxDepth = 0` / both-`Infinity` context — behavior unchanged.
 	 */
 	parentRunContext?: RunContext;
+	/**
+	 * Per-run tool-policy context (F2). Built by the sub-agent assembly site from
+	 * the intersected effective config + the tool's settings reference, and
+	 * threaded into every tool dispatch so command patterns / path allowlists /
+	 * plan-mode / denylist gate sub-agent tool calls (they previously ran the
+	 * dispatcher's legacy inline branch). Omitted → legacy branch (removed in
+	 * Phase D).
+	 */
+	policyCtx?: ToolPolicyContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +164,7 @@ export class SubAgentRunner {
 			// No settings → per-turn cost stays 0 (the Infinity cell never blocks
 			// anyway); no orchestrationContext and no hooks → today's behavior.
 			orchestrationContext: undefined,
+			policyCtx: this.options.policyCtx,
 			onProgress: this.options.onProgress,
 		});
 

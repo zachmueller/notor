@@ -196,6 +196,9 @@ describe("SubAgentRunner", () => {
 				provider,
 				dispatcher,
 				toolDefinitions: toolDefs,
+				// F2: sub-agents now thread a policy context so the pure engine gates
+				// their tool calls; it rides as the 7th positional arg to dispatch().
+				policyCtx: { effectiveConfig: { tools: {} }, mode: "act", vaultRootPath: "/vault" },
 			}));
 
 			const result = await runner.run("Search for notes about testing");
@@ -206,7 +209,8 @@ describe("SubAgentRunner", () => {
 			// Token usage accumulated across both turns
 			expect(result.tokenUsage.input).toBe(15 + 12);
 			expect(result.tokenUsage.output).toBe(8 + 6);
-			// Dispatcher was called
+			// Dispatcher was called. F2: policyCtx now rides as the 7th positional
+			// arg (was `undefined`); the 11-arg shape is otherwise byte-identical.
 			expect(dispatcher.dispatch).toHaveBeenCalledWith(
 				"search_vault",
 				{ query: "testing" },
@@ -214,7 +218,7 @@ describe("SubAgentRunner", () => {
 				"tc-1",
 				expect.anything(), // AbortSignal
 				undefined, // onProgress (not used by sub-agent runner)
-				undefined, // policyCtx (not used by sub-agent runner)
+				expect.objectContaining({ vaultRootPath: "/vault" }), // policyCtx (F2)
 				undefined, // approvalCallback (not used by sub-agent runner)
 				undefined, // sessionContext (not used by sub-agent runner)
 				undefined, // approvalHookDispatcher (not used by sub-agent runner)
@@ -543,11 +547,12 @@ describe("SubAgentRunner", () => {
 				dispatcher,
 				toolDefinitions: [{ name: "write_note", description: "Write", input_schema: { type: "object" } }],
 				mode: "plan",
+				policyCtx: { effectiveConfig: { tools: {} }, mode: "plan", vaultRootPath: "/vault" },
 			}));
 
 			const result = await runner.run("Write a note");
 
-			// Dispatcher was called with "plan" mode
+			// Dispatcher was called with "plan" mode. F2: policyCtx rides 7th.
 			expect(dispatcher.dispatch).toHaveBeenCalledWith(
 				"write_note",
 				expect.anything(),
@@ -555,7 +560,7 @@ describe("SubAgentRunner", () => {
 				expect.anything(),
 				expect.anything(), // AbortSignal
 				undefined, // onProgress
-				undefined, // policyCtx
+				expect.objectContaining({ mode: "plan" }), // policyCtx (F2)
 				undefined, // approvalCallback
 				undefined, // sessionContext
 				undefined, // approvalHookDispatcher

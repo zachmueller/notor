@@ -21,22 +21,22 @@ the legacy branch alone honors orchestration scratchpad allow-paths (dispatcher.
 
 ## Phase A — Make `evaluateToolPolicy` the superset (commit 1)
 
-- [ ] **A.1** Extend `ToolPolicyContext` (`tool-policy.ts:28–35`) with
+- [x] **A.1** Extend `ToolPolicyContext` (`tool-policy.ts:28–35`) with
       `sessionAllowedPaths?: string[]` (orchestration scratchpad auto-allow, INT-001/FR-121).
-- [ ] **A.2** Thread it into the path check:
+- [x] **A.2** Thread it into the path check:
       `enforcePathConstraints(toolName, parameters, toolEntry, ctx.vaultRootPath,
       ctx.resolveVaultPath, ctx.sessionAllowedPaths)` — the enforcer already accepts the 6th
       arg (`path-enforcer.ts:55–62`). The scratchpad+parentScratchpad construction (copied from
       dispatcher.ts:655–662) lives at the **call sites** that have an `orchestrationContext`
       (Phase B), not in the pure function.
-- [ ] **A.3** Fix the drifted plan-mode description map: delete the phantom-name map at
+- [x] **A.3** Fix the drifted plan-mode description map: delete the phantom-name map at
       `tool-policy.ts:58–67` (`create_file`/`edit_file`/… — tools that don't exist in this
       plugin); move `getWriteToolDescription` with the dispatcher's real-name entries
       (dispatcher.ts:832–841: `write_note`, `replace_in_note`, `update_frontmatter`,
       `manage_tags`, `execute_command`) into `tool-policy.ts` as the single copy; the legacy
       branch calls it too until deletion. Optionally add `write_file`, `delete_note`,
       `move_note`, `apply_template` entries while touching it.
-- [ ] **A.4** Encode the §2 feature audit as tests — extend `tool-policy.test.ts` (currently
+- [x] **A.4** Encode the §2 feature audit as tests — extend `tool-policy.test.ts` (currently
       command-patterns + auto-approve only): plan-mode block (MCP + non-MCP messages, real
       names), disabled tool, domain denylist, path allow/block,
       **sessionAllowedPaths allow + `blocked_paths` still wins**, internal bypass.

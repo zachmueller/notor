@@ -20,6 +20,7 @@ import type { NotorSettings } from "../settings/types";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { ParsedToolConfig } from "../tool-config/types";
 import type { ApprovalCallback } from "../chat/dispatcher";
+import type { ToolPolicyContext } from "../chat/tool-policy";
 import type { Conversation } from "../types";
 import type { HistoryManager } from "../chat/history";
 import { ToolDispatcher } from "../chat/dispatcher";
@@ -400,6 +401,19 @@ export class UseSubagentTool implements Tool {
 		const mode = options?.mode ?? "act";
 		const parentSignal = abortSignal ?? new AbortController().signal;
 
+		// F2: build the per-run policy context from the intersected effective config
+		// so the pure policy engine gates the sub-agent's tool calls (command
+		// patterns / path allowlists / plan-mode / denylist) — sub-agents pass no
+		// settings into RunLoop, so domainDenylist is sourced from the tool's
+		// settings reference here at assembly time.
+		const policyCtx: ToolPolicyContext = {
+			effectiveConfig: intersectedConfig,
+			mode,
+			domainDenylist: this.settings.domain_denylist,
+			vaultRootPath: this.vaultRootPath ?? "",
+			resolveVaultPath: this.resolveVaultPath,
+		};
+
 		const runner = new SubAgentRunner({
 			provider,
 			model,
@@ -415,6 +429,7 @@ export class UseSubagentTool implements Tool {
 			// flow at maxDepth ≥ 1), inherit the parent's shared budget cell and
 			// depth. Absent (foreground chat), the runner seeds a fresh root context.
 			parentRunContext: options?.runContext,
+			policyCtx,
 		});
 
 		const result = await runner.run(task);

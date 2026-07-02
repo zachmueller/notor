@@ -19,6 +19,7 @@
 import type { LLMProvider, ChatMessage, ToolDefinition } from "../providers/provider";
 import type { ConversationMode } from "../types";
 import type { ToolDispatcher } from "../chat/dispatcher";
+import type { ToolPolicyContext } from "../chat/tool-policy";
 import type { NotorSettings } from "../settings/types";
 
 // ---------------------------------------------------------------------------
@@ -402,4 +403,13 @@ export interface RunLoopOptions {
 	hooks?: RunLoopHooks;
 	/** Optional progress callback (status string). */
 	onProgress?: (status: string) => void;
+	/**
+	 * Per-run tool-policy context (F2). Threaded into every tool dispatch so the
+	 * pure `evaluateToolPolicy()` engine gates the run — command patterns, path
+	 * allowlists, plan-mode, denylist, enabled checks. The caller (an
+	 * orchestration factory or sub-agent assembly) builds it from the run's
+	 * effective config; RunLoop never assembles it. When omitted, the dispatcher
+	 * falls back to its legacy inline branch (removed in Phase D).
+	 */
+	policyCtx?: ToolPolicyContext;
 }

@@ -362,13 +362,19 @@ export class RunLoop {
 		messageIdMap: Map<string, string>,
 	) {
 		if (!this.threadsCascadeSeam) {
-			// Historical sub-agent path — identical to SubAgentRunner today.
+			// Historical sub-agent path — no cascade seam. Threads policyCtx (F2) so
+			// the pure policy engine gates sub-agent tool calls; runContext /
+			// orchestrationContext stay undefined, so `dispatch()` still receives the
+			// historical 11 positional args (the RunLoop Regression Gate arity).
 			return executeToolBatches(
 				batches,
 				this.options.dispatcher,
 				this.options.mode,
 				messageIdMap,
 				this.abortController.signal,
+				undefined, // concurrencyCap — use default
+				undefined, // onProgressMap
+				this.options.policyCtx,
 			);
 		}
 		// Orchestration / flow path: thread the cascade seam. The positional gap
@@ -382,7 +388,7 @@ export class RunLoop {
 			this.abortController.signal,
 			undefined, // concurrencyCap — use default
 			undefined, // onProgressMap
-			undefined, // policyCtx
+			this.options.policyCtx,
 			undefined, // approvalCallback
 			undefined, // sessionContext
 			undefined, // approvalHookDispatcher

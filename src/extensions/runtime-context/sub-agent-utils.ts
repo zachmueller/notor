@@ -159,6 +159,20 @@ export function buildSubAgentUtils(ctx: BuilderContext): Pick<ExtensionUtils, "r
 					iterationCap: opts.iterationCap ?? profile.iteration_cap ?? plugin.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP,
 					tokenLimit: SUB_AGENT_TOKEN_LIMIT,
 					mode: "act",
+					// F2: gate this sub-agent's tool calls through the pure policy engine
+					// (command patterns / paths / plan-mode / denylist), built from the
+					// intersected effective config. domainDenylist comes from the tool's
+					// settings reference (no settings are threaded into RunLoop).
+					policyCtx: {
+						effectiveConfig: intersectedConfig,
+						mode: "act",
+						domainDenylist: plugin.settings.domain_denylist,
+						vaultRootPath: plugin.vaultRootPath ?? "",
+						resolveVaultPath: (path: string) => {
+							const file = resolveNote(path, plugin.app.vault, plugin.app.metadataCache);
+							return file?.path ?? null;
+						},
+					},
 				});
 
 				depth++;

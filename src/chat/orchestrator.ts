@@ -1571,13 +1571,15 @@ export class ChatOrchestrator implements ToolSessionContext {
 			}
 		}
 
-		// Build policy context and pass per-session approval callback
-		const policyCtx = vaultRootPath
-			? session.buildPolicyContext(this.settings, vaultRootPath, (path: string) => {
-				const file = resolveNote(path, this.app.vault, this.app.metadataCache);
-				return file?.path ?? null;
-			})
-			: undefined;
+		// Build policy context and pass per-session approval callback. F2: always
+		// build it — on mobile (no basePath) `vaultRootPath` is undefined, so pass
+		// "" (path enforcement is verified safe with an empty root; vault-namespace
+		// checks never touch the root, and absolute allow/block rules still apply).
+		// This removes the former mobile legacy-branch fallback for chat.
+		const policyCtx = session.buildPolicyContext(this.settings, vaultRootPath ?? "", (path: string) => {
+			const file = resolveNote(path, this.app.vault, this.app.metadataCache);
+			return file?.path ?? null;
+		});
 
 		const approvalHookFn = currentConv
 			? async (tn: string, params: Record<string, unknown>, m: string) =>
