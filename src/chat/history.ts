@@ -55,6 +55,7 @@ import { isSubAgentFilename, isHiddenFromConversationList } from "./sub-agent-hi
 import { logger } from "../utils/logger";
 import type { ContentBlock } from "../media/types";
 import { getTextContent } from "../media/types";
+import { atomicRewrite } from "../utils/atomic-write";
 
 const log = logger("HistoryManager");
 
@@ -199,10 +200,9 @@ export class HistoryManager {
 		});
 
 		return this.enqueueWrite(filePath, async () => {
-			try {
-				const existing = await this.vault.adapter.read(filePath);
-				await this.vault.adapter.write(filePath, existing + line + "\n");
-			} catch {
+			if (await this.vault.adapter.exists(filePath)) {
+				await this.vault.adapter.append(filePath, line + "\n");
+			} else {
 				// File doesn't exist yet — create it with header + message
 				log.warn("Conversation file not found, creating", { path: filePath });
 				const headerLine = JSON.stringify({
@@ -236,11 +236,11 @@ export class HistoryManager {
 
 		return this.enqueueWrite(filePath, async () => {
 			try {
-				const existing = await this.vault.adapter.read(filePath);
-				await this.vault.adapter.write(filePath, existing + line + "\n");
-			} catch {
+				await this.vault.adapter.append(filePath, line + "\n");
+			} catch (e) {
 				log.warn("Failed to append stale state", {
 					conversationId: conversation.id,
+					error: String(e),
 				});
 			}
 		});
@@ -318,16 +318,14 @@ export class HistoryManager {
 
 		return this.enqueueWrite(filePath, async () => {
 			try {
-				const content = await this.vault.adapter.read(filePath);
-				const lines = content.split("\n");
-
-				// Replace the first line (header)
-				lines[0] = JSON.stringify({
-					_type: "conversation",
-					...conversation,
+				await atomicRewrite(this.vault.adapter, filePath, (content) => {
+					const lines = content.split("\n");
+					lines[0] = JSON.stringify({
+						_type: "conversation",
+						...conversation,
+					});
+					return lines.join("\n");
 				});
-
-				await this.vault.adapter.write(filePath, lines.join("\n"));
 			} catch (e) {
 				log.warn("Failed to update conversation header", {
 					id: conversation.id,
@@ -358,18 +356,19 @@ export class HistoryManager {
 
 		await this.enqueueWrite(filePath, async () => {
 			try {
-				const content = await this.vault.adapter.read(filePath);
-				const firstNewline = content.indexOf("\n");
-				const headerLine = firstNewline >= 0 ? content.substring(0, firstNewline) : content;
-				const rest = firstNewline >= 0 ? content.substring(firstNewline) : "";
-				const headerObj = JSON.parse(headerLine) as Record<string, unknown>;
-				newValue = !headerObj.is_favorite;
-				if (newValue) {
-					headerObj.is_favorite = true;
-				} else {
-					delete headerObj.is_favorite;
-				}
-				await this.vault.adapter.write(filePath, JSON.stringify(headerObj) + rest);
+				await atomicRewrite(this.vault.adapter, filePath, (content) => {
+					const firstNewline = content.indexOf("\n");
+					const headerLine = firstNewline >= 0 ? content.substring(0, firstNewline) : content;
+					const rest = firstNewline >= 0 ? content.substring(firstNewline) : "";
+					const headerObj = JSON.parse(headerLine) as Record<string, unknown>;
+					newValue = !headerObj.is_favorite;
+					if (newValue) {
+						headerObj.is_favorite = true;
+					} else {
+						delete headerObj.is_favorite;
+					}
+					return JSON.stringify(headerObj) + rest;
+				});
 			} catch (e) {
 				log.warn("Failed to toggle favorite", {
 					filename,

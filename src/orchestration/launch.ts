@@ -33,6 +33,7 @@ import { resolveNote } from "../utils/resolve-note";
 import { NoteOpener } from "../tools/note-opener";
 import { resolveIncludeNotes } from "../include-note/resolver";
 import { logger } from "../utils/logger";
+import { atomicRewrite } from "../utils/atomic-write";
 import { FlowDefinitionParser } from "./flow-parser";
 import { FlowCompositionManager } from "./flow-composition-manager";
 import type {
@@ -224,7 +225,11 @@ export class VaultSessionFs implements SessionFs {
 		if (dir && !(await this.app.vault.adapter.exists(dir))) {
 			await this.mkdir(dir);
 		}
-		await this.app.vault.adapter.write(norm, data);
+		// Atomic write: write to a temp file, then rename over the target.
+		// Rename-over-existing is atomic on the desktop adapter (no torn-state read window).
+		const tmp = norm + ".tmp";
+		await this.app.vault.adapter.write(tmp, data);
+		await this.app.vault.adapter.rename(tmp, norm);
 	}
 
 	read(path: string): Promise<string> {
@@ -1052,24 +1057,25 @@ async function backfillParentEdge(
 	try {
 		const norm = normalizePath(path);
 		if (!(await plugin.app.vault.adapter.exists(norm))) return;
-		const content = await plugin.app.vault.adapter.read(norm);
-		const nl = content.indexOf("\n");
-		const headerLine = nl >= 0 ? content.slice(0, nl) : content;
-		const rest = nl >= 0 ? content.slice(nl) : "";
-		const header = JSON.parse(headerLine) as Record<string, unknown>;
-		header.schema_version ??= 1;
-		const edges = Array.isArray(header.orchestration_edges)
-			? (header.orchestration_edges as Array<Record<string, unknown>>)
-			: [];
-		if (!edges.some((e) => e.kind === "parent" && e.conversation_id === parentConversationId)) {
-			edges.push({
-				kind: "parent",
-				conversation_id: parentConversationId,
-				session_id: parentSessionId,
-			});
-		}
-		header.orchestration_edges = edges;
-		await plugin.app.vault.adapter.write(norm, JSON.stringify(header) + rest);
+		await atomicRewrite(plugin.app.vault.adapter, norm, (content) => {
+			const nl = content.indexOf("\n");
+			const headerLine = nl >= 0 ? content.slice(0, nl) : content;
+			const rest = nl >= 0 ? content.slice(nl) : "";
+			const header = JSON.parse(headerLine) as Record<string, unknown>;
+			header.schema_version ??= 1;
+			const edges = Array.isArray(header.orchestration_edges)
+				? (header.orchestration_edges as Array<Record<string, unknown>>)
+				: [];
+			if (!edges.some((e) => e.kind === "parent" && e.conversation_id === parentConversationId)) {
+				edges.push({
+					kind: "parent",
+					conversation_id: parentConversationId,
+					session_id: parentSessionId,
+				});
+			}
+			header.orchestration_edges = edges;
+			return JSON.stringify(header) + rest;
+		});
 	} catch (e) {
 		log.warn("Failed to backfill parent edge on child entry", { error: String(e) });
 	}

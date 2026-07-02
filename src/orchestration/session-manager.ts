@@ -84,6 +84,8 @@ function trimSlash(p: string): string {
 
 export class OrchestrationSessionManager {
 	private readonly orchestrationsRoot: string;
+	/** Per-session write chains — serializes readMeta → mutate → writeMeta inside updateStatus. */
+	private readonly writeChains = new Map<string, Promise<void>>();
 
 	/**
 	 * @param notorDir - The configured Notor directory (e.g. `notor`).
@@ -173,17 +175,28 @@ export class OrchestrationSessionManager {
 	 * Patch a session's status (and optionally `iteration` / `active_step`),
 	 * preserving every other field. Used at finalize and by recovery to mark a
 	 * session `error`/`completed`/`interrupted`.
+	 *
+	 * Serialized via a per-session write chain so concurrent callers (runner
+	 * pause seam + finalize) can't interleave and lose a patch.
 	 */
 	async updateStatus(
 		sessionId: string,
 		status: OrchestrationSessionMeta["status"],
 		patch?: Partial<Pick<OrchestrationSessionMeta, "iteration" | "active_step">>,
 	): Promise<void> {
-		const meta = await this.readMeta(sessionId);
-		meta.status = status;
-		if (patch?.iteration !== undefined) meta.iteration = patch.iteration;
-		if (patch?.active_step !== undefined) meta.active_step = patch.active_step;
-		await this.writeMeta(sessionId, meta);
+		const current = this.writeChains.get(sessionId) ?? Promise.resolve();
+		const next = current.then(async () => {
+			const meta = await this.readMeta(sessionId);
+			meta.status = status;
+			if (patch?.iteration !== undefined) meta.iteration = patch.iteration;
+			if (patch?.active_step !== undefined) meta.active_step = patch.active_step;
+			await this.writeMeta(sessionId, meta);
+		});
+		// Always advance the chain even on error, so one bad write doesn't block subsequent ones.
+		const safe = next.catch(() => {});
+		this.writeChains.set(sessionId, safe);
+		// Propagate errors to the caller but keep the chain alive.
+		return next;
 	}
 
 	// -- Internals -----------------------------------------------------------
