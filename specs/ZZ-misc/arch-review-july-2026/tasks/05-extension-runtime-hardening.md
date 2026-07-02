@@ -123,7 +123,7 @@ overrides.
 - [ ] Manual: extension with `notor-min-api: 99` → persistent Notice, does not load; a tool that
       `await new Promise(()=>{})`s errors after the configured timeout instead of wedging the
       conversation; `word-count` and the 8 migrated scaffolds still work.
-- [ ] Run the `audit-personas-docs` skill (docs + tool-creator persona both change here).
+- [x] Run the `audit-personas-docs` skill (docs + tool-creator persona both change here).
 - [x] Grep gates:
       `grep -rn "checkpointManager\|staleTracker\b" src/extensions/builtin-tool-scaffolds/` →
       zero; `grep -rn "notor-min-api" docs/ src/` → parser + docs hits only.
