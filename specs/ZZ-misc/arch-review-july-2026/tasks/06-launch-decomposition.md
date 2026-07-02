@@ -136,8 +136,21 @@ Fakes ready for reuse: `FakeSessionFs` (`session-manager.test.ts:16–33`), `Fak
 
 ## Phase 4 — Optional follow-up
 
-- [ ] Dynamize the `makeChildFlowSpawner` static import (`main.ts:89`) to restore full lazy
-      loading of the orchestration layer.
+- [x] Dynamize the `makeChildFlowSpawner` static import (`main.ts:89`) to restore full lazy
+      loading of the orchestration layer. **Done (2026-07-03):** replaced the eager import with a
+      memoized lazy-wrapper `SpawnChildFlow` closure in `registerRunFlowTool` that
+      `await import("./orchestration/launch")`s on first `run_flow` execution (the spawner is only
+      invoked inside the async `RunFlowTool.execute()`, so no need to make the sync
+      `getToolRegistry` chain async). **Key discovery:** `main.ts` also statically imported
+      `requestOrchestrationInput` from `./ui/orchestration-modals`, which transitively pulls
+      `run-lifecycle` → `launch-wiring`/`runner` — so dynamizing line 89 alone was moot. Also
+      dynamized the `requestOrchestrationInput` import: its four call sites (the lazy spawner, the
+      recovery scan, the hook launcher, the scheduled launcher) now pull it from
+      `await import("./ui/orchestration-modals")` alongside their existing dynamic launch imports.
+      Verified: no static edge from `main.ts`'s eager import set reaches the orchestration graph
+      (remaining `./orchestration/*` static imports are `flow-composition-manager`, `run-registry`,
+      and type-only `child-flow`/`host`/`types`). e2e `orchestration-run-flow-test.ts` confirms
+      `run_flow` still spawns/returns the child correctly through the lazy wrapper.
 
 ## Verification
 

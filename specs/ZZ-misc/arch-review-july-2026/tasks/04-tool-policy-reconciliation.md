@@ -5,7 +5,9 @@
 while this task touches only the two runtime-factory regions (:281–345, :407–465) — landing
 after Task 03 avoids double-rebasing).
 **Blocks:** Task 06 (its split must not break the regression-gate arity assertions this task
-updates). **Phase D (deletion) trails one release behind Phases A–C.**
+updates). **Phase D (deletion) originally planned to trail one release behind Phases A–C; the
+release gate was instead discharged via e2e observation + static proof and Phase D landed in the
+same effort — see the Phase D note.**
 
 The two engines: `ToolDispatcher.dispatch()` forks at `dispatcher.ts:443–447` — with `policyCtx`
 it runs pure `evaluateToolPolicy()` (`tool-policy.ts:85`); without, a 182-line legacy inline
@@ -115,32 +117,63 @@ Builders own context assembly — do **not** have RunLoop assemble it (it lacks
       behavior change. "RunLoop threading (both branches)" is covered by the updated cascade-seam
       arity vectors in `run-loop.test.ts`; the conversation-step + code-step ctx threading is
       locked in `step-turn-executor.emission.test.ts` + `code-step-executor.test.ts`.
-- [ ] **C.6** Release notes: headless contexts gain enforcement they lacked — blocked patterns
-      now block; path enforcement now precedes approval (pure ordering: block before
+- [x] **C.6** Release notes: headless contexts gain enforcement they lacked — blocked patterns
+      now participate; path enforcement now precedes approval (pure ordering: block before
       prompting). That is the fix, not a regression.
+      > **Release note (Phase D, this pass):** The dispatcher's legacy inline policy branch is
+      > deleted. All five dispatch contexts (foreground chat, background workflows, sub-agents,
+      > orchestration conversation steps, orchestration code steps) now run the single pure
+      > `evaluateToolPolicy` engine — there is no fallback path. Behaviorally this only *removes*
+      > a dead branch that was already unreachable (every context built a `policyCtx` since
+      > Phase B); no user-visible policy behavior changes. `policyCtx` is now a required argument
+      > to `ToolDispatcher.dispatch()`, so any future caller that forgets it is a compile error
+      > rather than a silent downgrade to unenforced policy.
 
-## Phase D — Delete the legacy branch (**Release N+1**, separate branch/PR)
+## Phase D — Delete the legacy branch (**gate discharged via e2e — see note**)
 
-Gate: `grep -rn "LEGACY POLICY PATH HIT"` in captured logs empty for a full release.
+Gate: `grep -rn "LEGACY POLICY PATH HIT"` empty. **Discharged in-session** (2026-07-03) without a
+full production release: the tripwire is a `log.error`, and the e2e harness captures every
+`log.error` over CDP. Two gate scripts exercised all five live dispatch contexts against real
+Obsidian + Bedrock and observed **zero** `LEGACY POLICY PATH HIT` (foreground read tools + the
+`run_flow` composition's conversation/code/child-spawn contexts). Combined with the static proof
+(all four in-repo `dispatch()` call sites build a concrete ctx) and the now-required type (a
+missing ctx is a compile error), the legacy branch was proven unreachable and deleted.
 
-- [ ] **D.1** Make `policyCtx` required in `dispatch()` (position 7 of 13,
-      dispatcher.ts:406–420).
-- [ ] **D.2** Delete the `else if (tool.internal)` bypass (:503–506), the legacy block
-      (:507–688), and the four duplicated block-result blocks. Keep `raceApprovalSources`.
-- [ ] **D.3** Delete now-dead helpers after repo-wide grep: `resolveMcpAutoApprove` (:47–59),
-      the `resolveAutoApprove` import, the `autoApprove` field. Remove
-      `setEffectiveToolConfig` + field **only if** nothing else reads it —
-      `ConfigResolver.updateDisplayConfig` (`config-resolver.ts:131–135`) writes it; trace
-      whether the display-sync path has any remaining reader first (and confirm the F7
-      settings-sync findings don't depend on it).
-- [ ] **D.4** Grep gates: `grep -n "policyCtx" src/ | grep -v test` shows no `undefined,`
-      placeholders.
+- [x] **D.1** `policyCtx` is required in `dispatch()` (position 7). `abortSignal`/`onProgress`
+      became required-but-nullable (TS forbids a required param after an optional one); every
+      caller already passed them positionally. `RunLoopOptions.policyCtx`,
+      `SubAgentRunnerOptions.policyCtx`, `StepRuntime`/`CodeStepRuntime`/`BuildOrchestrationHelperArgs`
+      `.policyCtx`, and the three `tool-orchestration.ts` batch-executor params all became required
+      to match.
+- [x] **D.2** Deleted the `else if (tool.internal)` bypass and the entire legacy `else` block.
+      Kept `raceApprovalSources` and the pure branch's approval section. Internal tools are
+      handled inside the pure branch (`evaluateToolPolicy` returns `{allowed, autoApproved}` for
+      `tool.internal`, and the render-suppression `else if (approvalCb && !tool.internal)` stays).
+- [x] **D.3** Deleted: `resolveMcpAutoApprove` fn, the `autoApprove` field + `setAutoApprove`
+      setter (+ its 3 callers: main.ts, wire-view.ts, orchestrator.ts), the `effectiveToolConfig`
+      field + `setEffectiveToolConfig` setter (+ its 4 writer call sites: config-resolver,
+      use-subagent, sub-agent-utils, launch-wiring). The `resolveAutoApprove` import went dead and
+      its now-orphaned source file `src/personas/auto-approve-resolver.ts` was deleted. ConfigResolver
+      keeps its own `effectiveToolConfig` field (read by the inspector via `getEffectiveToolConfig`,
+      not the dispatcher's copy). Unused `isDomainBlocked`/`isMcpTool`/`getWriteToolDescription`
+      dispatcher imports pruned; `McpRegisteredTool` stays (used by `hasExplicitUserReadClassification`).
+- [x] **D.4** Grep gates: `grep -rn "LEGACY POLICY PATH HIT" src/` → 0;
+      `grep -n "policyCtx" src/ | grep -v test | grep "undefined,"` → 0;
+      `grep -rn "resolveMcpAutoApprove\|setAutoApprove\|setEffectiveToolConfig" src/ | grep -v test` → 0.
 
-## Verification (Release N)
+## Verification (Release N + Phase D)
 
-- [x] `tsc` + suite green (1591 tests, 107 files); arity assertions updated in the same commits
-      as call-site changes (run-loop.test.ts cascade-seam vectors + sub-agent-runner.test.ts,
-      both moved policyCtx from `undefined` to `expect.objectContaining` at position 7).
+- [x] `tsc` + suite green (1591 tests at Release N; **1631 tests / 114 files after Phase D**);
+      arity assertions updated in the same commits as call-site changes (run-loop.test.ts
+      cascade-seam vectors + sub-agent-runner.test.ts, both moved policyCtx from `undefined` to
+      `expect.objectContaining` at position 7). Phase D additionally flipped every test's
+      RunLoop/sub-agent/step/code-step options builder to supply a minimal required `policyCtx`,
+      and updated `orchestration-helper.test.ts`'s "undefined when not supplied" assertion to
+      assert the now-always-present ctx.
+- [x] **e2e gate (Phase D):** `orchestration-run-flow-test.ts` (extended with a tripwire-sweep
+      scenario) + new `legacy-policy-tripwire-test.ts` (foreground chat + sub-agent) run against
+      real Obsidian + Bedrock — zero `LEGACY POLICY PATH HIT`, zero plugin errors, both pre- and
+      post-deletion. The flows still complete (child spawns, structured return, ledger entries).
 - [ ] Manual (requires running Obsidian — not executed here): orchestration flow →
       `execute_command` with a blocked pattern; scratchpad writes still work; plan-mode
       orchestration launch still permits `emit_event`. **Caveat (see C.5 semantics note):** a
