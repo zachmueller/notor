@@ -137,10 +137,37 @@ checkpoint restore) refuse `> 1` with a clear error, mirroring the in-repo prece
 ## Verification
 
 - [x] `tsc` + full suite green.
-- [ ] e2e orchestration scripts that assert on `session.json` / `session-log.jsonl` (e.g.
-      `orchestration-inbox-triage-test.ts:361–375`) still pass — the stamp is additive.
-- [ ] Manual: open a pre-change conversation (no version field) → loads; favorite-toggle it →
-      field appears, messages intact.
+- [x] e2e orchestration scripts that assert on `session.json` / `session-log.jsonl` (e.g.
+      `orchestration-inbox-triage-test.ts:361–375`) still pass — the stamp is additive. **Verified
+      2026-07-03:** all 10 orchestration e2e scripts green against live Obsidian + Bedrock
+      (single-flow, inbox-triage, run-flow, terminal-paths, runtree-notices, meeting-notes,
+      draft-critique, vault-health, weekly-review, zettelkasten).
+      **⚠ This live run surfaced a Phase-B regression** (see the atomic-write note below).
+- [x] Manual → converted to a unit drive (more precise than a live click). `history.test.ts`:
+      a legacy conversation JSONL with **no** `schema_version` header loads with messages intact
+      (the reader defaults it to 1 — `loadConversation`), and `toggleFavorite` on a legacy file
+      adds `is_favorite` while preserving messages. **Note:** the toggle does NOT stamp
+      `schema_version` (raw-header rewrite); the reader-side default is the safety net — so
+      "field appears on toggle" from the original premise was inaccurate; the version defaults on
+      *load*, not on toggle.
 - [x] Grep gate: `grep -rn "adapter.write(.*existing" src/chat/history.ts` → zero hits.
-- [ ] Risk to smoke-check once: `adapter.process` atomicity on the mobile adapter; fallback is
-      documented temp+rename.
+- [x] Risk smoke-checked (by inspection — desktop harness can't drive the mobile adapter):
+      `adapter.process` is documented as atomic in the Obsidian `DataAdapter` contract
+      (`obsidian.d.ts:1642` — "Atomically read, modify, and save"), which both desktop and mobile
+      (Capacitor) adapters implement, and `atomicRewrite` uses it directly. The one custom
+      temp+rename path (`VaultSessionFs.write`) is orchestration-only and desktop-gated. The
+      documented temp+rename fallback is in place. **Mobile live smoke-check remains N/A on the
+      desktop Playwright harness.**
+
+### ⚠ Regression found + fixed during live verification (2026-07-03)
+
+Phase B's `VaultSessionFs.write` used `write(tmp)` → `rename(tmp, target)` with a comment
+asserting "rename-over-existing is atomic on the desktop adapter." That assumption is **wrong**:
+Obsidian's desktop `adapter.rename` throws `"Destination file already exists!"` when the target
+exists. Effect: `session.json` finalize (`updateStatus` → `writeMeta`) threw, leaving **every
+completed orchestration flow stuck at status `active`** (and step-conversation edge backfill
+failed the same way). This is the exact "remove-before-rename gap" B.2 noted but assumed away; no
+unit test caught it because the fake-fs doubles modeled `rename` as a silent overwrite.
+**Fix (commit `fe16705`):** remove the target before rename (matching the working idiom in
+`dedup-cache.ts`), plus a `launch-wiring.test.ts` regression using a rename-strict fake adapter.
+Re-verified: single-flow reaches `completed` in ~12s and all 10 orchestration scripts pass.

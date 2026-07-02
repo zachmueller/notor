@@ -120,9 +120,14 @@ overrides.
 ## Verification
 
 - [x] `tsc` + suite green.
-- [ ] Manual: extension with `notor-min-api: 99` → persistent Notice, does not load; a tool that
-      `await new Promise(()=>{})`s errors after the configured timeout instead of wedging the
-      conversation; `word-count` and the 8 migrated scaffolds still work.
+- [x] Manual → discharged via a new live e2e drive `runtime-hardening-test.ts` (2026-07-03, 4/4,
+      no LLM needed): a `notor-min-api: 99` tool is REFUSED (reload error names v99 + v1), stays
+      unregistered, and the plugin surfaces the persistent error Notice (`_extensionStaleNotice`
+      set); a tool that `await new Promise(()=>{})`s errors via the registered `UserToolAdapter`
+      after the configured timeout (~1s) with a structured `success:false` result instead of
+      wedging. `word-count` + the 8 migrated scaffolds still work (confirmed present + invocable in
+      `user-extensions-test.ts`; note that script's tool-*count* assertions are pre-existing drift
+      — the plugin now registers 39 scaffolds, not the hardcoded 20 — orthogonal to F5).
 - [x] Run the `audit-personas-docs` skill (docs + tool-creator persona both change here).
 - [x] Grep gates:
       `grep -rn "checkpointManager\|staleTracker\b" src/extensions/builtin-tool-scaffolds/` →

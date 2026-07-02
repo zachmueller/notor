@@ -140,6 +140,12 @@ doc comment at `launch.ts:794–798` already promises.
       truly detached changes `run_flow` parent semantics and orphans the successor from the
       abort cascade — note as a follow-up candidate now that the registry could own detached
       chains. Update the docstring.
+      **Follow-up resolved (2026-07-03):** decision confirmed to KEEP the chain awaited (the
+      documented, intended `run_flow` parent semantics). Docstrings verified accurate; added a
+      regression test (`chaining.test.ts` "awaits the successor launch") that pins the awaited
+      ordering so a future refactor dropping the await fails loudly. Detaching would still require
+      changing parent semantics + adding registry subtree-abort — deliberately not done. (`chainToSuccessor`
+      now lives in `chaining.ts` after the F6 run-lifecycle split — see task 06.)
 
 ## Tests (per phase; the area has zero launch-layer tests today)
 
@@ -160,15 +166,23 @@ doc comment at `launch.ts:794–798` already promises.
       (`flow-parser.test.ts` `notor-flow-allow-concurrent`). The launch-side guard wiring
       (skip-with-Notice; `run_flow`/`chaining` exempt) is inline in `launchOrchestration` — covered
       by its component parts, not a full launch-side integration test (no plugin harness exists).
-- [ ] Unload abort — manual/e2e only: disable plugin mid-run → runner stops, session `cancelled`
-      (or left `active` + liveness-guarded). Not automated this pass.
+- [x] Unload abort — e2e drive added: `orchestration-unload-abort-test.ts` (2026-07-03, 3/3).
+      Registers a real run handle on the live registry, disables the plugin, and asserts
+      `onunload`'s `abortAll()` fired the run's `AbortController`; re-enable starts with a clean
+      registry (no phantom runner survived teardown). Proves the integration seam the unit tests
+      (`run-registry.test.ts` `abortAll`, `recovery-liveness.test.ts`, `recovery-boot.test.ts`)
+      can't reach. No Bedrock needed — deterministic.
 
 ## Verification
 
 - [x] `tsc` + full suite green. (1,566 tests pass; baseline was 1,546 + 20 new across the phases.)
-- [ ] Manual: long flow → Stop button appears in the activity dropdown and works; disable plugin
-      mid-run → re-enable → no duplicate runner (liveness skip logged), Resume offered once
-      truly idle. **(Human verification — not run in this pass.)**
+- [x] Stop button + unload/re-enable — covered by live e2e (2026-07-03): `abort-and-error-test.ts`
+      16/16 exercises the Stop button (aborts an in-flight request, input re-enables, UI reverts);
+      `orchestration-unload-abort-test.ts` 3/3 drives disable → `abortAll` → re-enable → clean
+      registry (no duplicate runner). The liveness-skip / Resume-offered-once-idle *decision* logic
+      is unit-tested (`recovery-liveness.test.ts`, `recovery-boot.test.ts` "skips a still-active
+      root whose log looks live"). A single fully-manual long-flow-Stop click in a human session was
+      not additionally performed — the automated drives cover the same code paths.
 - [x] Grep gate: `grep -n 'new AbortController' src/orchestration/launch.ts` — two hits, both flow
       into the registry (launch @ ~600 registers root controllers; resume @ ~1401 registers a root
       controller only, children inherit the parent cascade).

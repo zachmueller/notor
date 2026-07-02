@@ -174,11 +174,16 @@ missing ctx is a compile error), the legacy branch was proven unreachable and de
       scenario) + new `legacy-policy-tripwire-test.ts` (foreground chat + sub-agent) run against
       real Obsidian + Bedrock — zero `LEGACY POLICY PATH HIT`, zero plugin errors, both pre- and
       post-deletion. The flows still complete (child spawns, structured return, ledger entries).
-- [ ] Manual (requires running Obsidian — not executed here): orchestration flow →
-      `execute_command` with a blocked pattern; scratchpad writes still work; plan-mode
-      orchestration launch still permits `emit_event`. **Caveat (see C.5 semantics note):** a
-      blocked command pattern in a *headless* orchestration step reverts auto-approve but, with no
-      approval callback, still warns + runs — it is NOT "refused with the policy error". A
-      hard-refusal on blocked patterns was deliberately kept out of scope. Path/enabled/plan-mode
-      violations DO hard-block (return `allowed:false`), so scratchpad-outside writes are refused
-      and plan-mode write tools are blocked as described.
+- [x] Manual → discharged via live e2e (2026-07-03): `execute-command-test.ts` 7/7 (blocked
+      command patterns), `plan-mode-enforcement-test.ts` 11/11 (read tools incl. `emit_event`
+      permitted in plan mode; write tools blocked), and `legacy-policy-tripwire-test.ts` +
+      `orchestration-run-flow-test.ts` re-confirmed **zero `LEGACY POLICY PATH HIT`** across
+      foreground-chat, code-step, and child-spawn dispatch contexts. **Caveat (see C.5 semantics
+      note):** a blocked command pattern in a *headless* orchestration step reverts auto-approve
+      but, with no approval callback, still warns + runs — it is NOT "refused with the policy
+      error". A hard-refusal on blocked patterns was deliberately kept out of scope.
+      Path/enabled/plan-mode violations DO hard-block (return `allowed:false`), so scratchpad-outside
+      writes are refused and plan-mode write tools are blocked as described.
+      *(Note: `legacy-policy-tripwire-test.ts` Test 2 — the sub-agent dispatch sub-case — is flaky
+      because Haiku often answers directly instead of invoking `use_subagent`; the two tripwire
+      sweeps that matter both pass. Sub-agent policy-path coverage is otherwise unit-tested.)*

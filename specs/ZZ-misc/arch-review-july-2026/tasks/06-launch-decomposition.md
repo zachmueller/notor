@@ -159,18 +159,32 @@ Fakes ready for reuse: `FakeSessionFs` (`session-manager.test.ts:16–33`), `Fak
       were NOT run here** — they require a live Obsidian instance + live Bedrock credentials (real
       cost), unavailable in this headless environment. Left for the release branch as designed;
       the pause/resume item below is the one that exercises the injection this task changed.
+      **Run 2026-07-03:** all 10 orchestration e2e scripts executed against live Obsidian + Bedrock
+      and pass (see task 01 verification for the full list). Post the F6-follow-up split of
+      `run-lifecycle.ts` (below), single-flow (7/7), run-flow (8/8), and weekly-review (4/4) were
+      re-run green to confirm the pure-move preserved behavior.
 - [x] Grep gates: `grep -c "plugin\." src/orchestration/launch*.ts
       src/orchestration/run-lifecycle.ts src/orchestration/child-spawn.ts
       src/orchestration/recovery-boot.ts` → **0** (all via `host.`);
       `grep -rn "upsertFlowRun?." src/` → **0**;
       `grep -rn "vault.adapter" src/orchestration/child-spawn.ts` → **0**. All pass.
 - [x] `wc -l` sanity: barrel 15 (<20); modules launch-wiring 457 / child-spawn 382 /
-      recovery-boot 340 / orchestration-modals 258 / host 52 — all under. **run-lifecycle.ts is
-      524** (~24 over the soft `~500` ceiling): it carries `launchOrchestration` + chaining +
-      `finalizeRun` + the `ChainDeps` test seam and its docs. Left as-is (splitting the chaining
-      helpers into their own module is a plausible follow-up but was not in this task's scope).
-- [ ] Pause/resume e2e (`orchestration-terminal-paths-test.ts` covers interactive pause) — **not
-      run here** (live-Bedrock e2e; see above). Must be run on the release branch: the
-      `requestOrchestrationInput` injection now flows through `launchOrchestration`/
-      `makeChildFlowSpawner`/`recoverOrchestrations` options from four composition sites in
-      main.ts (was an internal import), so the interactive-pause path needs the live backstop.
+      recovery-boot 340 / orchestration-modals 258 / host 52 — all under. run-lifecycle.ts was
+      **524** (~24 over the soft `~500` ceiling). **Follow-up done (2026-07-03, commit `1fdd003`):**
+      extracted the chaining helpers (`chainToSuccessor`, `resolveSuccessorInputs`, `ChainLauncher`,
+      `ChainDeps`) into a new `chaining.ts` (176 lines) — **run-lifecycle.ts is now 378**, both
+      comfortably under the ceiling. The chaining test moved to `chaining.test.ts`; the barrel
+      (`launch.ts`) is unchanged (chaining stays internal). The `launchOrchestration`↔`chainToSuccessor`
+      mutual import is a lazy ESM cycle (same shape as child-spawn↔recovery-boot).
+- [x] Pause/resume — verified across the layers, with one honest caveat.
+      **Premise correction:** `orchestration-terminal-paths-test.ts` does NOT cover interactive
+      pause — it covers the FLOW_CANCELLED and `{step}.code_error` terminal paths (7/7, re-run
+      2026-07-03). No e2e drives the interactive-pause modal.
+      **What IS verified:** the interactive-pause *logic* (INT-030: `user.input.required` →
+      suspend → `requestUserInput` → resume) is unit-tested in `runner.test.ts` ("pauses on
+      user.input.required, then resumes…"); the `requestOrchestrationInput` injection wiring
+      through the four main.ts composition sites is a type-level change confirmed by `tsc` clean +
+      the full 10-script orchestration sweep completing green (the same options object flows the
+      callback). **Still recommended once on the release branch:** a human click-through of a
+      flow that pauses for input (the live modal round-trip is the one path no automated drive
+      exercises end-to-end).
