@@ -86,8 +86,7 @@ import { UseSubagentTool } from "./tools/use-subagent";
 import { UpdateTasksTool } from "./tools/update-tasks";
 import { RunFlowTool, RUN_FLOW_TOOL_NAME } from "./tools/run-flow";
 import { FlowCompositionManager } from "./orchestration/flow-composition-manager";
-import { makeChildFlowSpawner } from "./orchestration/launch";
-import { requestOrchestrationInput } from "./ui/orchestration-modals";
+import type { SpawnChildFlow } from "./orchestration/child-flow";
 import { OrchestrationRunRegistry } from "./orchestration/run-registry";
 import type { OrchestrationHost } from "./orchestration/host";
 import { buildUtils } from "./extensions/runtime-context";
@@ -766,12 +765,15 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			// resume them. Gated on orchestration_enabled; fire-and-forget so it
 			// never blocks load. Loud recovery errors surface as Notices.
 			if (this.settings.orchestration_enabled) {
-				import("./orchestration/launch")
-					.then(({ recoverOrchestrations }) =>
-					recoverOrchestrations(this, (flowName, question) =>
-						requestOrchestrationInput(this.app, flowName, question),
-					),
-				)
+				Promise.all([
+					import("./orchestration/launch"),
+					import("./ui/orchestration-modals"),
+				])
+					.then(([{ recoverOrchestrations }, { requestOrchestrationInput }]) =>
+						recoverOrchestrations(this, (flowName, question) =>
+							requestOrchestrationInput(this.app, flowName, question),
+						),
+					)
 					.catch((e) => log.warn("Orchestration recovery scan failed", { error: String(e) }));
 			}
 		});
@@ -1076,6 +1078,7 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 					? async (flowNameOrDir: string, objective: string) => {
 							const { FlowDefinitionParser } = await import("./orchestration/flow-parser");
 							const { launchOrchestration } = await import("./orchestration/launch");
+							const { requestOrchestrationInput } = await import("./ui/orchestration-modals");
 							const parser = new FlowDefinitionParser(
 								this.app.vault,
 								this.app.metadataCache,
@@ -1183,6 +1186,7 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			async (flow) => {
 				if (!this.settings.orchestration_enabled) return;
 				const { launchOrchestration } = await import("./orchestration/launch");
+				const { requestOrchestrationInput } = await import("./ui/orchestration-modals");
 				const objective = `Scheduled run of orchestration flow '${flow.name}'.`;
 				await launchOrchestration(this, flow, objective, {
 					origin: "schedule",
@@ -1731,12 +1735,23 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			this.app.metadataCache,
 			this.settings.notor_dir,
 		);
-		const runFlowTool = new RunFlowTool(
-			composition,
-			makeChildFlowSpawner(this, (flowName, question) =>
-				requestOrchestrationInput(this.app, flowName, question),
-			),
-		);
+		// Lazy spawner (F6 Phase 4): defer loading the orchestration layer
+		// (`./orchestration/launch` + the ui modals it pulls) until `run_flow`
+		// actually executes — the spawner is only invoked inside RunFlowTool.execute(),
+		// which is async, so the dynamic import + real spawner are memoized on first
+		// call. This keeps the whole orchestration graph off the plugin's load path.
+		let realSpawner: SpawnChildFlow | undefined;
+		const spawnChildFlow: SpawnChildFlow = async (req) => {
+			if (!realSpawner) {
+				const { makeChildFlowSpawner } = await import("./orchestration/launch");
+				const { requestOrchestrationInput } = await import("./ui/orchestration-modals");
+				realSpawner = makeChildFlowSpawner(this, (flowName, question) =>
+					requestOrchestrationInput(this.app, flowName, question),
+				);
+			}
+			return realSpawner(req);
+		};
+		const runFlowTool = new RunFlowTool(composition, spawnChildFlow);
 		registry.register(runFlowTool);
 		// Prime the invocable-flow cache (hot-reloaded again at each execute()).
 		runFlowTool.refreshInvocableFlows().catch((e) =>
@@ -1776,7 +1791,6 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 				this._toolDispatcher.registerTool(tool);
 			}
 
-			this._toolDispatcher.setAutoApprove(this.settings.auto_approve);
 			this._toolDispatcher.setSettings(this.settings);
 			this._toolDispatcher.setSpiller(this._tempOutputSpiller);
 
