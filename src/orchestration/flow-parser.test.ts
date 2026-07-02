@@ -276,6 +276,22 @@ describe("FlowDefinitionParser", () => {
 		expect(flow.steps).toHaveLength(2);
 	});
 
+	it("exempts .stream_error from the static-orphan rule so a step may subscribe to it (F3)", async () => {
+		const files = validFlowFiles();
+		// planner publishes a {step}.stream_error channel and finisher subscribes to
+		// it — neither the publish nor the subscribe is a static orphan / load error.
+		files[`${FLOW_DIR}/steps/planner.md`]!.frontmatter!["notor-step-publishes"] = [
+			"work",
+			"Planner.stream_error",
+		];
+		files[`${FLOW_DIR}/steps/finisher.md`]!.frontmatter!["notor-step-triggers"] = [
+			"work",
+			"Planner.stream_error",
+		];
+		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		expect(flow.steps).toHaveLength(2);
+	});
+
 	it("requires a required-event to be published by some step", async () => {
 		const files = validFlowFiles({ "notor-required-events": ["never.published"] });
 		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(/never\.published/);

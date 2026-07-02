@@ -64,6 +64,15 @@ describe("FallbackCoordinator", () => {
 		expect(coordinator.handle(event("Y.code_error", "Y"), fakeFlow()).payload).toContain("Y.code_error");
 	});
 
+	it("recognizes an unsubscribed .stream_error as a diagnosable FLOW_ERROR (F3)", () => {
+		const coordinator = new FallbackCoordinator();
+		const result = coordinator.handle(event("Fetcher.stream_error", "Fetcher"), fakeFlow());
+		expect(result.topic).toBe(FLOW_ERROR);
+		// Names the failing step + channel (diagnosable, not an anonymous orphan).
+		expect(result.payload).toContain("Fetcher.stream_error");
+		expect(result.payload).toContain("Fetcher");
+	});
+
 	it("is pure + synchronous — returns a FLOW_ERROR event directly (no promise, no LLM)", () => {
 		const coordinator = new FallbackCoordinator();
 		const result = coordinator.handle(event("orphan"), fakeFlow());

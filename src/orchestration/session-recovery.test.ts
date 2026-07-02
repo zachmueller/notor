@@ -180,6 +180,30 @@ describe("SessionRecovery — budget reconstruction", () => {
 		const budget = recovery.rebuildBudget(entries, { maxIterations: 100, maxCostUsd: 5.0 });
 		expect(budget.iterationsRemaining).toBe(99); // only the LLM turn counts
 	});
+
+	it("subtracts child.result cost/iterations so a recovered root loses child-flow headroom (F3)", () => {
+		const entries: SessionLogEntry[] = [
+			sessionStart("user"),
+			turnComplete(1, "Caller", "x", 1.0), // own LLM turn: -1 iter, -$1
+			// run_flow child that spent $2.50 across 4 turns (recorded on the parent log).
+			{ type: "child.result", turn: 1, child_session_id: "child-1", text: "ok", stop_reason: "FLOW_COMPLETE", cost_usd: 2.5, iterations: 4, ts: TS },
+		];
+		const budget = recovery.rebuildBudget(entries, { maxIterations: 100, maxCostUsd: 5.0 });
+		expect(budget.costRemainingUsd).toBeCloseTo(1.5, 5); // 5.00 − 1.00 − 2.50
+		expect(budget.iterationsRemaining).toBe(95); // 100 − 1 (own) − 4 (child)
+	});
+
+	it("defaults a legacy child.result with no cost fields to zero (unchanged behavior)", () => {
+		const entries: SessionLogEntry[] = [
+			sessionStart("user"),
+			turnComplete(1, "Caller", "x", 1.0),
+			// Pre-F3 child.result: no cost_usd / iterations fields.
+			{ type: "child.result", turn: 1, child_session_id: "child-1", text: "ok", stop_reason: "FLOW_COMPLETE", ts: TS },
+		];
+		const budget = recovery.rebuildBudget(entries, { maxIterations: 100, maxCostUsd: 5.0 });
+		expect(budget.costRemainingUsd).toBeCloseTo(4.0, 5); // only the own turn counts
+		expect(budget.iterationsRemaining).toBe(99);
+	});
 });
 
 // ---------------------------------------------------------------------------

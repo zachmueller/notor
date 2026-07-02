@@ -319,6 +319,107 @@ describe("RunLoop — cascade seam threading", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Stream error / cancellation mapping (F3)
+// ---------------------------------------------------------------------------
+
+describe("RunLoop — stream error / cancellation mapping (F3)", () => {
+	it("maps a provider stream error to stopReason 'error' with the raw errorMessage", async () => {
+		const provider = mockProvider([
+			{ type: "text_delta", text: "partial" },
+			{ type: "error", error: "Bedrock rate limited" },
+			{ type: "message_end", input_tokens: 7, output_tokens: 2 },
+		]);
+		const result = await new RunLoop(buildOptions({ provider })).run("go");
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toBe("Bedrock rate limited");
+		// text still carries the wrapper (parents rely on it) but the raw message is
+		// available first-class in errorMessage.
+		expect(result.text).toContain("[Sub-agent error: Bedrock rate limited]");
+	});
+
+	it("draws down the shared cell and fires onTurnComplete on a stream error", async () => {
+		const completed: number[] = [];
+		const ctx = makeRunContext({ maxDepth: 1, budget: newRootBudget(10, 5) });
+		const provider = mockProvider([
+			{ type: "error", error: "boom" },
+			{ type: "message_end", input_tokens: 3, output_tokens: 1 },
+		]);
+		const result = await new RunLoop(buildOptions({
+			provider,
+			runContext: ctx,
+			hooks: { onTurnComplete: (t) => { completed.push(t); } },
+		})).run("go");
+		expect(result.stopReason).toBe("error");
+		// The errored turn's cost was real → the cell was decremented AND the hook fired.
+		expect(ctx.budget.iterationsRemaining).toBe(9);
+		expect(completed).toEqual([1]);
+	});
+
+	it("maps a mid-stream abort to stopReason 'cancelled' and fires onTurnComplete", async () => {
+		const controller = new AbortController();
+		const completed: number[] = [];
+		const provider: LLMProvider = {
+			sendMessage: vi.fn((): AsyncIterable<StreamChunk> => (async function* () {
+				yield { type: "text_delta" as const, text: "partial" };
+				controller.abort();
+				yield { type: "text_delta" as const, text: " more" };
+				yield { type: "message_end" as const, input_tokens: 4, output_tokens: 2 };
+			})()),
+			listModels: vi.fn(async () => []),
+			getTokenCount: vi.fn(() => 0),
+			supportsStreaming: vi.fn(() => true),
+			validateConnection: vi.fn(async () => true),
+		} as unknown as LLMProvider;
+		const result = await new RunLoop(buildOptions({
+			provider,
+			runContext: makeRunContext({ abort: controller.signal }),
+			hooks: { onTurnComplete: (t) => { completed.push(t); } },
+		})).run("go");
+		expect(result.stopReason).toBe("cancelled");
+		expect(result.text).toContain("[Sub-agent cancelled]");
+		expect(completed).toEqual([1]);
+	});
+
+	it("maps a pre-turn abort to stopReason 'cancelled'", async () => {
+		const parent = new AbortController();
+		parent.abort();
+		const result = await new RunLoop(buildOptions({
+			provider: mockProvider(textStream("unused")),
+			runContext: makeRunContext({ abort: parent.signal }),
+		})).run("go");
+		expect(result.stopReason).toBe("cancelled");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Wind-down turn accounting (F3 §3.3.1)
+// ---------------------------------------------------------------------------
+
+describe("RunLoop — wind-down accounting (F3)", () => {
+	it("decrements the shared cell for the wind-down turn and fires onTurnComplete for it", async () => {
+		const completed: number[] = [];
+		const ctx = makeRunContext({ maxDepth: 1, budget: newRootBudget(10, 5) });
+		const loopStream = toolCallStream("tc", "search_vault", { q: "x" }, 5, 3);
+		// iterationCap 2 → two tool-calling turns, then a wind-down summary turn.
+		const streams = [ [...loopStream], [...loopStream], textStream("Summary.", 8, 4) ];
+		const result = await new RunLoop(buildOptions({
+			provider: mockProvider(...streams),
+			dispatcher: mockDispatcher(searchTools()),
+			toolDefinitions: [searchToolDef],
+			iterationCap: 2,
+			runContext: ctx,
+			hooks: { onTurnComplete: (t) => { completed.push(t); } },
+		})).run("loop");
+		expect(result.stopReason).toBe("iteration_cap");
+		// Two loop turns + the wind-down turn each drew down one iteration → 10 - 3 = 7.
+		expect(ctx.budget.iterationsRemaining).toBe(7);
+		expect(ctx.subtreeConsumed.iterations).toBe(3);
+		// onTurnComplete fired for the two loop turns AND the wind-down turn.
+		expect(completed).toEqual([1, 2, 2]);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Budget accounting
 // ---------------------------------------------------------------------------
 

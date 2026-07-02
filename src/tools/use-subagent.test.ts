@@ -266,6 +266,33 @@ describe("UseSubagentTool", () => {
 			expect(mockRunFn).toHaveBeenCalledWith("Find notes about testing");
 		});
 
+		it("returns success:false when the sub-agent stopped on a stream error (F3)", async () => {
+			mockRunFn.mockResolvedValueOnce(makeSubAgentResult({
+				text: "[Sub-agent error: Bedrock rate limited]",
+				stopReason: "error",
+			}));
+			const tool = createTool();
+			const result = await tool.execute(
+				{ profile: "search-vault", task: "Find notes" },
+				{ mode: "act" },
+			);
+			expect(result.success).toBe(false);
+			expect(result.result).toContain("Bedrock rate limited");
+		});
+
+		it("returns success:true for a cancelled sub-agent (partial result still usable)", async () => {
+			mockRunFn.mockResolvedValueOnce(makeSubAgentResult({
+				text: "Partial work\n\n[Sub-agent cancelled]",
+				stopReason: "cancelled",
+			}));
+			const tool = createTool();
+			const result = await tool.execute(
+				{ profile: "search-vault", task: "Find notes" },
+				{ mode: "act" },
+			);
+			expect(result.success).toBe(true);
+		});
+
 		it("threads onProgress callback through to SubAgentRunner", async () => {
 			const onProgress = vi.fn();
 			const tool = createTool();
