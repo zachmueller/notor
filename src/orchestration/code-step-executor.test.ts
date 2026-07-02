@@ -397,6 +397,21 @@ describe("CodeStepExecutor — helper dispatch from a code step", () => {
 		expect((dispatcher.dispatch as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalledOnce();
 	});
 
+	it("threads the runtime's policyCtx into dispatch (F2 — pure engine gates the code step)", async () => {
+		const dispatcher = dispatcherReturning("ok");
+		const policyCtx = {
+			effectiveConfig: { tools: {} },
+			mode: "act" as const,
+			vaultRootPath: "/vault",
+			sessionAllowedPaths: ["notor/orchestrations/sessions/sess-1/scratchpad"],
+		};
+		const { executor } = makeExecutor({ dispatcher, policyCtx });
+		const code = `await orchestration.callTool("read_note", { path: "x.md" }); return orchestration.emit("done");`;
+		await executor.execute(request(step({ bodyContent: fenced("ts", code) })));
+		const call = (dispatcher.dispatch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
+		expect(call[6]).toBe(policyCtx); // policyCtx (7th positional)
+	});
+
 	it("a dispatch rejection inside the step surfaces as {step}.code_error", async () => {
 		const dispatcher = {
 			dispatch: vi.fn(async () => ({ tool_name: "t", success: false, result: "", error: "denied" })),

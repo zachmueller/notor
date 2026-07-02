@@ -463,8 +463,13 @@ export class ToolDispatcher {
 				return result;
 			}
 
+			// Approval resolution (approval ≠ policy — kept in the dispatcher). Prefer
+			// the per-call callback (sessions), falling back to the instance callback
+			// set via setApprovalCallback — the sub-agent seam. Preserved so the seam
+			// keeps working when the pure branch becomes the only branch (Phase D).
+			const approvalCb = perCallApprovalCallback ?? this.approvalCallback;
+
 			if (!decision.autoApproved) {
-				const approvalCb = perCallApprovalCallback;
 				if (!approvalCb) {
 					log.warn("No approval callback set, auto-approving", { toolName });
 				} else {
@@ -493,8 +498,11 @@ export class ToolDispatcher {
 						return result;
 					}
 				}
-			} else if (perCallApprovalCallback) {
-				void perCallApprovalCallback(toolCall, abortSignal, messageId, true);
+			} else if (approvalCb && !tool.internal) {
+				// Auto-approved: render the collapsed diff for after-the-fact review.
+				// Internal tools (only update_tasks) stay invisible — matching the
+				// legacy `else if (tool.internal)` bypass, which fired no render.
+				void approvalCb(toolCall, abortSignal, messageId, true);
 			}
 
 			// Mark as approved
@@ -506,6 +514,11 @@ export class ToolDispatcher {
 			this.events.onToolCallStatusChanged?.(toolCall, messageId);
 		} else {
 			// --- Legacy inline policy checks (no policyCtx provided) ---
+			// F2 tripwire (Phase C.3): after all five contexts pass a policyCtx this
+			// branch is unreachable in production. A hit means a caller regressed to
+			// omitting the ctx — captured for a release before the branch is deleted
+			// (Phase D, gated on this line never firing).
+			log.error("LEGACY POLICY PATH HIT — policyCtx was not provided", { toolName, mode });
 
 			// 2. Enabled check — block disabled tools before any other check (FR-83)
 			if (this.effectiveToolConfig) {

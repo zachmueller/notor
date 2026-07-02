@@ -281,7 +281,21 @@ async function testPlanModeBlocksWriteRegardlessOfAutoApprove(ctx: TestContext):
 		const dispatcher = plugin.getToolDispatcher?.();
 		if (!dispatcher) return { error: "dispatcher-not-found" };
 		try {
-			const res = await dispatcher.dispatch(toolName, {}, "plan", "test-plan-block");
+			// F2: build a policy context so dispatch takes the pure engine (the
+			// legacy branch is release-gated for deletion and logs a tripwire on
+			// hit). Sourced from the active orchestrator's effective config +
+			// settings + vault root — the same inputs the real chat path uses.
+			const orchestrator = plugin.getActiveOrchestrator?.();
+			const effectiveConfig = orchestrator?.getEffectiveToolConfig?.() ?? { tools: {} };
+			const policyCtx = {
+				effectiveConfig,
+				mode: "plan",
+				domainDenylist: plugin.settings?.domain_denylist,
+				vaultRootPath: plugin.vaultRootPath ?? "",
+			};
+			const res = await dispatcher.dispatch(
+				toolName, {}, "plan", "test-plan-block", undefined, undefined, policyCtx,
+			);
 			return { success: res.success, error: res.error ?? null };
 		} catch (e: any) {
 			return { threw: true, error: e.message };

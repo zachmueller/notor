@@ -46,10 +46,10 @@ the legacy branch alone honors orchestration scratchpad allow-paths (dispatcher.
 Builders own context assembly — do **not** have RunLoop assemble it (it lacks
 `effectiveConfig`/`vaultRootPath`).
 
-- [ ] **B.1** Add `policyCtx?: ToolPolicyContext` to `RunLoopOptions`
+- [x] **B.1** Add `policyCtx?: ToolPolicyContext` to `RunLoopOptions`
       (`run-loop/types.ts:336–370`). RunLoop passes `this.options.policyCtx` instead of
       `undefined` at `run-loop.ts:377` (flow branch) and in the sub-agent branch (:356–365).
-- [ ] **B.2 Orchestration conversation steps** — `makeRuntimeFactory.build()`
+- [x] **B.2 Orchestration conversation steps** — `makeRuntimeFactory.build()`
       (`launch.ts:281–345`) already has every input: `effective` (:314), settings →
       `domain_denylist` (:284), `plugin.vaultRootPath` (:299), the `resolveVaultPath` closure
       (:300–303), `mode` (in build args, currently not destructured), `orchestrationContext`
@@ -57,24 +57,24 @@ Builders own context assembly — do **not** have RunLoop assemble it (it lacks
       scratchpad paths). Return ctx on `StepRuntime`, thread through
       `StepTurnExecutor.executeConversationStep` (`step-turn-executor.ts:298–314`) into
       `RunLoopOptions`.
-- [ ] **B.3 Orchestration code steps** — `makeCodeStepRuntimeFactory.build()`
+- [x] **B.3 Orchestration code steps** — `makeCodeStepRuntimeFactory.build()`
       (`launch.ts:407–465`, same inputs; `mode` available at the dispatch site,
       `orchestration-helper.ts:238`). Pass ctx into `buildOrchestrationHelper`; use it at both
       dispatch calls (`orchestration-helper.ts:235–249`), replacing the `undefined // policyCtx`
       at :242.
-- [ ] **B.4 Sub-agents** — `use-subagent.ts` (dispatcher assembly :378–393; `intersectedConfig`
+- [x] **B.4 Sub-agents** — `use-subagent.ts` (dispatcher assembly :378–393; `intersectedConfig`
       :331; mode :400) and the extension path `sub-agent-utils.ts:110–132`: build ctx from the
       intersected config. Sub-agents pass no `settings` into RunLoop
       (`sub-agent-runner.ts:152–154`) — source `domainDenylist` from the tool's settings
       reference at assembly time.
-- [ ] **B.5 Mobile gate.** Where `vaultRootPath` is unavailable
+- [x] **B.5 Mobile gate.** Where `vaultRootPath` is unavailable
       (`orchestrator.ts:1818–1821`, `workflow-executor.ts` fallbacks): first write a unit test
       locking `enforcePathConstraints` behavior with `vaultRootPath: ""` (precedented — the
       legacy branch passes `this.vaultRootPath ?? ""`, dispatcher.ts:663–670). If safe, pass
       ctx with `""` and remove the mobile legacy fallback for chat/workflows too. If unsafe,
       keep the mobile fallback explicitly scoped — and note that Phase D's deletion must then
       wait or mobile needs a sentinel ctx.
-- [ ] **B.6 Regression-gate arity updates** — tests dictate call shape; update deliberately,
+- [x] **B.6 Regression-gate arity updates** — tests dictate call shape; update deliberately,
       once, in the same commit as the call-site change (never wholesale
       `expect.anything()`): `run-loop.test.ts:286–300` (11-arg sub-agent assertion) and
       `:302–318` (13-arg flow assertion); `sub-agent-runner.test.ts:210–222, 547–559`;
@@ -82,30 +82,39 @@ Builders own context assembly — do **not** have RunLoop assemble it (it lacks
       `tool-orchestration.ts:289–294`. `policyCtx` moves from `undefined` to
       `expect.objectContaining({...})`. **Do not absorb the F8 options-object refactor** unless
       it turns out trivially cheap.
-- [ ] **B.7** Keep all `setEffectiveToolConfig` calls (`launch.ts:319, 436`, etc.) — the legacy
+- [x] **B.7** Keep all `setEffectiveToolConfig` calls (`launch.ts:319, 436`, etc.) — the legacy
       branch still reads that field until Phase D.
 
 ## Phase C — Behavior fixes + approval preservation + tripwire (commit 4) → **Release N**
 
-- [ ] **C.1** Suppress the auto-approved *render* for `tool.internal` on the pure path
+- [x] **C.1** Suppress the auto-approved *render* for `tool.internal` on the pure path
       (dispatcher.ts:496–498 currently fires the collapsed-diff card; the legacy bypass at
       :503–506 doesn't — `update_tasks` must stay invisible).
-- [ ] **C.2** Approval semantics: preserve, don't reform. The instance-callback fallback
+- [x] **C.2** Approval semantics: preserve, don't reform. The instance-callback fallback
       (`perCallApprovalCallback ?? this.approvalCallback`, :599) stays **in the dispatcher
       approval section** (approval ≠ policy) and must survive into the pure branch before
       deletion so the sub-agent seam (`setApprovalCallback`, :202–204) keeps working. Headless
       contexts still have no approval callback → warn + auto-approve (:607–608) — unchanged;
       the point is that *policy* (command patterns, paths, plan-mode) now gates them first.
-- [ ] **C.3** Tripwire: first line of the legacy `else` branch →
+- [x] **C.3** Tripwire: first line of the legacy `else` branch →
       `log.error("LEGACY POLICY PATH HIT — policyCtx was not provided", { toolName, mode })`.
       Should be unreachable once all five contexts pass ctx.
-- [ ] **C.4** Re-verify and fix the e2e caller the June plan flagged:
+- [x] **C.4** Re-verify and fix the e2e caller the June plan flagged:
       `e2e/scripts/mcp-auto-approve-test.ts` omitted policyCtx as of June.
-- [ ] **C.5** New tests: command patterns headless (orchestration-style dispatch with
-      intersected config — blocked pattern blocks despite `auto_approve: true`; allowed pattern
-      auto-approves); RunLoop threading (policyCtx forwarded on both branches);
+- [x] **C.5** New tests: command patterns headless (orchestration-style dispatch with
+      intersected config — blocked pattern **revokes** `auto_approve: true` → `autoApproved:false`;
+      allowed pattern auto-approves); RunLoop threading (policyCtx forwarded on both branches);
       orchestration factories (built ctx contains effective config, mode, scratchpad
       allow-paths).
+      **Semantics note (confirmed 2026-07-02):** a blocked command pattern does NOT hard-`block`
+      on the pure path — it sets `autoApproved:false` (`allowed` stays `true`). In a headless
+      context with no approval callback, dispatch then warns + auto-runs (unchanged). The real
+      tightening is that patterns *participate at all* in headless contexts now; "blocks despite
+      auto_approve" overstates it. Tests assert at `evaluateToolPolicy` (autoApproved), matching
+      the existing precedent in `tool-policy.test.ts`. Hard-blocking would be an out-of-scope
+      behavior change. "RunLoop threading (both branches)" is covered by the updated cascade-seam
+      arity vectors in `run-loop.test.ts`; the conversation-step + code-step ctx threading is
+      locked in `step-turn-executor.emission.test.ts` + `code-step-executor.test.ts`.
 - [ ] **C.6** Release notes: headless contexts gain enforcement they lacked — blocked patterns
       now block; path enforcement now precedes approval (pure ordering: block before
       prompting). That is the fix, not a regression.

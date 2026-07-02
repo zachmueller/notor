@@ -350,3 +350,37 @@ describe("evaluateToolPolicy — path allowlists (FR-84) + sessionAllowedPaths (
 		expect(blocked.allowed).toBe(false);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// F2 §2 / C.5 — command patterns now participate in headless contexts.
+// Before F2, headless dispatch (sub-agents / orchestration steps) ran the legacy
+// branch, which never consulted command patterns. With ctx now threaded, the
+// pure engine gates them: a blocked pattern revokes a blanket auto_approve:true,
+// and an allowed pattern grants auto-approve. (It does NOT hard-block — allowed
+// stays true; a headless run with no approval callback would still warn+run. The
+// tightening is that patterns now participate at all.)
+// ---------------------------------------------------------------------------
+
+describe("evaluateToolPolicy — command patterns in a headless (intersected-config) context", () => {
+	const EXEC_TOOL: DispatchableTool = { name: "execute_command", mode: "write" } as any;
+
+	it("blocked pattern revokes auto_approve:true (the security payoff)", () => {
+		const ctx = makeToolCtx("execute_command", {
+			auto_approve: true,
+			blocked_command_patterns: ["rm *"],
+		});
+		const result = evaluateToolPolicy("execute_command", { command: "rm -rf /" }, EXEC_TOOL, ctx);
+		expect(result.allowed).toBe(true);
+		expect(result.autoApproved).toBe(false);
+	});
+
+	it("allowed pattern grants auto-approve even when auto_approve:false", () => {
+		const ctx = makeToolCtx("execute_command", {
+			auto_approve: false,
+			allowed_command_patterns: ["git *"],
+		});
+		const result = evaluateToolPolicy("execute_command", { command: "git status" }, EXEC_TOOL, ctx);
+		expect(result.allowed).toBe(true);
+		expect(result.autoApproved).toBe(true);
+	});
+});

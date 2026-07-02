@@ -50,8 +50,15 @@ let nextRunResult: {
 	stopReason: "completed",
 };
 
+// Captures the options the last-constructed RunLoop received, so tests can assert
+// what the executor threaded in (e.g. F2 policyCtx).
+let lastRunLoopOptions: Record<string, unknown> | null = null;
+
 vi.mock("../run-loop/run-loop", () => ({
 	RunLoop: class {
+		constructor(options: Record<string, unknown>) {
+			lastRunLoopOptions = options;
+		}
 		async run() {
 			return nextRunResult;
 		}
@@ -117,7 +124,7 @@ function flow(steps: StepDefinition[]): OrchestrationFlow {
 	};
 }
 
-function makeExecutor(): StepTurnExecutor {
+function makeExecutor(runtimeOver: Record<string, unknown> = {}): StepTurnExecutor {
 	return new StepTurnExecutor(
 		{
 			personaManager: { getPersonaByName: async () => null },
@@ -130,6 +137,7 @@ function makeExecutor(): StepTurnExecutor {
 					dispatcher: {} as never,
 					toolDefinitions: [],
 					systemPrompt: "sys",
+					...runtimeOver,
 				}),
 			},
 		},
@@ -244,5 +252,21 @@ describe("StepTurnExecutor — FR-117a emission matrix (F3)", () => {
 			error: null,
 			stack: null,
 		});
+	});
+});
+
+describe("StepTurnExecutor — F2 policyCtx threading (conversation step)", () => {
+	it("forwards the runtime's policyCtx into the step's RunLoopOptions", async () => {
+		setResult({ stopReason: "completed" });
+		const policyCtx = {
+			effectiveConfig: { tools: {} },
+			mode: "act" as const,
+			vaultRootPath: "/vault",
+			sessionAllowedPaths: ["sp"],
+		};
+		lastRunLoopOptions = null;
+		await makeExecutor({ policyCtx }).execute(makeRequest(step(), carriage()));
+		expect(lastRunLoopOptions).not.toBeNull();
+		expect(lastRunLoopOptions!.policyCtx).toBe(policyCtx);
 	});
 });
