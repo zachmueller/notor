@@ -141,14 +141,23 @@ Fakes ready for reuse: `FakeSessionFs` (`session-manager.test.ts:16–33`), `Fak
 
 ## Verification
 
-- [ ] `tsc` + full suite after **each** commit; the 10 orchestration e2e scripts as the
-      integration backstop.
-- [ ] Grep gates: `grep -c "plugin\." src/orchestration/launch*.ts
+- [x] `tsc` + full suite after **each** commit — green at every phase (final: `tsc` clean,
+      1631 tests / 114 files pass, up from 1612 at baseline). **The 10 orchestration e2e scripts
+      were NOT run here** — they require a live Obsidian instance + live Bedrock credentials (real
+      cost), unavailable in this headless environment. Left for the release branch as designed;
+      the pause/resume item below is the one that exercises the injection this task changed.
+- [x] Grep gates: `grep -c "plugin\." src/orchestration/launch*.ts
       src/orchestration/run-lifecycle.ts src/orchestration/child-spawn.ts
-      src/orchestration/recovery-boot.ts` → 0 (all via `host.`);
-      `grep -rn "upsertFlowRun?." src/` → 0;
-      `grep -rn "vault.adapter" src/orchestration/child-spawn.ts` → 0.
-- [ ] `wc -l` sanity: no new module > ~500 lines; barrel < 20.
-- [ ] Pause/resume e2e (`orchestration-terminal-paths-test.ts` covers interactive pause) still
-      passes — the `requestOrchestrationInput` injection touches the runner-deps wiring in two
-      places.
+      src/orchestration/recovery-boot.ts` → **0** (all via `host.`);
+      `grep -rn "upsertFlowRun?." src/` → **0**;
+      `grep -rn "vault.adapter" src/orchestration/child-spawn.ts` → **0**. All pass.
+- [x] `wc -l` sanity: barrel 15 (<20); modules launch-wiring 457 / child-spawn 382 /
+      recovery-boot 340 / orchestration-modals 258 / host 52 — all under. **run-lifecycle.ts is
+      524** (~24 over the soft `~500` ceiling): it carries `launchOrchestration` + chaining +
+      `finalizeRun` + the `ChainDeps` test seam and its docs. Left as-is (splitting the chaining
+      helpers into their own module is a plausible follow-up but was not in this task's scope).
+- [ ] Pause/resume e2e (`orchestration-terminal-paths-test.ts` covers interactive pause) — **not
+      run here** (live-Bedrock e2e; see above). Must be run on the release branch: the
+      `requestOrchestrationInput` injection now flows through `launchOrchestration`/
+      `makeChildFlowSpawner`/`recoverOrchestrations` options from four composition sites in
+      main.ts (was an internal import), so the interactive-pause path needs the live backstop.
