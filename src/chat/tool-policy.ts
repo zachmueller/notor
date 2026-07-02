@@ -63,9 +63,8 @@ export interface PolicyDecision {
 /**
  * Human-readable descriptions for write tools blocked in Plan mode.
  *
- * Single home for the plan-mode message map — the dispatcher's legacy branch
- * imports this too (until that branch is deleted, F2 Phase D). Names are the
- * plugin's real write tools; the fallback covers everything else.
+ * Used by the plan-mode block message in {@link evaluateToolPolicy}. Names are
+ * the plugin's real write tools; the fallback covers everything else.
  */
 export function getWriteToolDescription(toolName: string): string {
 	const descriptions: Record<string, string> = {
