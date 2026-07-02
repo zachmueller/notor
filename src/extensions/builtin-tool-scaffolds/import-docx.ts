@@ -147,16 +147,16 @@ if (!existingFile) {
     imagesSkipped: skippedCount,
     duplicatesSkipped,
   });
-  await utils.noteOpener.openNote(finalNotePath);
+  await utils.notes.open(finalNotePath);
   return \`Note created: \${finalNotePath} (\${markdown.length} characters, \${extractedCount} image(s) extracted, \${duplicatesSkipped} duplicate(s) skipped)\`;
 }
 
 try {
-  await utils.checkpointManager.createCheckpoint(existingFile.path, "import_docx", "");
+  await utils.checkpoints.create(existingFile.path, "import_docx", "");
 } catch { /* non-fatal */ }
 
 await app.vault.process(existingFile, () => markdown);
-utils.staleTracker.updateAfterWrite(existingFile.path, markdown);
+utils.staleContent.updateAfterWrite(existingFile.path, markdown);
 log.info("Imported docx over existing note", {
   source: resolvedPath,
   dest: existingFile.path,
@@ -165,6 +165,6 @@ log.info("Imported docx over existing note", {
   imagesSkipped: skippedCount,
   duplicatesSkipped,
 });
-await utils.noteOpener.openNote(existingFile.path);
+await utils.notes.open(existingFile.path);
 return \`Note updated: \${existingFile.path} (\${markdown.length} characters, \${extractedCount} image(s) extracted, \${duplicatesSkipped} duplicate(s) skipped)\`;`,
 );

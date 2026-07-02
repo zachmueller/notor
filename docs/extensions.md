@@ -396,9 +396,9 @@ All extension code executes with these variables in scope:
 |---|---|
 | `utils.api.version` | Runtime API contract version (currently `1`). Declare `notor-min-api: N` in frontmatter to require at least version N — see [Runtime API version](#runtime-api-version). |
 | `utils.resolveNote(path)` | Resolve a note path (handles bare names, missing `.md`, wikilinks). Returns `TFile \| null`. |
-| `utils.staleTracker` | Record reads and check for concurrent edits before writes. |
-| `utils.checkpointManager` | Create snapshots before destructive operations for rollback. |
-| `utils.noteOpener` | Open notes programmatically in the editor. |
+| `utils.staleContent` | Record reads and check for concurrent edits before writes. Methods: `recordRead(path, content)`, `check(path, currentContent)` → `{ isStale, error }`, `invalidate(path)`, `updateAfterWrite(path, newContent)`, `updateAfterFrontmatterWrite(path, newFullContent)`. |
+| `utils.checkpoints` | Snapshot a note before a destructive write for user rollback. Method: `create(path, toolName, messageId)` → `Checkpoint \| null`. (Restoring checkpoints is intentionally not exposed to extensions.) |
+| `utils.notes` | Open notes programmatically in the editor. Method: `open(path)`. |
 | `utils.logger(name)` | Create a scoped logger (prefixed with `ext:`) — console-only. (Inside an orchestration **code step**, prefer `orchestration.log`, which also persists and surfaces in the run-tree — see [orchestration.md](orchestration.md).) |
 | `utils.resolveAndValidatePath(path, allowedPaths?)` | Validate and resolve filesystem paths against allowed paths. Returns `{ valid: true, resolvedPath }` or `{ valid: false, error }` — check `.valid` first. |
 | `utils.executeShellCommand(cmd, opts?)` | Run a shell command. |
@@ -532,6 +532,16 @@ notor-min-api: 1
 ```
 
 The runtime **refuses to load** an extension whose `notor-min-api` exceeds the version this build provides — it collects a load error naming the file, the required version, and the runtime version, surfaced as a persistent Notice (file-watcher reload) or a summary (Settings → "Reload extensions"). A non-integer `notor-min-api` is likewise a load error. The key is optional: an extension that omits it loads on any build (and is responsible for its own compatibility). Built-in tools do not declare it.
+
+### Migration to API v1
+
+API v1 is a **breaking change** to the runtime surface. If you maintain a vault extension written against an earlier build, update these call sites:
+
+- **Narrowed manager facades.** The live `utils.checkpointManager` / `utils.staleTracker` / `utils.noteOpener` objects are replaced by the narrow facades `utils.checkpoints` / `utils.staleContent` / `utils.notes`:
+  - `checkpointManager.createCheckpoint(path, tool, msgId)` → `checkpoints.create(path, tool, msgId)` (restore/list are no longer exposed to extensions).
+  - `staleTracker.recordRead/check/invalidate/updateAfterWrite/updateAfterFrontmatterWrite(...)` → `staleContent.*` (the same five methods; `serialize`/`restore`/`clear`/`getEntry`/`hasBeenRead` are internal).
+  - `noteOpener.openNote(path)` → `notes.open(path)`.
+- **Webview gating.** `utils.webview` is now present only when the **webview tool** is enabled (Settings → Tools). It previously always existed on desktop; if disabled, its methods throw a message telling you to enable the tool. Declare `notor-min-api: 1` in frontmatter to require this API.
 
 ## Security
 

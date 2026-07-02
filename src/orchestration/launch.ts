@@ -467,13 +467,13 @@ function makeCodeStepRuntimeFactory(
 
 			// utils/libs/obsidian — IDENTICAL to user-defined tools, except the
 			// note-opener honors the orchestration note-opening decision (a code step
-			// may call `utils.noteOpener` directly, bypassing the dispatcher).
+			// may call `utils.notes.open` directly, bypassing the dispatcher).
 			const utils = buildUtils(plugin);
-			utils.noteOpener = new NoteOpener(
+			utils._setNoteOpener(new NoteOpener(
 				plugin.app,
 				openNotesInEditor,
 				settings.focus_notes_on_access,
-			);
+			));
 			utils.abortSignal = abortSignal;
 			// The scaffold task tools (and any orchestration-aware tool reached via
 			// callTool) read the session carriage off utils, exactly as a step turn.

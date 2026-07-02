@@ -1,5 +1,6 @@
 import type { BuilderContext, ExtensionUtils, WebviewElement } from "./types";
 import { logger } from "../../utils/logger";
+import { NoteOpener } from "../../tools/note-opener";
 import { Notice, Platform, normalizePath } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 
@@ -15,10 +16,16 @@ function getAvailableKeys(root: unknown, pathParts: string[]): string {
 }
 
 export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
-	"staleTracker" | "checkpointManager" | "noteOpener" | "logger" |
+	"checkpoints" | "staleContent" | "notes" | "_setNoteOpener" | "logger" |
 	"queue" | "readPluginSettings" | "editPluginSetting" | "notify" | "webview"
 > {
 	const { plugin, conversationId } = ctx;
+
+	// Invocation-scoped note-opener backing the `notes.open` facade. Defaults to
+	// the chat opener from `getNoteOpener()`; UserToolAdapter / the code-step
+	// launcher swap it via `_setNoteOpener` to honor the silent/orchestration
+	// open-notes decision. The facade closure reads this holder at call time.
+	let noteOpener: NoteOpener = plugin.getNoteOpener();
 
 	const webview: ExtensionUtils["webview"] = (() => {
 		if (!Platform.isDesktopApp) return null;
@@ -181,11 +188,29 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 	})();
 
 	return {
-		staleTracker: plugin.getStaleTracker(),
+		// Narrow facades over the live managers (closures over the lazy getters).
+		// Only the methods scaffolds actually consume are exposed; lifecycle /
+		// persistence methods (restore, serialize, setConversationId, …) stay
+		// internal so the frozen runtime surface stays minimal.
+		checkpoints: {
+			create: (notePath, toolName, messageId) =>
+				plugin.getSharedCheckpointManager().createCheckpoint(notePath, toolName, messageId),
+		},
 
-		checkpointManager: plugin.getSharedCheckpointManager(),
+		staleContent: {
+			recordRead: (notePath, content) => plugin.getStaleTracker().recordRead(notePath, content),
+			check: (notePath, currentContent) => plugin.getStaleTracker().check(notePath, currentContent),
+			invalidate: (notePath) => plugin.getStaleTracker().invalidate(notePath),
+			updateAfterWrite: (notePath, newContent) => plugin.getStaleTracker().updateAfterWrite(notePath, newContent),
+			updateAfterFrontmatterWrite: (notePath, newFullContent) =>
+				plugin.getStaleTracker().updateAfterFrontmatterWrite(notePath, newFullContent),
+		},
 
-		noteOpener: plugin.getNoteOpener(),
+		notes: {
+			open: (notePath) => noteOpener.openNote(notePath),
+		},
+
+		_setNoteOpener: (opener) => { noteOpener = opener; },
 
 		logger: (name: string) => logger(`ext:${name}`),
 

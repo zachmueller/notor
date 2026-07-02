@@ -196,17 +196,17 @@ Return a string for success, or throw an Error for failure.
 - \`utils.readNote(path)\` — read a vault note's raw Markdown content (throws if not found)
 - \`utils.resolveNotorPath(subdir)\` — resolve a path under the notor directory
 - \`utils.ensureDirectoryExists(filePath)\` — create intermediate vault directories for a file path
-- \`utils.noteOpener.openNote(path)\` — open a note in the editor
+- \`utils.notes.open(path)\` — open a note in the editor
 
 **Stale-content tracking** (use in write tools to detect concurrent edits):
-- \`utils.staleTracker.recordRead(path, content)\` — call after reading a note
-- \`utils.staleTracker.check(path, currentContent)\` — call before writing; returns \`{ isStale: boolean; error: string | null }\`
-- \`utils.staleTracker.updateAfterWrite(path, newContent)\` — call after a successful write
-- \`utils.staleTracker.invalidate(path)\` — remove tracking for a path
-- \`utils.staleTracker.hasBeenRead(path)\` — returns boolean
+- \`utils.staleContent.recordRead(path, content)\` — call after reading a note
+- \`utils.staleContent.check(path, currentContent)\` — call before writing; returns \`{ isStale: boolean; error: string | null }\`
+- \`utils.staleContent.updateAfterWrite(path, newContent)\` — call after a successful write
+- \`utils.staleContent.updateAfterFrontmatterWrite(path, newFullContent)\` — call after a frontmatter-only write
+- \`utils.staleContent.invalidate(path)\` — remove tracking for a path
 
 **Checkpoints** (creates a user-restorable backup before destructive writes):
-- \`utils.checkpointManager.createCheckpoint(path, toolName, metadata?)\` — call before modifying a file
+- \`utils.checkpoints.create(path, toolName, messageId)\` — call before modifying a file (returns the checkpoint or \`null\`)
 
 **Paths & shell:**
 - \`utils.resolveAndValidatePath(path)\` — returns \`{ valid: true; resolvedPath: string }\` or \`{ valid: false; error: string }\`; always check \`.valid\` before using \`.resolvedPath\`
@@ -263,7 +263,7 @@ Return a string for success, or throw an Error for failure.
 const file = utils.resolveNote(params.path);
 if (!file) throw new Error(\`Note not found: \${params.path}\`);
 const content = await app.vault.read(file);
-utils.staleTracker.recordRead(file.path, content);
+utils.staleContent.recordRead(file.path, content);
 return content;
 \`\`\`
 
@@ -272,11 +272,11 @@ return content;
 const file = utils.resolveNote(params.path);
 if (!file) throw new Error(\`Note not found: \${params.path}\`);
 const current = await app.vault.read(file);
-const staleResult = utils.staleTracker.check(file.path, current);
+const staleResult = utils.staleContent.check(file.path, current);
 if (staleResult.isStale) throw new Error(staleResult.error!);
-await utils.checkpointManager.createCheckpoint(file.path, "my_tool");
+await utils.checkpoints.create(file.path, "my_tool", "");
 await app.vault.modify(file, params.new_content);
-utils.staleTracker.updateAfterWrite(file.path, params.new_content);
+utils.staleContent.updateAfterWrite(file.path, params.new_content);
 return \`Updated \${file.path}\`;
 \`\`\`
 

@@ -33,7 +33,7 @@ if (!existingFile) {
   await app.vault.create(createPath, params.content as string);
 
   log.info("Created new note", { path: createPath, chars: (params.content as string).length });
-  await utils.noteOpener.openNote(createPath);
+  await utils.notes.open(createPath);
 
   return \`Note created: \${createPath} (\${(params.content as string).length} characters)\`;
 }
@@ -41,9 +41,9 @@ if (!existingFile) {
 // ---- Existing file: stale check → checkpoint → frontmatter-safe write ----
 const currentContent = await app.vault.read(existingFile);
 
-const staleResult = utils.staleTracker.check(existingFile.path, currentContent);
+const staleResult = utils.staleContent.check(existingFile.path, currentContent);
 if (staleResult.isStale) {
-  utils.staleTracker.recordRead(existingFile.path, currentContent);
+  utils.staleContent.recordRead(existingFile.path, currentContent);
   return {
     __toolError: true,
     error: "Note content has changed since last read. The current content is included below — retry your edit based on this content.",
@@ -53,7 +53,7 @@ if (staleResult.isStale) {
 
 // Checkpoint before overwriting (non-fatal)
 try {
-  await utils.checkpointManager.createCheckpoint(existingFile.path, "write_note", "");
+  await utils.checkpoints.create(existingFile.path, "write_note", "");
 } catch { /* non-fatal */ }
 
 // Frontmatter preservation: if existing note has frontmatter but new content doesn't,
@@ -74,10 +74,10 @@ if (existingFm.exists && !newFm.exists) {
 await app.vault.process(existingFile, () => finalContent);
 
 // Update stale tracker so subsequent writes don't falsely detect staleness
-utils.staleTracker.updateAfterWrite(existingFile.path, finalContent);
+utils.staleContent.updateAfterWrite(existingFile.path, finalContent);
 
 log.info("Modified existing note", { path: existingFile.path, chars: finalContent.length });
-await utils.noteOpener.openNote(existingFile.path);
+await utils.notes.open(existingFile.path);
 
 return \`Note updated: \${existingFile.path} (\${finalContent.length} characters)\`;`,
 );

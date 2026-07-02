@@ -51,7 +51,7 @@ if (existing) {
 
 // Checkpoint before destructive operation (non-fatal)
 try {
-  await utils.checkpointManager.createCheckpoint(file.path, "move_note", "");
+  await utils.checkpoints.create(file.path, "move_note", "");
 } catch { /* non-fatal */ }
 
 // Ensure destination directory exists

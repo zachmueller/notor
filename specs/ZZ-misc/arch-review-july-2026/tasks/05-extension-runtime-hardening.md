@@ -66,7 +66,7 @@ Three independently landable parts = three phases, each its own commit(s).
 
 ## Phase 3 — Facade narrowing + webview gate (commits 3–4) — the gate for worker isolation
 
-- [ ] **3.1** Replace the three live-instance members of `ExtensionUtils`
+- [x] **3.1** Replace the three live-instance members of `ExtensionUtils`
       (`plugin-utils.ts:184–188`) with minimal facades (closures over the plugin's lazy
       getters):
       - `checkpoints: { create(notePath, toolName, messageId) }` — the only method scaffolds
@@ -79,13 +79,13 @@ Three independently landable parts = three phases, each its own commit(s).
         (`manager.ts:106–114`, `launch.ts:442–446`) becomes an internal detail behind the
         facade (the closure reads the invocation-scoped opener, preserving the orchestration
         open-notes decision).
-- [ ] **3.2** Migrate the **8** scaffolds (7 `createCheckpoint` sites: `delete-note.ts:35`,
+- [x] **3.2** Migrate the **8** scaffolds (7 `createCheckpoint` sites: `delete-note.ts:35`,
       `import-docx.ts:155`, `manage-tags.ts:41`, `move-note.ts:54`, `replace-in-note.ts:101`,
       `update-frontmatter.ts:45`, `write-note.ts:56`; plus staleContent/notes call sites).
       Delete the raw members from `ExtensionUtils` in the **same release** — D-compat clean
       break (pre-1.0), with the migration note (June plan §1 lines 191–198 has ready text).
       Update `docs/extensions.md:398–400` and the tool-creator persona.
-- [ ] **3.3** Code steps inherit the narrowing automatically (same `buildUtils`) — this turns
+- [x] **3.3** Code steps inherit the narrowing automatically (same `buildUtils`) — this turns
       the orchestration helper's isolation from advisory to real for these three surfaces.
       `libs.fs` and `app` remain: worker isolation is the deferred answer; don't half-build it.
 - [ ] **3.4 Webview gate** (this task's only novel scope vs. June): in `buildPluginUtils`,

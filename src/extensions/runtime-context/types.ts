@@ -1,7 +1,6 @@
 import type NotorPlugin from "../../main";
 import type { Logger } from "../../utils/logger";
-import type { StaleContentTracker } from "../../chat/stale-tracker";
-import type { CheckpointManager } from "../../checkpoints/checkpoint";
+import type { StaleCheckResult } from "../../chat/stale-tracker";
 import type { NoteOpener } from "../../tools/note-opener";
 import type { ShellExecuteOptions, ShellExecuteResult } from "../../shell/shell-executor";
 import type { TempOutputSpiller } from "../../shell/temp-output-spiller";
@@ -12,7 +11,7 @@ import type { DocxImageData } from "../../tools/docx-image-utils";
 import type { RawComment, Comment } from "../../tools/docx-comment-parser";
 import type { WebSearchApiResult, WebSearchResolvedConfig } from "../../web-search/queue";
 import type { SubAgentResult } from "../../chat/sub-agent-runner";
-import type { Message } from "../../types";
+import type { Message, Checkpoint } from "../../types";
 import type { MemoryNote } from "../../memory/note-format";
 import type { ResolveConceptResult } from "../../memory/concept-resolver";
 import type { PendingMemoryManager } from "../../memory/pending-memory-manager";
@@ -102,9 +101,35 @@ export interface ExtensionUtils {
 	 */
 	api: { version: number };
 	resolveNote: (path: string) => TFile | null;
-	staleTracker: StaleContentTracker;
-	checkpointManager: CheckpointManager;
-	noteOpener: NoteOpener;
+	/**
+	 * Checkpoint facade — snapshot a note before a destructive write for later
+	 * user rollback. Deliberately narrow: only `create` is exposed (extensions
+	 * cannot restore or enumerate arbitrary checkpoints).
+	 */
+	checkpoints: {
+		/** Snapshot a note's current content for later rollback. Returns null on failure (non-blocking). */
+		create: (notePath: string, toolName: string, messageId: string) => Promise<Checkpoint | null>;
+	};
+	/**
+	 * Stale-content facade — the 5 methods write tools use to detect concurrent
+	 * edits. `serialize`/`restore`/`clear`/`getEntry`/`hasBeenRead` stay internal
+	 * to the plugin.
+	 */
+	staleContent: {
+		recordRead: (notePath: string, content: string) => void;
+		check: (notePath: string, currentContent: string) => StaleCheckResult;
+		invalidate: (notePath: string) => void;
+		updateAfterWrite: (notePath: string, newContent: string) => void;
+		updateAfterFrontmatterWrite: (notePath: string, newFullContent: string) => void;
+	};
+	/**
+	 * Notes facade — open a note in the editor. The underlying per-invocation
+	 * `NoteOpener` (which encodes the chat/sub-agent/orchestration open-notes
+	 * decision) is an internal detail behind this facade.
+	 */
+	notes: {
+		open: (notePath: string) => Promise<void>;
+	};
 	logger: (name: string) => Logger;
 	resolveAndValidatePath: (
 		path: string,
@@ -412,6 +437,15 @@ export interface ExtensionUtils {
 				iterations: number;
 		  }>)
 		| null;
+	/**
+	 * Replace the note-opener backing {@link ExtensionUtils.notes}.open for this
+	 * invocation. Set by UserToolAdapter (silent/orchestration selection) and the
+	 * orchestration code-step launcher; the `notes.open` closure reads the holder
+	 * this mutates, preserving the open-notes decision without exposing the raw
+	 * `NoteOpener`.
+	 * @internal
+	 */
+	_setNoteOpener: (opener: NoteOpener) => void;
 	/** AbortSignal for the current tool call — only set per-invocation by UserToolAdapter. */
 	abortSignal?: AbortSignal;
 	/** Progress callback for long-running tools — only set per-invocation by UserToolAdapter. */

@@ -32,7 +32,7 @@ for (const [sourcePath, links] of Object.entries(app.metadataCache.resolvedLinks
 
 // Checkpoint before destructive operation (non-fatal) — second recovery path.
 try {
-  await utils.checkpointManager.createCheckpoint(file.path, "delete_note", "");
+  await utils.checkpoints.create(file.path, "delete_note", "");
 } catch { /* non-fatal */ }
 
 // Recoverable delete: honors the user's configured Obsidian trash location.

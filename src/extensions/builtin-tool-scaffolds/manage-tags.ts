@@ -38,7 +38,7 @@ if (!file) throw new Error(\`Note not found: \${params.path}\`);
 
 // Create checkpoint before modifying (non-fatal)
 try {
-  await utils.checkpointManager.createCheckpoint(file.path, "manage_tags", "");
+  await utils.checkpoints.create(file.path, "manage_tags", "");
 } catch { /* non-fatal */ }
 
 // -- Helpers --
@@ -94,7 +94,7 @@ await app.fileManager.processFrontMatter(file, (frontmatter: any) => {
 // Update stale tracker so subsequent body-write tools don't false-positive
 try {
   const updatedContent = await app.vault.read(file);
-  utils.staleTracker.updateAfterFrontmatterWrite(file.path, updatedContent);
+  utils.staleContent.updateAfterFrontmatterWrite(file.path, updatedContent);
 } catch { /* non-fatal */ }
 
 const parts: string[] = [];

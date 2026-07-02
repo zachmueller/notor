@@ -86,9 +86,9 @@ if (!file) throw new Error(\`Note not found: \${params.path}\`);
 // Stale content check
 const currentContent = await app.vault.read(file);
 
-const staleResult = utils.staleTracker.check(file.path, currentContent);
+const staleResult = utils.staleContent.check(file.path, currentContent);
 if (staleResult.isStale) {
-  utils.staleTracker.recordRead(file.path, currentContent);
+  utils.staleContent.recordRead(file.path, currentContent);
   return {
     __toolError: true,
     error: "Note content has changed since last read. The current content is included below — retry your edit based on this content.",
@@ -98,7 +98,7 @@ if (staleResult.isStale) {
 
 // Checkpoint before write (non-fatal)
 try {
-  await utils.checkpointManager.createCheckpoint(file.path, "replace_in_note", "");
+  await utils.checkpoints.create(file.path, "replace_in_note", "");
 } catch { /* non-fatal */ }
 
 // Apply changes atomically via vault.process —
@@ -146,7 +146,7 @@ try {
     const errorMsg = failedReason === "not_unique"
       ? \`Edit \${failedBlockIndex} matched \${failedCount} locations in \${params.path}. Add surrounding context (2–4 lines) so it matches exactly one place. No changes were applied. The text to find was: "\${preview}"\`
       : \`Edit \${failedBlockIndex} did not match any text in \${params.path}. No changes were applied. The text to find was: "\${preview}"\`;
-    utils.staleTracker.recordRead(file.path, currentContent);
+    utils.staleContent.recordRead(file.path, currentContent);
     return {
       __toolError: true,
       error: errorMsg,
@@ -159,15 +159,15 @@ try {
 // Update stale tracker with new content
 try {
   const newContent = await app.vault.read(file);
-  utils.staleTracker.updateAfterWrite(file.path, newContent);
+  utils.staleContent.updateAfterWrite(file.path, newContent);
 } catch {
-  utils.staleTracker.invalidate(file.path);
+  utils.staleContent.invalidate(file.path);
 }
 
 log.info("Applied replacements", { path: params.path, count: params.changes.length, noOps: noOpBlocks.length });
 
 // Open in editor
-await utils.noteOpener.openNote(file.path);
+await utils.notes.open(file.path);
 
 const applied = params.changes.length - noOpBlocks.length;
 let msg = \`Applied \${applied} replacement\${applied === 1 ? "" : "s"} to \${params.path}\`;

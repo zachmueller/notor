@@ -101,8 +101,8 @@ function runReadNote(opts: RunOpts) {
 			if (src.unreadable) throw new Error(`Cannot read: ${p}`);
 			return src.content;
 		}),
-		staleTracker: { recordRead },
-		noteOpener: { openNote },
+		staleContent: { recordRead },
+		notes: { open: openNote },
 	};
 
 	const params: Record<string, unknown> = { path: targetPath, ...(opts.params ?? {}) };

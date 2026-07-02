@@ -88,10 +88,10 @@ if (params.include_frontmatter) {
 
 // Record full content (not stripped) so write tools can compare against actual file state.
 // Use file.path (canonical) so stale checks work regardless of input spelling.
-utils.staleTracker.recordRead(file.path, fullContent);
+utils.staleContent.recordRead(file.path, fullContent);
 
 // Open the note in the editor if configured
-await utils.noteOpener.openNote(file.path);
+await utils.notes.open(file.path);
 
 log.debug("Read note successfully", { path: params.path, contentLength: returnContent.length });
 

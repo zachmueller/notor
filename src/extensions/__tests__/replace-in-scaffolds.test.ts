@@ -55,14 +55,14 @@ function runReplaceInNote(opts: {
 		logger: noopLogger,
 		resolveNote: vi.fn(() => file),
 		resilientIndexOf,
-		staleTracker: {
+		staleContent: {
 			check: vi.fn(() => ({ isStale: !!opts.stale })),
 			recordRead: vi.fn(),
 			updateAfterWrite: vi.fn(),
 			invalidate: vi.fn(),
 		},
-		checkpointManager: { createCheckpoint: vi.fn(async () => {}) },
-		noteOpener: { openNote: vi.fn(async () => {}) },
+		checkpoints: { create: vi.fn(async () => {}) },
+		notes: { open: vi.fn(async () => {}) },
 	};
 
 	const params = { path: "note.md", changes: opts.changes };

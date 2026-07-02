@@ -105,13 +105,13 @@ export class UserToolAdapter implements Tool {
 			// `open_notes_on_access` setting (focus still follows the global setting).
 			// Otherwise the chat-default opener from `getNoteOpener()` is used as-is.
 			if (options?.silentNoteOpener || options?.noteOpenerEnabled === false) {
-				utils.noteOpener = new NoteOpener(this.plugin.app, false, false);
+				utils._setNoteOpener(new NoteOpener(this.plugin.app, false, false));
 			} else if (options?.noteOpenerEnabled === true) {
-				utils.noteOpener = new NoteOpener(
+				utils._setNoteOpener(new NoteOpener(
 					this.plugin.app,
 					true,
 					this.plugin.settings.focus_notes_on_access,
-				);
+				));
 			}
 			if (options?.orchestrationContext) {
 				// Per-step orchestration carriage — lets the `emit_event` scaffold
