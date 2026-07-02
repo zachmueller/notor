@@ -61,3 +61,52 @@ export class TFile extends TAbstractFile {
 export class TFolder extends TAbstractFile {
 	children: TAbstractFile[] = [];
 }
+
+/**
+ * Minimal `Modal` / `FuzzySuggestModal` / `ButtonComponent` stubs. Inert — they
+ * only need to exist as constructable base classes so modules that `extends` them
+ * (e.g. the orchestration command UI) load under the mock. Tests that exercise a
+ * modal's behavior construct it and call its methods directly.
+ */
+export class Modal {
+	app: unknown;
+	contentEl: unknown = {};
+	constructor(app?: unknown) {
+		this.app = app;
+	}
+	open(): void {}
+	close(): void {}
+	onOpen(): void {}
+	onClose(): void {}
+}
+
+export class FuzzySuggestModal<T> {
+	app: unknown;
+	resultContainerEl: unknown = {};
+	constructor(app?: unknown) {
+		this.app = app;
+	}
+	setPlaceholder(_placeholder: string): void {}
+	getItems(): T[] {
+		return [];
+	}
+	getItemText(_item: T): string {
+		return "";
+	}
+	onChooseItem(_item: T): void {}
+	open(): void {}
+	close(): void {}
+}
+
+export class ButtonComponent {
+	constructor(_containerEl?: unknown) {}
+	setButtonText(_text: string): this {
+		return this;
+	}
+	setCta(): this {
+		return this;
+	}
+	onClick(_cb: () => void): this {
+		return this;
+	}
+}

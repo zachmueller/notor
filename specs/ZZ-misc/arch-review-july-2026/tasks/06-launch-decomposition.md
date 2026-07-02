@@ -103,14 +103,19 @@ Fakes ready for reuse: `FakeSessionFs` (`session-manager.test.ts:16–33`), `Fak
       extend if gaps remain after the move.
 - [ ] **3.2** Emission matrix — **written by Task 02** at the step-turn-executor level; do not
       duplicate.
-- [ ] **3.3** `run-lifecycle.test.ts` — the chaining gate (`chainToSuccessor`; frontmatter key
+- [x] **3.3** `run-lifecycle.test.ts` — the chaining gate (`chainToSuccessor`; frontmatter key
       `notor-on-complete-flow` → `flow.onCompleteFlow`, `flow-parser.ts:427–428`; gate logic:
       `depth + 1 >= maxDepth || iterationsRemaining <= 0 || costRemainingUsd <= 0`). Asserts:
       chains only on `status === "completed"`; blocked handoff → Notice + **no successor launch
-      and no status change** (the docstring claims FLOW_ERROR on block; the code just Notices —
-      fix the docstring or the code, and lock the choice here); budget cell passed to the
-      successor **by reference**; `parentScratchpadPath` only when
-      `handoffIsolation === "shared"`.
+      and no status change**; budget cell passed to the successor **by reference**;
+      `parentScratchpadPath` only when `handoffIsolation === "shared"`.
+      **Decision locked: fixed the DOCSTRING to match the code** — a blocked handoff Notices and
+      stops the chain, leaving the completed predecessor's status untouched (the code never
+      mutated status to `error`; the old "FLOW_ERROR on block" docstring was the drift). Made
+      `chainToSuccessor` exported + injectable (`resolveSuccessor`/`launch` seams) so the gate is
+      unit-testable without a vault or runner. Added minimal `Modal`/`FuzzySuggestModal`/
+      `ButtonComponent` stubs to `src/__mocks__/obsidian.ts` (the ui module is pulled in
+      transitively through launch-wiring).
 - [ ] **3.4** `recovery-boot.test.ts` — over `FakeRecoveryFs` + a stubbed host: recoverable
       root → resume invoked with rebuilt budget/committedKeys; error sessions marked; liveness
       skip and offered-resume paths (from Task 03).
