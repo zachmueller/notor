@@ -178,10 +178,16 @@ export class VaultSessionFs implements SessionFs {
 		if (dir && !(await this.app.vault.adapter.exists(dir))) {
 			await this.mkdir(dir);
 		}
-		// Atomic write: write to a temp file, then rename over the target.
-		// Rename-over-existing is atomic on the desktop adapter (no torn-state read window).
+		// Atomic write: write to a temp file, then rename over the target. Obsidian's
+		// desktop adapter.rename REFUSES to overwrite an existing file ("Destination
+		// file already exists!"), so the target must be removed first — the same idiom
+		// dedup-cache.ts uses. The remove→rename window is non-atomic but far narrower
+		// than the torn read→mutate→write it replaces.
 		const tmp = norm + ".tmp";
 		await this.app.vault.adapter.write(tmp, data);
+		if (await this.app.vault.adapter.exists(norm)) {
+			await this.app.vault.adapter.remove(norm);
+		}
 		await this.app.vault.adapter.rename(tmp, norm);
 	}
 

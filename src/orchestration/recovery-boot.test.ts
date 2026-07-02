@@ -136,6 +136,9 @@ function fakeHost(sessions: Record<string, { meta?: OrchestrationSessionMeta }>)
 		write: async (p: string, data: string) => {
 			files.set(p, data);
 		},
+		remove: async (p: string) => {
+			files.delete(p);
+		},
 		rename: async (from: string, to: string) => {
 			files.set(to, files.get(from) ?? "");
 			files.delete(from);
