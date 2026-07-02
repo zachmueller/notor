@@ -234,14 +234,21 @@ export interface ResolvedProviderConfig {
 // RunResult — always-both result
 // ---------------------------------------------------------------------------
 
-/** Why a run stopped. The aggregate cost ceiling yields `cost_cap`; a blocked spawn yields `depth_cap`. */
+/**
+ * Why a run stopped. The aggregate cost ceiling yields `cost_cap`; a blocked
+ * spawn yields `depth_cap`. A provider/parser stream error yields `error`
+ * (raw message in {@link RunResult.errorMessage}); a mid-stream or pre-turn
+ * abort yields `cancelled`.
+ */
 export type RunStopReason =
 	| "completed"
 	| "iteration_cap"
 	| "token_limit"
 	| "context_window"
 	| "cost_cap"
-	| "depth_cap";
+	| "depth_cap"
+	| "error"
+	| "cancelled";
 
 /**
  * The result of a `RunLoop.run()`. `structured` is populated only by a terminal
@@ -265,6 +272,12 @@ export interface RunResult {
 	iterationCount: number;
 	/** Why the run stopped. */
 	stopReason: RunStopReason;
+	/**
+	 * Populated when `stopReason === "error"`: the raw provider/parser error
+	 * message. Preserved as a first-class field so consumers never have to
+	 * string-scrape the `[Sub-agent error: …]` wrapper in {@link RunResult.text}.
+	 */
+	errorMessage?: string;
 }
 
 // ---------------------------------------------------------------------------

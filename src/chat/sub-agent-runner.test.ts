@@ -331,7 +331,9 @@ describe("SubAgentRunner", () => {
 			expect(result.text).toContain("Sub-agent error");
 			expect(result.text).toContain("Rate limit exceeded");
 			expect(result.iterationCount).toBe(1);
-			expect(result.stopReason).toBe("completed");
+			// F3: a provider stream error is now an honest `error` stop reason (was
+			// masquerading as `completed`).
+			expect(result.stopReason).toBe("error");
 		});
 
 		it("feeds tool execution errors back to the LLM", async () => {
@@ -389,7 +391,8 @@ describe("SubAgentRunner", () => {
 
 			expect(result.text).toContain("[Sub-agent cancelled]");
 			expect(result.iterationCount).toBe(0);
-			expect(result.stopReason).toBe("completed");
+			// F3: a pre-turn abort is now an honest `cancelled` stop reason.
+			expect(result.stopReason).toBe("cancelled");
 			// Provider should not have been called
 			expect(provider.sendMessage).not.toHaveBeenCalled();
 		});
@@ -422,7 +425,8 @@ describe("SubAgentRunner", () => {
 			const result = await runner.run("Task");
 
 			expect(result.text).toContain("[Sub-agent cancelled]");
-			expect(result.stopReason).toBe("completed");
+			// F3: a mid-stream abort is now an honest `cancelled` stop reason.
+			expect(result.stopReason).toBe("cancelled");
 		});
 
 		it("cleans up parent abort listener on completion", async () => {

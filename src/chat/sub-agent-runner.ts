@@ -9,9 +9,9 @@
  *   `orchestrationContext: undefined`, **no** `settings` (so per-turn cost stays
  *   `0`), and **no** persistence hooks (only `onProgress`);
  * - maps the engine's {@link RunResult} → {@link SubAgentResult} (a strict
- *   subset — `structured` is dropped; the `stopReason` union narrows back to the
- *   four sub-agent reasons, since `cost_cap`/`depth_cap` are unreachable with an
- *   `Infinity` cell and `maxDepth = 0`).
+ *   subset — `structured` is dropped; the `stopReason` union narrows to the
+ *   reachable sub-agent reasons, dropping only `cost_cap`/`depth_cap`, which are
+ *   unreachable with an `Infinity` cell and `maxDepth = 0`).
  *
  * With the aggregate cell at `Infinity` and `maxDepth = 0`, the two-layer
  * decision rule reduces to exactly today's single `iterationCount < iterationCap`
@@ -46,7 +46,9 @@ export type SubAgentStopReason =
 	| "completed"
 	| "iteration_cap"
 	| "token_limit"
-	| "context_window";
+	| "context_window"
+	| "error"
+	| "cancelled";
 
 export interface SubAgentResult {
 	/** Final text response from the sub-agent. */
@@ -157,9 +159,12 @@ export class SubAgentRunner {
 
 		const result = await runLoop.run(taskPrompt);
 
-		// Map RunResult → SubAgentResult (strict subset). `structured` is dropped;
-		// cost_cap/depth_cap are unreachable here (Infinity cell, maxDepth 0), so
-		// the narrowing cast is sound.
+		// Map RunResult → SubAgentResult (strict subset). `structured` is dropped.
+		// `SubAgentStopReason` now includes `error`/`cancelled` (both reachable: a
+		// provider/parser stream error and a parent/mid-stream abort respectively).
+		// The narrowing cast remains sound because the ONLY `RunStopReason` members
+		// `SubAgentStopReason` omits — `cost_cap`/`depth_cap` — stay unreachable here
+		// (fresh both-`Infinity` cell + `maxDepth = 0`).
 		return {
 			text: result.text,
 			messages: result.messages,

@@ -475,7 +475,11 @@ export class UseSubagentTool implements Tool {
 
 		return {
 			tool_name: USE_SUBAGENT_TOOL_NAME,
-			success: true,
+			// A provider/parser stream error is an honest failure — surface it as
+			// `success: false` (matching `run_flow`'s convention) rather than passing
+			// off the `[Sub-agent error: …]` text as a successful result. A `cancelled`
+			// sub-agent still returns its partial text as success (unchanged).
+			success: result.stopReason !== "error",
 			result: result.text,
 			// INT-047: the shared child_run_metadata block (single-run totals for a
 			// sub-agent). `name` is the generalized label; `profile_name` is retained

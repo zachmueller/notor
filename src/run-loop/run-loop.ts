@@ -148,7 +148,7 @@ export class RunLoop {
 						messages,
 						tokenUsage,
 						iterationCount,
-						stopReason: "completed",
+						stopReason: "cancelled",
 					};
 				}
 
@@ -244,7 +244,8 @@ export class RunLoop {
 						messages,
 						tokenUsage,
 						iterationCount,
-						stopReason: "completed",
+						stopReason: "error",
+						errorMessage: streamResult.error,
 					};
 				}
 
@@ -256,7 +257,7 @@ export class RunLoop {
 						messages,
 						tokenUsage,
 						iterationCount,
-						stopReason: "completed",
+						stopReason: "cancelled",
 					};
 				}
 
