@@ -234,7 +234,28 @@ function offerResumeNotice(
 				}),
 			);
 		});
-	new ButtonComponent(buttonRow).setButtonText("Dismiss").onClick(() => notice.hide());
+	new ButtonComponent(buttonRow).setButtonText("Dismiss").onClick(() => {
+		notice.hide();
+		dismissRecoveredSession(recovered, sessionManager);
+	});
+}
+
+/**
+ * Persist a "Dismiss" of the resume Notice so the recovery scan doesn't re-offer
+ * this session on the next reload. `cancelled` is terminal (excluded from
+ * `RECOVERABLE_STATUSES`), mirroring a user Stop. Fire-and-forget from the click
+ * handler — a failed status write is logged, never thrown.
+ */
+export function dismissRecoveredSession(
+	recovered: RecoverableSession,
+	sessionManager: OrchestrationSessionManager,
+): Promise<void> {
+	return sessionManager.updateStatus(recovered.sessionId, "cancelled").catch((e) =>
+		log.error("Failed to persist resume-dismiss", {
+			sessionId: recovered.sessionId,
+			error: String(e),
+		}),
+	);
 }
 
 /**

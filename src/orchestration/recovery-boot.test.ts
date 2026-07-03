@@ -12,8 +12,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { recoverOrchestrations } from "./recovery-boot";
-import type { RecoveryFs } from "./session-recovery";
+import { recoverOrchestrations, dismissRecoveredSession } from "./recovery-boot";
+import { OrchestrationSessionManager } from "./session-manager";
+import type { RecoveryFs, RecoverableSession } from "./session-recovery";
 import type { OrchestrationHost } from "./host";
 import { FLOW_COMPLETE, type OrchestrationFlow, type OrchestrationSessionMeta } from "./types";
 
@@ -234,5 +235,59 @@ describe("recoverOrchestrations — scan decisions (F6 §5.4)", () => {
 		});
 		expect(offerResume).not.toHaveBeenCalled();
 		expect(notices.some((m) => m.includes("its flow definition is missing"))).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Dismiss — persisting the user's decision so the scan doesn't re-offer (bugfix)
+// ---------------------------------------------------------------------------
+
+describe("dismissRecoveredSession — persists a terminal status", () => {
+	/** An in-memory SessionFs seeded with one session.json. */
+	function fakeFs(sessionId: string, m: OrchestrationSessionMeta) {
+		const files = new Map<string, string>([
+			[`notor/orchestrations/sessions/${sessionId}/session.json`, JSON.stringify(m)],
+		]);
+		const fs = {
+			exists: async (p: string) => files.has(p),
+			mkdir: async () => {},
+			write: async (p: string, data: string) => {
+				files.set(p, data);
+			},
+			read: async (p: string) => {
+				const v = files.get(p);
+				if (v === undefined) throw new Error(`ENOENT ${p}`);
+				return v;
+			},
+		};
+		return { fs, files };
+	}
+
+	it("marks the session `cancelled` so recovery excludes it on the next reload", async () => {
+		const m = meta({ session_id: "s1", status: "interrupted" });
+		const { fs, files } = fakeFs("s1", m);
+		const sessionManager = new OrchestrationSessionManager("notor", fs);
+		const recovered = { sessionId: "s1", meta: m } as unknown as RecoverableSession;
+
+		await dismissRecoveredSession(recovered, sessionManager);
+
+		const written = JSON.parse(
+			files.get("notor/orchestrations/sessions/s1/session.json")!,
+		) as OrchestrationSessionMeta;
+		expect(written.status).toBe("cancelled");
+	});
+
+	it("swallows a failed status write (never throws out of the click handler)", async () => {
+		const failingFs = {
+			exists: async () => true,
+			mkdir: async () => {},
+			write: async () => {},
+			read: async () => {
+				throw new Error("boom");
+			},
+		};
+		const sessionManager = new OrchestrationSessionManager("notor", failingFs);
+		const recovered = { sessionId: "s1", meta: meta({ session_id: "s1" }) } as unknown as RecoverableSession;
+		await expect(dismissRecoveredSession(recovered, sessionManager)).resolves.toBeUndefined();
 	});
 });
