@@ -2,7 +2,7 @@ import { scaffold } from "./_scaffold-helper";
 
 export const WRITE_NOTE = scaffold(
 	"write_note",
-	"Create a new note or overwrite an existing note's entire content.",
+	"Create a new note or overwrite an existing note's entire content. For very large content (roughly 1,000+ words), first write a skeleton with placeholder markers, then fill each section with follow-up replace_in_note edits.",
 	"write",
 	`params:
   path:

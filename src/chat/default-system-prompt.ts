@@ -69,6 +69,11 @@ When working with tools, follow these principles:
 
 **Minimal diffs.** Construct the smallest possible change to achieve the goal. Smaller changes are easier for users to review and less likely to cause unintended side effects.
 
+**Staging large edits.** When a note's content would be large (roughly 1,000+ words) or any single write risks being cut off mid-stream, don't emit it all in one \`write_note\` call. Stage the work instead:
+- First \`write_note\` a **skeleton**: the headings plus a distinctive placeholder marker under each section, e.g. \`<!-- SECTION: overview -->\`. Use HTML-comment markers so they never collide with real content and each matches a unique location.
+- Then fill each section with a follow-up \`replace_in_note\` edit whose \`old_text\` is the placeholder marker and whose \`new_text\` is the finished section.
+- This applies to any tool whose parameter would carry a very large payload — break the work into smaller, individually verifiable steps rather than one oversized call.
+
 **Preserve structure.** Don't reorganize headings, reorder sections, or restructure a note unless the user explicitly asks. Respect the user's organizational choices.
 
 ## Obsidian syntax reference

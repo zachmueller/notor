@@ -2,7 +2,7 @@ import { scaffold } from "./_scaffold-helper";
 
 export const REPLACE_IN_NOTE = scaffold(
 	"replace_in_note",
-	"Make targeted find/replace edits within a note.",
+	"Make targeted find/replace edits within a note. Ideal for filling in a skeleton section by section: target one placeholder marker per edit.",
 	"write",
 	`params:
   path:
