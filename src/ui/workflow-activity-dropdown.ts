@@ -41,6 +41,14 @@ export type OpenRunTreeCallback = (sessionId: string) => void;
 export type StopFlowRunCallback = (sessionId: string) => void;
 
 /**
+ * Predicate for whether a flow run is actually live in the abort registry (F1
+ * Fix 1). The Stop button is only rendered when this returns `true`, so a
+ * background child, a stale post-crash entry, or an already-finalized run — all
+ * of which the registry cannot `abort` — no longer show a dead Stop button.
+ */
+export type IsFlowRunLivePredicate = (sessionId: string) => boolean;
+
+/**
  * Workflow activity dropdown component.
  *
  * Renders a positioned popover below the activity indicator icon showing
@@ -84,6 +92,9 @@ export class WorkflowActivityDropdown {
 	/** Optional stop callback for live `flow-run` entries (F1 Fix 1). */
 	private readonly onStopFlowRun?: StopFlowRunCallback;
 
+	/** Optional liveness predicate gating the Stop button (F1 Fix 1). */
+	private readonly isFlowRunLive?: IsFlowRunLivePredicate;
+
 	constructor(
 		tracker: WorkflowActivityTracker,
 		onNavigate: NavigateToConversationCallback,
@@ -91,6 +102,7 @@ export class WorkflowActivityDropdown {
 		getCurrentConversationId?: () => string | null,
 		onOpenRunTree?: OpenRunTreeCallback,
 		onStopFlowRun?: StopFlowRunCallback,
+		isFlowRunLive?: IsFlowRunLivePredicate,
 	) {
 		this.tracker = tracker;
 		this.onNavigate = onNavigate;
@@ -98,6 +110,7 @@ export class WorkflowActivityDropdown {
 		this.getCurrentConversationId = getCurrentConversationId;
 		this.onOpenRunTree = onOpenRunTree;
 		this.onStopFlowRun = onStopFlowRun;
+		this.isFlowRunLive = isFlowRunLive;
 	}
 
 	// -----------------------------------------------------------------------
@@ -351,8 +364,12 @@ export class WorkflowActivityDropdown {
 
 		// F1 Fix 1: a live (`active`) run gets a stop icon-button that aborts it via
 		// the run registry. `stopPropagation` keeps the row's open-run-tree click
-		// from firing when the user clicks Stop.
-		if (run.status === "active" && this.onStopFlowRun) {
+		// from firing when the user clicks Stop. Gate on the liveness predicate too:
+		// a background child, a stale post-crash entry, or an already-finalized run
+		// is `active` in the indicator but absent from the abort registry, so its
+		// Stop would be a silent no-op — don't render it.
+		const isLive = this.isFlowRunLive?.(run.sessionId) ?? true;
+		if (run.status === "active" && isLive && this.onStopFlowRun) {
 			const stopBtn = topRow.createSpan({ cls: "notor-flow-run-stop-button" });
 			stopBtn.setAttr("role", "button");
 			stopBtn.setAttr("aria-label", "Stop flow run");

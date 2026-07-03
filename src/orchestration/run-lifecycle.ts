@@ -25,6 +25,7 @@ import { OrchestrationRunner, type OrchestrationRunResult } from "./runner";
 import { newRootBudget } from "../run-loop/budget";
 import { FLOW_CANCELLED } from "./types";
 import type { OrchestrationFlow } from "./types";
+import type { FlowRunEntry } from "../workflows/workflow-activity-tracker";
 import { VaultSessionFs, VaultSessionLogWriter, buildExecutor, listOpenTaskKeys } from "./launch-wiring";
 import { chainToSuccessor, resolveSuccessorInputs } from "./chaining";
 
@@ -114,6 +115,26 @@ export async function finalizeRun(
 	await maybeWriteFailureReport(host, sessionManager, sessionId, flow, result);
 
 	return finalStatus;
+}
+
+/**
+ * Reflect a run's status into the unified activity indicator's `flow-run` entry
+ * (POL-004). Extracted so EVERY settle path — a fresh finalize, a resume finalize,
+ * and both crash catches — mirrors the terminal status the same way. Without this
+ * the entry stays `active` forever once a run ends off the happy path, and the
+ * dropdown then offers a Stop button for a run the registry can no longer abort.
+ *
+ * Bug C: `startedAt` is threaded from the run's own start timestamp (never the
+ * finalize time) so completed entries keep sorting by when they began.
+ */
+export function reflectFlowRunStatus(
+	host: OrchestrationHost,
+	sessionId: string,
+	flowName: string,
+	status: FlowRunEntry["status"],
+	startedAt: string,
+): void {
+	host.upsertFlowRun({ type: "flow-run", sessionId, flowName, status, startedAt });
 }
 
 /**
@@ -307,10 +328,12 @@ export async function launchOrchestration(
 		result = await runner.start(flow, promptText);
 	} catch (e) {
 		// A crash before a terminal: mark the session interrupted so the recovery
-		// scan (INT-005) picks it up on next load.
+		// scan (INT-005) picks it up on next load, and mirror that into the indicator
+		// so the entry stops showing `active` (and stops offering a dead Stop button).
 		await sessionManager
 			.updateStatus(sessionId, "interrupted")
 			.catch(() => undefined);
+		reflectFlowRunStatus(host, sessionId, flow.name, "interrupted", flowRunStartedAt);
 		throw e;
 	} finally {
 		// F1 Fix 1: release the lifecycle handle once the run settles (success,
@@ -326,13 +349,7 @@ export async function launchOrchestration(
 	// POL-004: reflect the terminal status into the unified indicator's flow-run
 	// entry. Bug C: preserve the entry's original `startedAt` (overwriting it with
 	// the finalize timestamp mis-sorted completed entries).
-	host.upsertFlowRun({
-		type: "flow-run",
-		sessionId,
-		flowName: flow.name,
-		status: finalStatus,
-		startedAt: flowRunStartedAt,
-	});
+	reflectFlowRunStatus(host, sessionId, flow.name, finalStatus, flowRunStartedAt);
 
 	// INT-045: chaining / one-way handoff. On successful completion, if the flow
 	// declares `notor-on-complete-flow`, launch the successor INSTEAD of returning

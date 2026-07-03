@@ -23,7 +23,7 @@ import { SessionRecovery, type RecoveryFs, type RecoverableSession } from "./ses
 import { isSessionLogMtimeLive } from "./recovery-liveness";
 import type { OrchestrationFlow } from "./types";
 import { VaultSessionFs, VaultSessionLogWriter, buildExecutor, listOpenTaskKeys } from "./launch-wiring";
-import { finalizeRun, type RequestUserInput } from "./run-lifecycle";
+import { finalizeRun, reflectFlowRunStatus, type RequestUserInput } from "./run-lifecycle";
 
 const log = logger("OrchestrationLaunch");
 
@@ -324,6 +324,11 @@ export async function resumeRecoveredSession(
 		result = await runner.resume(flow, recovered);
 	} catch (e) {
 		await sessionManager.updateStatus(recovered.sessionId, "interrupted").catch(() => undefined);
+		// Mirror into the indicator so a crashed resume stops showing `active` (and
+		// stops offering a dead Stop button). Root resumes seeded the entry above;
+		// a child resume re-seeds it via the parent, so this is a no-op for children
+		// that never surfaced their own entry.
+		reflectFlowRunStatus(host, recovered.sessionId, flow.name, "interrupted", recovered.meta.started_at);
 		throw e;
 	} finally {
 		// F1 Fix 1: release the lifecycle handle once the resume settles (a no-op
@@ -334,7 +339,11 @@ export async function resumeRecoveredSession(
 	// INT-001 + Part B: the shared finalize invariant — reflect the terminal status
 	// into session.json and write the opt-in failure report for a recovered run that
 	// ends in error, identically to a fresh launch.
-	await finalizeRun(host, sessionManager, recovered.sessionId, flow, result);
+	const finalStatus = await finalizeRun(host, sessionManager, recovered.sessionId, flow, result);
+
+	// POL-004: mirror the terminal status into the indicator so a resumed run clears
+	// out of `active` on completion, matching a fresh launch's finalize.
+	reflectFlowRunStatus(host, recovered.sessionId, flow.name, finalStatus, recovered.meta.started_at);
 
 	return result;
 }

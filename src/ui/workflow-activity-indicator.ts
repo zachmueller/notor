@@ -48,6 +48,8 @@ export class WorkflowActivityIndicator {
 	private onOpenRunTree: ((sessionId: string) => void) | null = null;
 	/** Callback for stopping a live flow run from its flow-run entry (F1 Fix 1). */
 	private onStopFlowRun: ((sessionId: string) => void) | null = null;
+	/** Predicate gating the Stop button on a live abort-registry handle (F1 Fix 1). */
+	private isFlowRunLive: ((sessionId: string) => boolean) | null = null;
 	/** Optional accessor for active foreground conversation sessions (Phase 3). */
 	private readonly getActiveSessions?: () => ConversationSession[];
 	/** Optional accessor for the conversation ID currently shown in THIS panel. */
@@ -142,6 +144,7 @@ export class WorkflowActivityIndicator {
 			(sessionId: string) => {
 				this.onStopFlowRun?.(sessionId);
 			},
+			(sessionId: string) => this.isFlowRunLive?.(sessionId) ?? true,
 		);
 
 		// Register the onChange callback for reactive updates
@@ -262,6 +265,15 @@ export class WorkflowActivityIndicator {
 	 */
 	setOnStopFlowRun(callback: (sessionId: string) => void): void {
 		this.onStopFlowRun = callback;
+	}
+
+	/**
+	 * Wire the liveness predicate gating the Stop button (F1 Fix 1). Wired by
+	 * `chat-view.ts` to `OrchestrationRunRegistry.get(sessionId)` so the button
+	 * only renders for a run the registry can actually abort.
+	 */
+	setIsFlowRunLive(predicate: (sessionId: string) => boolean): void {
+		this.isFlowRunLive = predicate;
 	}
 
 	// -----------------------------------------------------------------------

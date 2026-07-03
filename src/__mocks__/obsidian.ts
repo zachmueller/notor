@@ -37,6 +37,14 @@ export function normalizePath(path: string): string {
 		.replace(/^\//, "");
 }
 
+/**
+ * Minimal `setIcon` stub — records the requested icon name on the element via a
+ * data attribute so a suite can assert which icon was set without a real SVG.
+ */
+export function setIcon(el: HTMLElement, iconId: string): void {
+	el.setAttribute("data-icon", iconId);
+}
+
 export function getFrontMatterInfo(content: string): { exists: boolean; contentStart: number } {
 	const match = content.match(/^---\n[\s\S]*?\n---\n?/);
 	if (!match) return { exists: false, contentStart: 0 };
