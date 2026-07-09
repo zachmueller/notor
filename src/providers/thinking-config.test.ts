@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolveAnthropicThinking } from "./thinking-config";
-import { getThinkingMode } from "./model-metadata";
+import { getThinkingMode, getThinkingCapability, supportsThinking } from "./model-metadata";
 
 describe("resolveAnthropicThinking", () => {
 	describe("effort models (Opus 4.8)", () => {
@@ -77,6 +77,19 @@ describe("resolveAnthropicThinking", () => {
 			expect(resolveAnthropicThinking("5000", "claude-opus-4-20250514")).toEqual({
 				thinking: { type: "enabled", budget_tokens: 5000 },
 			});
+		});
+	});
+
+	describe("unknown / unsupported models (mode:none)", () => {
+		// Fable 5 and any model outside THINKING_PATTERNS must emit NO thinking
+		// payload, even with a level set — guessing a dialect risks a rejection.
+		it("returns undefined for Claude Fable 5 even with a level set", () => {
+			expect(resolveAnthropicThinking("high", "global.anthropic.claude-fable-5")).toBeUndefined();
+			expect(resolveAnthropicThinking("medium", "claude-fable-5")).toBeUndefined();
+		});
+
+		it("returns undefined for a wholly unknown model with a level set", () => {
+			expect(resolveAnthropicThinking("high", "some-unknown-model-v9")).toBeUndefined();
 		});
 	});
 
@@ -159,5 +172,62 @@ describe("getThinkingMode", () => {
 	it("defaults to 'effort' for an unknown/future model id", () => {
 		expect(getThinkingMode("claude-opus-5-0")).toBe("effort");
 		expect(getThinkingMode("global.anthropic.claude-sonnet-5-0")).toBe("effort");
+	});
+});
+
+describe("getThinkingCapability (single source of truth)", () => {
+	it("classifies Opus 4.8 as supported effort", () => {
+		expect(getThinkingCapability("claude-opus-4-8")).toEqual({ supported: true, mode: "effort" });
+		expect(getThinkingCapability("global.anthropic.claude-opus-4-8")).toEqual({
+			supported: true,
+			mode: "effort",
+		});
+	});
+
+	it("classifies the legacy set as supported enabled", () => {
+		expect(getThinkingCapability("claude-3-7-sonnet-20250219")).toEqual({
+			supported: true,
+			mode: "enabled",
+		});
+		expect(getThinkingCapability("us.anthropic.claude-opus-4-6-v1")).toEqual({
+			supported: true,
+			mode: "enabled",
+		});
+	});
+
+	// Fable 5 and unknown models: NOT supported, mode none — the safe default.
+	it("classifies Claude Fable 5 and unknown ids as unsupported none", () => {
+		expect(getThinkingCapability("global.anthropic.claude-fable-5")).toEqual({
+			supported: false,
+			mode: "none",
+		});
+		expect(getThinkingCapability("claude-fable-5")).toEqual({ supported: false, mode: "none" });
+		expect(getThinkingCapability("totally-unknown-model")).toEqual({
+			supported: false,
+			mode: "none",
+		});
+	});
+
+	// Normalization: surrounding whitespace must not flip the classification, so a
+	// model is gated identically no matter which code path supplied the id.
+	it("normalizes surrounding whitespace before classifying", () => {
+		expect(getThinkingCapability("  claude-opus-4-8  ")).toEqual({
+			supported: true,
+			mode: "effort",
+		});
+		expect(supportsThinking(" global.anthropic.claude-opus-4-6-v1 ")).toBe(true);
+	});
+
+	// supportsThinking (the UI gate) and getThinkingCapability.supported (the wire
+	// decision) must always agree — they now share one implementation.
+	it("keeps supportsThinking in lockstep with capability.supported", () => {
+		for (const id of [
+			"claude-opus-4-8",
+			"claude-3-7-sonnet-20250219",
+			"global.anthropic.claude-fable-5",
+			"unknown-x",
+		]) {
+			expect(supportsThinking(id)).toBe(getThinkingCapability(id).supported);
+		}
 	});
 });

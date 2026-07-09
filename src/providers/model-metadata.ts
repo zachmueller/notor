@@ -724,25 +724,65 @@ const LEGACY_ENABLED_THINKING_PATTERNS = [
 
 export type ThinkingMode = "enabled" | "effort";
 
-export function supportsThinking(modelId: string): boolean {
-	return THINKING_PATTERNS.some((pattern) => pattern.test(modelId));
+/**
+ * A model's thinking capability, resolved through a single chokepoint so the
+ * UI-visibility decision and the wire-payload decision can never diverge.
+ *
+ * - `mode: "enabled"` — legacy `budget_tokens` protocol with a VISIBLE streamed
+ *   transcript (closed `LEGACY_ENABLED_THINKING_PATTERNS` set).
+ * - `mode: "effort"` — adaptive thinking + `output_config.effort` (Opus 4.8+).
+ * - `mode: "none"` — thinking not supported / model unknown. Send NO thinking or
+ *   `output_config` fields and hide the thinking control. This is the SAFE
+ *   default for any model not in `THINKING_PATTERNS` (e.g. Claude Fable 5 until
+ *   its dialect is confirmed) — unknown models must never emit a thinking
+ *   payload a model might reject.
+ */
+export interface ThinkingCapability {
+	supported: boolean;
+	mode: "enabled" | "effort" | "none";
 }
 
 /**
- * The thinking protocol a (thinking-capable) model uses on the wire.
- *
- * - `"enabled"`: legacy `budget_tokens` reasoning with a VISIBLE streamed
- *   transcript. Only the closed `LEGACY_ENABLED_THINKING_PATTERNS` set
- *   (Claude 3.5/3.7, Sonnet/Opus 4.0–4.6). This set is final and never grows.
- * - `"effort"`: adaptive thinking + `output_config.effort`; reasoning is returned
- *   encrypted (no visible transcript) and `thinking.type=enabled` is REJECTED.
- *   THE DEFAULT — every model not in the legacy set (Opus 4.8 and all future
- *   models) uses this, so new models need no change here.
- *
- * Only consulted for models where `supportsThinking()` is already true.
+ * Normalize a model id before any thinking-capability regex test. The single
+ * chokepoint so a model classifies identically no matter which code path
+ * (header id, active id, preset id) supplied it. Trims surrounding whitespace;
+ * `THINKING_PATTERNS`/`LEGACY_ENABLED_THINKING_PATTERNS` already cover both bare
+ * and `(us|eu|apac|global).anthropic.*` inference-profile forms.
+ */
+function normalizeModelId(modelId: string): string {
+	return modelId.trim();
+}
+
+/**
+ * Single source of truth for "can this model think, and how." Both the settings
+ * UI gate (`buildThinkingLevelSection`, preset controls) and the wire-payload
+ * builder (`resolveAnthropicThinking`) route through this so visibility and the
+ * request shape are always the same decision over the same normalized id.
+ */
+export function getThinkingCapability(modelId: string): ThinkingCapability {
+	const id = normalizeModelId(modelId);
+	if (!THINKING_PATTERNS.some((pattern) => pattern.test(id))) {
+		return { supported: false, mode: "none" };
+	}
+	return {
+		supported: true,
+		mode: LEGACY_ENABLED_THINKING_PATTERNS.some((pattern) => pattern.test(id))
+			? "enabled"
+			: "effort",
+	};
+}
+
+export function supportsThinking(modelId: string): boolean {
+	return getThinkingCapability(modelId).supported;
+}
+
+/**
+ * The thinking protocol a (thinking-capable) model uses on the wire. Only
+ * meaningful for models where `supportsThinking()` is already true; retained for
+ * back-compat callers, but new code should prefer `getThinkingCapability()`.
  */
 export function getThinkingMode(modelId: string): ThinkingMode {
-	return LEGACY_ENABLED_THINKING_PATTERNS.some((pattern) => pattern.test(modelId))
-		? "enabled"
-		: "effort";
+	const mode = getThinkingCapability(modelId).mode;
+	// Preserve the historical "effort" default for the (gated) unknown case.
+	return mode === "none" ? "effort" : mode;
 }
