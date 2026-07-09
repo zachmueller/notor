@@ -46,6 +46,7 @@ export class ConversationLifecycleManager {
 		private readonly getActiveProviderId: () => string,
 		private readonly getActiveModelId: () => string,
 		private readonly getActiveUseExtendedContext: () => boolean,
+		private readonly getActiveThinkingLevel: () => string | null,
 		private readonly setActiveProviderId: (id: string) => void,
 		private readonly setActiveModelId: (modelId: string) => void,
 		private readonly setActiveUseExtendedContext: (useExtended: boolean) => void,
@@ -179,6 +180,7 @@ export class ConversationLifecycleManager {
 
 		const presetName = this.getActivePresetName();
 		const useExtendedContext = this.getActiveUseExtendedContext();
+		const thinkingLevel = this.getActiveThinkingLevel();
 		const conversation = convManager.createConversation(
 			providerId,
 			modelId,
@@ -186,6 +188,7 @@ export class ConversationLifecycleManager {
 			{
 				...(useExtendedContext && { use_extended_context: true }),
 				...(presetName !== undefined && { preset_name: presetName }),
+				...(thinkingLevel != null && { thinking_level: thinkingLevel }),
 			},
 		);
 
@@ -238,12 +241,19 @@ export class ConversationLifecycleManager {
 			convManager.getActiveConversation()?.mode ??
 			this.getSettings().mode;
 
+		// Carry the full active selection onto the fork so the fork inherits the
+		// selector's current model+thinking+extended+preset, not a partial subset.
 		const forkData = convManager.prepareFork(
 			forkAtMessageId,
 			providerId,
 			modelId,
 			currentMode,
 			forkMode,
+			{
+				useExtendedContext: this.getActiveUseExtendedContext(),
+				thinkingLevel: this.getActiveThinkingLevel(),
+				presetName: this.getActivePresetName(),
+			},
 		);
 
 		if (!forkData) {
@@ -351,6 +361,7 @@ export class ConversationLifecycleManager {
 					conversation.provider_id = resolution.providerId;
 					conversation.model_id = resolution.modelId;
 					conversation.use_extended_context = resolution.useExtendedContext;
+					conversation.thinking_level = resolution.thinkingLevel;
 					if (resolution.source === "default") {
 						conversation.preset_name = resolution.presetName;
 					}

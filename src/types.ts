@@ -97,6 +97,15 @@ export interface Conversation {
 	 */
 	use_extended_context?: boolean;
 	/**
+	 * Thinking level active when the conversation was last used (named level like
+	 * "low"/"medium"/"high", a custom integer budget as a string, or null/"off").
+	 * Persisted on the header so reopen/fork restore it alongside provider+model
+	 * instead of dropping it — previously thinking level lived only on the
+	 * orchestrator's volatile `activeThinkingLevel` field and the preset-resolver
+	 * "stored" branch zeroed it. null/undefined = no explicit level.
+	 */
+	thinking_level?: string | null;
+	/**
 	 * ID of the conversation this was forked from (null for non-forked
 	 * conversations). Together with `forked_from_message_id`, establishes
 	 * fork provenance for lineage navigation.
