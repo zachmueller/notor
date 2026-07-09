@@ -113,6 +113,13 @@ export interface UserToolDefinition {
 	blocks?: BlockKindDeclaration[];
 	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
 	featureGroup?: string;
+	/**
+	 * When true (frontmatter `notor-awaits-user-input`), this tool suspends
+	 * awaiting human input (e.g. via `utils.ask`/`utils.askMany`). A live
+	 * foreground interaction channel exempts it from the execution timeout so a
+	 * slow-to-answer user is never auto-cancelled.
+	 */
+	awaitsUserInput?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +310,12 @@ export interface BuiltinToolScaffold {
 	scaffoldContent: string;
 	/** Feature group for gating (e.g. `"memory"` → gated by `memory_enabled`). */
 	featureGroup?: string;
+	/**
+	 * When true, this built-in tool suspends awaiting human input; a live
+	 * foreground interaction channel exempts it from the execution timeout.
+	 * Emitted as the `notor-awaits-user-input` frontmatter key.
+	 */
+	awaitsUserInput?: boolean;
 }
 
 /** Definition of a built-in block-kind scaffold (code-side constant). */

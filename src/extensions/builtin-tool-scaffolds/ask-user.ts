@@ -84,4 +84,6 @@ try {
 }
 
 return { answers: items.map((it) => ({ question: it.question, answer: it.answer })) };`,
+	undefined, // featureGroup — always available
+	true, // awaitsUserInput — suspends on utils.askMany; exempt from the execution timeout when a live interaction channel exists
 );

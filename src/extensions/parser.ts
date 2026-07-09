@@ -210,6 +210,8 @@ function parseToolFile(
 		? frontmatter["notor-feature-group"]
 		: undefined;
 
+	const awaitsUserInput = frontmatter["notor-awaits-user-input"] === true ? true : undefined;
+
 	return {
 		filePath,
 		name,
@@ -220,6 +222,7 @@ function parseToolFile(
 		settingsSchema,
 		blocks: blocks.length > 0 ? blocks : undefined,
 		featureGroup,
+		awaitsUserInput,
 		rawCode: codeFence.code,
 		compiledFn: null,
 	};
