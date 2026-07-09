@@ -286,3 +286,81 @@ describe("parseStreamEvents — partial tool-call preservation", () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// recovered-path guidance (turns preservation into actionable steering)
+// ---------------------------------------------------------------------------
+
+/** Pull the final `error` event's message out of a collected stream. */
+function lastErrorMessage(events: ParsedStreamEvent[]): string {
+	const last = events.at(-1);
+	expect(last?.type).toBe("error");
+	return (last as Extract<ParsedStreamEvent, { type: "error" }>).message;
+}
+
+describe("parseStreamEvents — recovered-path guidance", () => {
+	it("recovers the path and includes skeleton-first steps for a truncated write_note", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+			{
+				type: "tool_call_delta",
+				id: "t1",
+				partial_json: '{"path":"Notes/Big note.md","content":"# Heading\\n\\nlots of text',
+			},
+			{ type: "tool_call_end", id: "t1" },
+		]);
+
+		const message = lastErrorMessage(events);
+		expect(message).toContain("Recovered target path: Notes/Big note.md.");
+		// Steers toward the skeleton → replace_in_note → update_frontmatter workaround.
+		expect(message).toContain("write_note a skeleton");
+		expect(message).toContain("replace_in_note");
+		expect(message).toContain("update_frontmatter");
+	});
+
+	it("recovers the path from a max_tokens-truncated stream (no tool_call_end)", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+			{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md","content":"abc' },
+			{ type: "message_end", input_tokens: 1, output_tokens: 2, stop_reason: "length" },
+		]);
+
+		expect(lastErrorMessage(events)).toContain("Recovered target path: a.md.");
+	});
+
+	it("un-escapes an escaped quote in the recovered path", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+			{
+				type: "tool_call_delta",
+				id: "t1",
+				partial_json: '{"path":"weird\\"name.md","content":"x',
+			},
+			{ type: "tool_call_end", id: "t1" },
+		]);
+
+		expect(lastErrorMessage(events)).toContain('Recovered target path: weird"name.md.');
+	});
+
+	it("names the path but omits skeleton steps for a non-write tool", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "t1", tool_name: "read_note" },
+			{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md","extra":"trunc' },
+			{ type: "tool_call_end", id: "t1" },
+		]);
+
+		const message = lastErrorMessage(events);
+		expect(message).toContain("Recovered target path: a.md.");
+		expect(message).not.toContain("write_note a skeleton");
+	});
+
+	it("omits the recovered-path line when path itself was cut off mid-value", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+			{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"Notes/unfini' },
+			{ type: "tool_call_end", id: "t1" },
+		]);
+
+		expect(lastErrorMessage(events)).not.toContain("Recovered target path");
+	});
+});

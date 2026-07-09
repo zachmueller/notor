@@ -9,7 +9,6 @@
  */
 
 import type { ConversationMode, ToolCall, ToolResult } from "../types";
-import type { StreamChunk } from "../providers/provider";
 import type { NotorSettings } from "../settings";
 import type { ToolExecuteOptions, ToolSessionContext } from "../tools/tool";
 import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
@@ -213,59 +212,6 @@ export class ToolDispatcher {
 	setActivePersonaName(name: string | null): void {
 		this.activePersonaName = name;
 		log.debug("Updated active persona for auto-approve", { persona: name });
-	}
-
-	// -----------------------------------------------------------------------
-	// Tool call parsing from LLM stream
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Parse tool call requests from accumulated StreamChunk events.
-	 *
-	 * The LLM stream emits tool_call_start, tool_call_delta, and
-	 * tool_call_end events. This method accumulates the partial JSON
-	 * from deltas and returns the completed tool call.
-	 */
-	parseToolCallFromChunks(chunks: StreamChunk[]): {
-		id: string;
-		toolName: string;
-		parameters: Record<string, unknown>;
-	} | null {
-		let id = "";
-		let toolName = "";
-		let jsonAccumulator = "";
-		let ended = false;
-
-		for (const chunk of chunks) {
-			if (chunk.type === "tool_call_start") {
-				id = chunk.id;
-				toolName = chunk.tool_name;
-			} else if (chunk.type === "tool_call_delta") {
-				jsonAccumulator += chunk.partial_json;
-			} else if (chunk.type === "tool_call_end") {
-				ended = true;
-			}
-		}
-
-		if (!ended || !id || !toolName) {
-			return null;
-		}
-
-		let parameters: Record<string, unknown> = {};
-		try {
-			if (jsonAccumulator.trim()) {
-				parameters = JSON.parse(jsonAccumulator) as Record<string, unknown>;
-			}
-		} catch (e) {
-			log.warn("Failed to parse tool call parameters", {
-				toolName,
-				json: jsonAccumulator,
-				error: String(e),
-			});
-			return null;
-		}
-
-		return { id, toolName, parameters };
 	}
 
 	// -----------------------------------------------------------------------

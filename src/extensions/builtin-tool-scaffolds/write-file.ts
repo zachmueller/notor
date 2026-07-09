@@ -2,7 +2,7 @@ import { scaffold } from "./_scaffold-helper";
 
 export const WRITE_FILE = scaffold(
 	"write_file",
-	"Write text content to a file on the filesystem.",
+	"Write text content to a file on the filesystem. For very large content (roughly 1,000+ words), first write a skeleton with placeholder markers, then fill each section with follow-up replace_in_file edits.",
 	"write",
 	`params:
   path:

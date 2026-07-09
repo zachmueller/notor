@@ -77,15 +77,48 @@ function previewJson(json: string): { byteLength: number; head: string; tail: st
 }
 
 /**
+ * Tool names whose truncated writes benefit from skeleton-first staging. For
+ * these, a recovered `path` lets us steer the agent (and user) toward the
+ * skeleton → `replace_in_note` → `update_frontmatter` workaround.
+ */
+const WRITE_TOOL_NAMES = new Set(["write_note", "write_file"]);
+
+/**
+ * Best-effort extraction of the `path` argument from truncated/malformed
+ * tool-call JSON. Truncation lands in the trailing `content` string, so the
+ * earlier `path` field is almost always intact. Bounded to the first 64 KB
+ * (path is near the front) so it stays cheap on multi-MB payloads.
+ *
+ * Never throws: the regex cannot throw and the `JSON.parse` of the extracted
+ * fragment is guarded, so recovery can never break the stream parse. The
+ * `[^"\\]|\\.` body only matches a *terminated* quoted value, so a `path` that
+ * was itself cut off mid-value correctly yields `undefined`.
+ */
+function recoverPathFromPartialJson(partialJson: string): string | undefined {
+	const head = partialJson.slice(0, 65_536);
+	const m = /"path"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(head);
+	if (!m) return undefined;
+	try {
+		return JSON.parse(`"${m[1]}"`) as string;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * Build the user-facing `error` message for a tool call whose JSON could not be
  * finalized. Surfaces the cause, byte count, and (when preserved) the spill path
- * so the user can recover the content via `read_file`.
+ * so the user can recover the content via `read_file`. When a target `path` was
+ * recovered from the truncated JSON, names it — and for write tools, steers
+ * toward the skeleton-first workaround that keeps each write small enough to
+ * complete.
  */
 function formatTruncationError(
 	toolName: string,
 	byteLength: number,
 	spillPath: string | undefined,
 	reason: PartialToolCallReason,
+	recoveredPath?: string,
 ): string {
 	const cause =
 		reason === "parse_failure"
@@ -96,7 +129,17 @@ function formatTruncationError(
 	const preserved = spillPath
 		? ` Partial content was preserved at: ${spillPath} (open it with read_file).`
 		: "";
-	return `${cause} (received ${byteLength.toLocaleString()} bytes).${preserved}`;
+	let recovered = "";
+	if (recoveredPath) {
+		recovered = ` Recovered target path: ${recoveredPath}.`;
+		if (WRITE_TOOL_NAMES.has(toolName)) {
+			recovered +=
+				` To finish reliably, write_note a skeleton (headings plus a distinctive` +
+				` placeholder marker under each section) to that path, fill each section with` +
+				` a follow-up replace_in_note edit, then set frontmatter with update_frontmatter.`;
+		}
+	}
+	return `${cause} (received ${byteLength.toLocaleString()} bytes).${preserved}${recovered}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,10 +260,12 @@ export async function* parseStreamEvents(
 						// at `error` level (not `warn`) so it surfaces at the default log
 						// level; preview only (head/tail) to avoid flooding the console.
 						const spillPath = await preservePartial("parse_failure");
+						const recoveredPath = recoverPathFromPartialJson(toolCallJson);
 						log.error("Tool-call JSON parse failed — partial content preserved", {
 							toolName: currentToolName,
 							...previewJson(toolCallJson),
 							spillPath,
+							recoveredPath,
 							error: String(e),
 						});
 						yield {
@@ -230,6 +275,7 @@ export async function* parseStreamEvents(
 								toolCallJson.length,
 								spillPath,
 								"parse_failure",
+								recoveredPath,
 							),
 						};
 						return;
@@ -276,15 +322,23 @@ export async function* parseStreamEvents(
 				? "max_tokens"
 				: "truncated_stream";
 			const spillPath = await preservePartial(reason);
+			const recoveredPath = recoverPathFromPartialJson(toolCallJson);
 			log.error("Stream ended with an unfinished tool call — content preserved", {
 				toolName: currentToolName,
 				...previewJson(toolCallJson),
 				stopReason: lastStopReason,
 				spillPath,
+				recoveredPath,
 			});
 			yield {
 				type: "error",
-				message: formatTruncationError(currentToolName, toolCallJson.length, spillPath, reason),
+				message: formatTruncationError(
+					currentToolName,
+					toolCallJson.length,
+					spillPath,
+					reason,
+					recoveredPath,
+				),
 			};
 		}
 	} catch (e) {
