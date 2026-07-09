@@ -9,6 +9,8 @@ export default defineConfig({
 		},
 	},
 	test: {
-		include: ["src/**/*.test.ts"],
+		// Plugin/product tests live beside their sources in src/. The esbuild/
+		// build-tooling tests are plain ESM (.mjs) outside the TypeScript program.
+		include: ["src/**/*.test.ts", "esbuild/**/*.test.mjs"],
 	},
 });

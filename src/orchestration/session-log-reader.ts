@@ -20,7 +20,7 @@
  * @see specs/ZZ-misc/orchestration/contracts/vault-schema.md — Malformed-line policy
  */
 
-import type { SessionLogEntry, SessionStartEntry } from "./session-log";
+import type { SessionLogEntry } from "./session-log";
 
 /** Thrown when an **interior** log line is malformed (recovery must fail loudly). */
 export class SessionLogParseError extends Error {
@@ -103,7 +103,7 @@ export class SessionLogReader {
 		const firstEntry = entries[0];
 		const schema_version =
 			firstEntry?.type === "session.start"
-				? ((firstEntry as SessionStartEntry).schema_version ?? 1)
+				? (firstEntry.schema_version ?? 1)
 				: 1;
 
 		return { entries, truncatedFinalLine, schema_version };

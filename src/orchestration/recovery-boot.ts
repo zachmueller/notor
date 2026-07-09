@@ -236,7 +236,9 @@ function offerResumeNotice(
 		});
 	new ButtonComponent(buttonRow).setButtonText("Dismiss").onClick(() => {
 		notice.hide();
-		dismissRecoveredSession(recovered, sessionManager);
+		// Fire-and-forget: dismissRecoveredSession catches and logs its own write
+		// failures internally, so `void` just marks the promise as intentionally unawaited.
+		void dismissRecoveredSession(recovered, sessionManager);
 	});
 }
 

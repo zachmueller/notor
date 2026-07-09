@@ -4,6 +4,7 @@ import { builtinModules } from 'node:module';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { STRIP_FILTER, stripScriptInjectionSource } from './esbuild/strip-script-injection.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const buildDir = resolve(__dirname, 'build');
@@ -19,34 +20,18 @@ const prod = (process.argv[2] === "production");
 
 /**
  * Neutralizes dead-code <script>-injection feature-detection branches that ship
- * inside transitive deps (immediate, setimmediate) and docx's pre-bundled dist.
- * These are IE6-8 / browser-only async-scheduler fallbacks that NEVER execute
- * under Node/Electron (we run process.nextTick / native setImmediate). Removing
- * the literal document.createElement("script") text lets the Obsidian
- * community-plugin reviewer's "dynamic script element creation" check pass.
- * Runtime behavior is unchanged — the node code paths are untouched.
+ * inside transitive deps. The filter + transform live in
+ * ./esbuild/strip-script-injection.mjs so they can be unit-tested outside a full
+ * build (esbuild/strip-script-injection.test.mjs) — see that module for the full
+ * rationale, drift-safety contract, and why the culprit deps are version-pinned.
  */
 const stripScriptInjectionPlugin = {
 	name: "strip-script-injection",
 	setup(build) {
-		// Scope tightly to the three resolved culprit files (also docx cjs variants
-		// in case resolution ever picks the require path). [\\/] = cross-platform.
-		const filter =
-			/(immediate[\\/]lib[\\/]index\.js|setimmediate[\\/]setImmediate\.js|docx[\\/]dist[\\/]index\.(mjs|cjs|umd\.cjs))$/;
-
-		// (A) turn the feature TEST false -> esbuild folds the if-block / ternary arm away.
-		const TEST_RE =
-			/(['"])onreadystatechange\1\s*in\s+[\w$.]+\.createElement\((['"])script\2\)/g;
-		// (B) rewrite any remaining BODY literal -> result is independent of esbuild DCE.
-		const BODY_RE = /\bcreateElement\((['"])script\1\)/g;
-
-		build.onLoad({ filter }, (args) => {
+		build.onLoad({ filter: STRIP_FILTER }, (args) => {
 			const src = readFileSync(args.path, "utf8");
-			const contents = src
-				.replace(TEST_RE, "false")
-				.replace(BODY_RE, 'createElement("template")');
-			// "js" loader auto-detects ESM (.mjs) vs CJS — fine for all three files.
-			return { contents, loader: "js" };
+			// "js" loader auto-detects ESM (.mjs) vs CJS — fine for all target files.
+			return { contents: stripScriptInjectionSource(src), loader: "js" };
 		});
 	},
 };

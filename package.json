@@ -54,8 +54,8 @@
 		"@modelcontextprotocol/sdk": "^1.27.1",
 		"@xmldom/xmldom": "^0.8.11",
 		"croner": "^10.0.1",
-		"docx": "^9.6.1",
-		"mammoth": "^1.12.0",
+		"docx": "9.6.1",
+		"mammoth": "1.12.0",
 		"marked": "^17.0.4",
 		"obsidian": "latest",
 		"picomatch": "^4.0.4",
@@ -64,5 +64,11 @@
 		"turndown": "^7.2.2",
 		"turndown-plugin-gfm": "^1.0.2",
 		"unpdf": "^1.4.0"
+	},
+	"overrides": {
+		"jszip": "3.10.1",
+		"immediate": "3.0.6",
+		"setimmediate": "1.0.5",
+		"lie": "3.3.0"
 	}
 }

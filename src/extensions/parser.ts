@@ -113,7 +113,7 @@ export function parseExtensionFile(
 	if (minApi !== undefined) {
 		const required = typeof minApi === "number" ? minApi : Number(minApi);
 		if (!Number.isInteger(required)) {
-			return { filePath, message: `Invalid 'notor-min-api': '${String(minApi)}'. Must be an integer.` };
+			return { filePath, message: `Invalid 'notor-min-api': ${JSON.stringify(minApi)}. Must be an integer.` };
 		}
 		if (required > RUNTIME_API_VERSION) {
 			return { filePath, message: `Extension requires runtime API v${required}, but this Notor build provides v${RUNTIME_API_VERSION}. Update Notor to load this extension.` };
