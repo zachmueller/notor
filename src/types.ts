@@ -199,7 +199,22 @@ export type ConversationMode = "plan" | "act";
 // ---------------------------------------------------------------------------
 
 /** Role of a message within a conversation. */
-export type MessageRole = "system" | "user" | "assistant" | "tool_call" | "tool_result" | "extension_block";
+export type MessageRole = "system" | "user" | "assistant" | "tool_call" | "tool_result" | "extension_block" | "error";
+
+/**
+ * Diagnostic detail for a failed turn, persisted so a raw provider error
+ * survives into the conversation JSONL (previously errors were UI-only and
+ * lost on reload). `offending_fields` lists the request-field keys that may
+ * have triggered a rejection (e.g. `thinking`, `output_config`).
+ */
+export interface MessageError {
+	/** Underlying exception name (e.g. "ValidationException", "ProviderError"). */
+	name?: string;
+	/** Raw provider error message. */
+	message: string;
+	/** Keys of the request fields that may have caused the rejection. */
+	offending_fields?: string[];
+}
 
 /** A single message within a conversation. */
 export interface Message {
@@ -227,6 +242,8 @@ export interface Message {
 	tool_call?: ToolCall | null;
 	/** Tool result details (for tool_result role only). */
 	tool_result?: ToolResult | null;
+	/** Provider/turn error diagnostics (for `role === "error"` only). */
+	error?: MessageError | null;
 	/** Whether this message was truncated from the LLM context window. */
 	truncated?: boolean;
 	/** Auto-context metadata logged for user messages (Phase 3). */

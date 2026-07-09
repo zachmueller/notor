@@ -422,6 +422,8 @@ export class ConversationManager {
 		thinking_duration_ms?: number | null;
 		tool_call?: ToolCall | null;
 		tool_result?: ToolResult | null;
+		/** Provider/turn error diagnostics (error role only). */
+		error?: Message["error"];
 		auto_context?: string | null;
 		attachments?: Message["attachments"];
 		hook_injections?: string[] | null;
@@ -461,6 +463,7 @@ export class ConversationManager {
 			// used for fork/replay/compaction.
 			tool_call: params.tool_call ? (JSON.parse(JSON.stringify(params.tool_call)) as ToolCall) : null,
 			tool_result: params.tool_result ?? null,
+			error: params.error ?? null,
 			truncated: false,
 			auto_context: params.auto_context ?? null,
 			attachments: params.attachments ?? null,

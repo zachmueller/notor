@@ -472,6 +472,12 @@ export class BedrockProvider implements LLMProvider {
 					? String((e as { message: unknown }).message)
 					: String(e);
 			const errName = e instanceof Error ? e.name : (typeof e === "object" && e !== null && "name" in e ? String((e as { name: unknown }).name) : "");
+			// Keys of the request fields that may have triggered a rejection —
+			// persisted with the error so a failing chat log is diagnosable.
+			const offendingFields = input.additionalModelRequestFields
+				? Object.keys(input.additionalModelRequestFields)
+				: undefined;
+			const errDetails = { name: errName || undefined, rawMessage: errMsg, offendingFields };
 
 			if (
 				errName === "AccessDeniedException" ||
@@ -482,7 +488,8 @@ export class BedrockProvider implements LLMProvider {
 					"AWS Bedrock access denied. Check your IAM permissions and model access.",
 					"bedrock",
 					"AUTH_FAILED",
-					e instanceof Error ? e : undefined
+					e instanceof Error ? e : undefined,
+					errDetails
 				);
 			}
 			if (
@@ -493,7 +500,8 @@ export class BedrockProvider implements LLMProvider {
 					"AWS Bedrock rate limited. Please wait and try again.",
 					"bedrock",
 					"RATE_LIMITED",
-					e instanceof Error ? e : undefined
+					e instanceof Error ? e : undefined,
+					errDetails
 				);
 			}
 			if (
@@ -504,7 +512,8 @@ export class BedrockProvider implements LLMProvider {
 					"Model not available on AWS Bedrock. Check that the model is enabled in your region.",
 					"bedrock",
 					"MODEL_NOT_FOUND",
-					e instanceof Error ? e : undefined
+					e instanceof Error ? e : undefined,
+					errDetails
 				);
 			}
 			if (
@@ -516,7 +525,22 @@ export class BedrockProvider implements LLMProvider {
 					"The 1M context beta flag was rejected by Bedrock. The beta may have been updated or revoked — check for a plugin update.",
 					"bedrock",
 					"PROVIDER_ERROR",
-					e instanceof Error ? e : undefined
+					e instanceof Error ? e : undefined,
+					errDetails
+				);
+			}
+			// Account-level data retention mismatch — NOT a request-shape bug.
+			// Some models (e.g. Claude Fable 5) reject the account's inherited/default
+			// retention mode. Fixable only by the account owner, so name the fix.
+			if (errMsg.includes("data retention mode")) {
+				throw new ProviderError(
+					`Bedrock rejected model "${options.model}" because your AWS account's data-retention mode is incompatible with it. ` +
+						"Set an account-level mode with: aws bedrock put-account-data-retention --region <region> --mode none " +
+						"(or provider_data_share). This is an AWS account setting, not a Notor request issue.",
+					"bedrock",
+					"INVALID_REQUEST",
+					e instanceof Error ? e : undefined,
+					errDetails
 				);
 			}
 			if (this.isExpiredCredentialError(e)) {
@@ -533,14 +557,16 @@ export class BedrockProvider implements LLMProvider {
 					`Could not connect to AWS Bedrock in region ${this.region}: ${errMsg}`,
 					"bedrock",
 					"CONNECTION_FAILED",
-					e instanceof Error ? e : undefined
+					e instanceof Error ? e : undefined,
+					errDetails
 				);
 			}
 			throw new ProviderError(
 				`AWS Bedrock error: ${errMsg}`,
 				"bedrock",
 				"PROVIDER_ERROR",
-				e instanceof Error ? e : undefined
+				e instanceof Error ? e : undefined,
+				errDetails
 			);
 		}
 
@@ -567,6 +593,13 @@ export class BedrockProvider implements LLMProvider {
 			yield {
 				type: "error",
 				error: e instanceof Error ? e.message : String(e),
+				details: {
+					name: e instanceof Error ? e.name : undefined,
+					rawMessage: e instanceof Error ? e.message : String(e),
+					offendingFields: input.additionalModelRequestFields
+						? Object.keys(input.additionalModelRequestFields)
+						: undefined,
+				},
 			};
 		}
 	}

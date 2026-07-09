@@ -1153,6 +1153,23 @@ export class ChatOrchestrator implements ToolSessionContext {
 			await session.responsePromise;
 		} catch (e) {
 			session.setStatus("errored");
+			// Persist a thrown provider error into the conversation JSONL so the
+			// failure is diagnosable on reload (mirrors the yielded-error path).
+			try {
+				const errMsg = e instanceof Error ? e.message : String(e);
+				const details = e instanceof ProviderError ? e.details : undefined;
+				session.conversationManager.addMessage({
+					role: "error",
+					content: errMsg,
+					error: {
+						name: e instanceof Error ? e.name : undefined,
+						message: details?.rawMessage ?? errMsg,
+						offending_fields: details?.offendingFields,
+					},
+				});
+			} catch {
+				// Best-effort — never let error persistence mask the original error.
+			}
 			this.handleError(e);
 		} finally {
 			if (session.status === "running" || session.status === "waiting_approval") {
@@ -1497,6 +1514,18 @@ export class ChatOrchestrator implements ToolSessionContext {
 						: (result.error as unknown) instanceof Error
 							? (result.error as unknown as Error).message
 							: JSON.stringify(result.error);
+					// Persist the error into the conversation JSONL so a failed chat
+					// carries diagnostic detail (previously errors were UI-only and
+					// lost on reload). Auto-persists via the onMessageAdded wiring.
+					convManager.addMessage({
+						role: "error",
+						content: errStr,
+						error: {
+							name: result.details?.name,
+							message: result.details?.rawMessage ?? errStr,
+							offending_fields: result.details?.offendingFields,
+						},
+					});
 					this.getViewForSession(session)?.showError(errStr);
 				}
 			}
