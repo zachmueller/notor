@@ -6,7 +6,7 @@
  */
 
 import { Notice, setIcon } from "obsidian";
-import type { App } from "obsidian";
+import type { App, TFile } from "obsidian";
 import type { Attachment } from "../context/attachment";
 import {
 	createVaultNoteAttachment,
@@ -21,6 +21,8 @@ import type { ConversationMode, Workflow } from "../types";
 import type { NotorSettings } from "../settings/types";
 import {
 	VaultNoteSuggest,
+	SectionSuggest,
+	insertWikilinkToken,
 	createAttachmentButton,
 	getAbsoluteFilePath,
 	readExternalBinaryFile,
@@ -72,6 +74,7 @@ export class ChatInput {
 	private tokenObserver?: MutationObserver;
 	private attachmentChipManager!: AttachmentChipManager;
 	private vaultNoteSuggest?: VaultNoteSuggest;
+	private sectionSuggest?: SectionSuggest;
 	private workflowSuggest?: WorkflowSlashSuggest;
 
 	constructor(public deps: ChatInputDeps) {}
@@ -140,6 +143,10 @@ export class ChatInput {
 					e.preventDefault();
 					e.stopPropagation();
 					this.workflowSuggest.selectHighlighted(e);
+				} else if (this.sectionSuggest?.active) {
+					e.preventDefault();
+					e.stopPropagation();
+					this.sectionSuggest.selectHighlighted(e);
 				} else if (this.vaultNoteSuggest?.active) {
 					e.preventDefault();
 					e.stopPropagation();
@@ -239,6 +246,19 @@ export class ChatInput {
 			(attachment: Attachment) => this.addWikilinkAttachment(attachment),
 			() => this.deps.getPendingAttachments()
 		);
+
+		// Initialize section-header suggest (opened after a markdown note is
+		// picked, so the user may optionally append `#heading`).
+		this.sectionSuggest = new SectionSuggest(
+			this.deps.app,
+			this.textInputEl,
+			null,
+			(attachment: Attachment) => this.addWikilinkAttachment(attachment),
+			() => this.deps.getPendingAttachments()
+		);
+
+		// When a markdown note is picked, hand off to the section picker.
+		this.vaultNoteSuggest.setOnBeginSectionFlow((file: TFile) => this.beginSectionFlow(file));
 
 		// Initialize workflow slash suggest
 		this.workflowSuggest = new WorkflowSlashSuggest(
@@ -715,10 +735,55 @@ export class ChatInput {
 		return text.trim();
 	}
 
+	// --- Private: section-header flow ---
+
+	/**
+	 * Enter the section-header picker after a markdown note was chosen.
+	 *
+	 * `VaultNoteSuggest` has already replaced `[[query` with editable
+	 * `[[Basename#` text and closed its own popover. We activate the section
+	 * suggest for `file` (with a dismiss callback that finalizes the plain
+	 * `[[Note]]` attachment if the user backs out), then fire a synthetic `input`
+	 * event so Obsidian's `AbstractInputSuggest` opens the section popover — the
+	 * same mechanism the "Attach vault note" menu button uses to open the note
+	 * picker.
+	 */
+	private beginSectionFlow(file: TFile): void {
+		if (!this.sectionSuggest) return;
+
+		this.sectionSuggest.activate(file, () => this.finalizePlainNote(file));
+
+		// Defer so the current selection/close settles before we reopen.
+		setTimeout(() => {
+			if (this.sectionSuggest?.active) {
+				this.textInputEl.dispatchEvent(new Event("input", { bubbles: true }));
+			}
+		}, 0);
+	}
+
+	/**
+	 * Finalize a plain `[[Note]]` attachment when the section picker is dismissed
+	 * without choosing a heading. Replaces the leftover `[[Basename#` live text
+	 * with the atomic note token.
+	 */
+	private finalizePlainNote(file: TFile): void {
+		// Only finalize if our live `[[…#` text is still present and unfinished
+		// (the user may have deleted it, or a token may already exist).
+		const text = this.textInputEl.textContent ?? "";
+		const triggerIdx = text.lastIndexOf("[[");
+		if (triggerIdx === -1 || text.slice(triggerIdx + 2).includes("]]")) return;
+
+		const attachment = createVaultNoteAttachment(file.path);
+		insertWikilinkToken(this.textInputEl, attachment);
+		this.addWikilinkAttachment(attachment);
+		log.debug("Section flow dismissed — finalized plain note", { path: file.path });
+	}
+
 	// --- Private: trigger detection ---
 
 	private detectSlashCommandTrigger(): void {
 		if (this.vaultNoteSuggest?.["isActive"]) return;
+		if (this.sectionSuggest?.active) return;
 		if (this.textInputEl.querySelector("[data-workflow-path]")) return;
 
 		const text = this.textInputEl.textContent ?? "";
@@ -730,12 +795,19 @@ export class ChatInput {
 	}
 
 	private detectWikilinkTrigger(): void {
+		// While the section picker is active, the input holds `[[Basename#…` — do
+		// NOT re-activate the vault-note suggest over it; the section suggest owns
+		// this input event.
+		if (this.sectionSuggest?.active) return;
+
 		const text = this.textInputEl.textContent ?? "";
 		const triggerIdx = text.lastIndexOf("[[");
 
 		if (triggerIdx !== -1 && this.vaultNoteSuggest) {
 			const afterTrigger = text.slice(triggerIdx + 2);
-			if (!afterTrigger.includes("]]")) {
+			// A `#` means the note name is complete and we're into section territory;
+			// don't re-open the note picker over it.
+			if (!afterTrigger.includes("]]") && !afterTrigger.includes("#")) {
 				this.vaultNoteSuggest.activate(triggerIdx);
 			}
 		}

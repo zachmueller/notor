@@ -132,6 +132,65 @@ export function insertWikilinkToken(
 	// to the DOM by createSpan above).
 	void tokenSpan;
 }
+
+/**
+ * Replace the `[[query` text in a contenteditable input with plain, still-editable
+ * text (not an atomic token). Used to hand off from note selection into the
+ * section-header picker: after a note is chosen we leave `[[Basename#` as live
+ * text so the user can keep typing a `#heading` query, exactly like Obsidian's
+ * own note-link editor. The cursor is placed at the end of the inserted text.
+ *
+ * Mirrors the node-walking/removal logic of {@link insertWikilinkToken}, but
+ * inserts a text node instead of a `contenteditable=false` span.
+ */
+export function replaceWikilinkTriggerWithText(
+	inputEl: HTMLDivElement,
+	text: string
+): void {
+	const fullText = inputEl.textContent ?? "";
+	const triggerIdx = fullText.lastIndexOf("[[");
+	if (triggerIdx === -1) return;
+
+	const walker = document.createTreeWalker(inputEl, NodeFilter.SHOW_TEXT);
+	let accumulated = 0;
+	let targetTextNode: Text | null = null;
+	let offsetInNode = 0;
+
+	let node = walker.nextNode() as Text | null;
+	while (node) {
+		const len = node.length;
+		if (accumulated + len > triggerIdx) {
+			targetTextNode = node;
+			offsetInNode = triggerIdx - accumulated;
+			break;
+		}
+		accumulated += len;
+		node = walker.nextNode() as Text | null;
+	}
+
+	if (!targetTextNode) return;
+
+	// Split at triggerIdx so splitNode starts with "[[query…", then remove it and
+	// every following sibling.
+	const splitNode = targetTextNode.splitText(offsetInNode);
+	let sibling: ChildNode | null = splitNode;
+	while (sibling) {
+		const next: ChildNode | null = sibling.nextSibling;
+		sibling.parentNode?.removeChild(sibling);
+		sibling = next;
+	}
+
+	// Insert the live text and place the cursor at its end.
+	const textNode = document.createTextNode(text);
+	inputEl.appendChild(textNode);
+
+	const range = document.createRange();
+	range.setStart(textNode, text.length);
+	range.collapse(true);
+	const sel = window.getSelection();
+	sel?.removeAllRanges();
+	sel?.addRange(range);
+}
 import { logger } from "../utils/logger";
 
 const log = logger("AttachmentPicker");
@@ -187,6 +246,13 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	private isActive = false;
 	private triggerStartIndex = -1;
 	private currentSuggestions: VaultNoteSuggestion[] = [];
+	/**
+	 * When set, selecting a markdown note hands off to the section-header picker
+	 * for that file instead of finalizing the attachment immediately. Wired by
+	 * ChatInput so the two suggests can coordinate. Optional so unit tests and
+	 * non-section callers keep the finalize-immediately behaviour.
+	 */
+	private onBeginSectionFlow: ((file: TFile) => void) | null = null;
 
 	constructor(
 		app: App,
@@ -199,6 +265,16 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 		this.onAttachmentAdded = onAttachmentAdded;
 		this.existingAttachments = existingAttachments;
 		this.limit = 20;
+	}
+
+	/**
+	 * Register the section-flow handoff. When set, selecting a markdown note
+	 * leaves editable `[[Basename#` text and invokes `cb(file)` so the caller can
+	 * open the section-header picker. Pass a no-op-free callback; clearing is not
+	 * supported (set once during wiring).
+	 */
+	setOnBeginSectionFlow(cb: (file: TFile) => void): void {
+		this.onBeginSectionFlow = cb;
 	}
 
 	/** Activate the suggest overlay after `[[` is detected. */
@@ -402,8 +478,25 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 			return;
 		}
 
-		// Create the attachment — route image/PDF files to appropriate attachment type
+		// Markdown notes can have section headings — hand off to the section
+		// picker so the user may optionally append `#heading` (Obsidian-style),
+		// leaving the note as live `[[Basename#` text until they pick or dismiss.
+		// Image/PDF files have no headings, so they finalize immediately.
 		const ext = "." + suggestion.file.extension.toLowerCase();
+		const isMarkdown = !IMAGE_EXTENSIONS.has(ext) && !PDF_EXTENSIONS.has(ext);
+		if (isMarkdown && this.onBeginSectionFlow) {
+			// Replace `[[query` with editable `[[Basename#` and open the section
+			// picker. The suggest text uses the basename (no extension) for a clean
+			// query surface; the final token/attachment still uses the full path.
+			replaceWikilinkTriggerWithText(this.chatInputEl, `[[${suggestion.file.basename}#`);
+			this.deactivate();
+			this.close();
+			this.onBeginSectionFlow(suggestion.file);
+			log.debug("Vault note selected — entering section flow", { path: suggestion.file.path });
+			return;
+		}
+
+		// Create the attachment — route image/PDF files to appropriate attachment type
 		let attachment: Attachment;
 		if (IMAGE_EXTENSIONS.has(ext)) {
 			attachment = createVaultImageAttachment(suggestion.file.path);
@@ -455,13 +548,22 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 	private onAttachmentAdded: OnAttachmentAdded;
 	private existingAttachments: () => Attachment[];
 	private chatInputEl: HTMLDivElement;
-	private targetFile: TFile;
+	/** The note whose headings we suggest. Reset on each activate(). */
+	private targetFile: TFile | null;
 	private isActive = false;
+	private currentSuggestions: SectionSuggestion[] = [];
+	/**
+	 * Called when the section picker is dismissed WITHOUT choosing a heading
+	 * (Escape, or the `#` was deleted). Lets the caller finalize the note as a
+	 * plain `[[Note]]` attachment. Fires at most once per activation.
+	 */
+	private onDismiss: (() => void) | null = null;
+	private dismissed = false;
 
 	constructor(
 		app: App,
 		inputEl: HTMLDivElement,
-		targetFile: TFile,
+		targetFile: TFile | null,
 		onAttachmentAdded: OnAttachmentAdded,
 		existingAttachments: () => Attachment[]
 	) {
@@ -473,42 +575,96 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 		this.limit = 30;
 	}
 
-	activate(): void {
+	/**
+	 * Activate the section picker for `targetFile`.
+	 *
+	 * @param targetFile - The note whose headings to offer.
+	 * @param onDismiss  - Invoked if the picker closes without a heading pick so
+	 *                     the caller can finalize the plain note attachment.
+	 */
+	activate(targetFile: TFile, onDismiss?: () => void): void {
 		this.isActive = true;
+		this.dismissed = false;
+		this.targetFile = targetFile;
+		this.onDismiss = onDismiss ?? null;
+		log.debug("SectionSuggest activated", { path: targetFile.path });
 	}
 
 	deactivate(): void {
 		this.isActive = false;
+		this.currentSuggestions = [];
+		log.debug("SectionSuggest deactivated");
+	}
+
+	/** Whether the section picker is currently active. */
+	get active(): boolean {
+		return this.isActive;
+	}
+
+	/**
+	 * Fire the dismiss callback exactly once, then deactivate. Called when the
+	 * picker closes without a heading having been chosen (Escape / `#` deleted /
+	 * click-outside). Idempotent: safe to call from both {@link getSuggestions}
+	 * and the {@link close} override.
+	 */
+	dismiss(): void {
+		if (!this.isActive || this.dismissed) return;
+		this.dismissed = true;
+		const cb = this.onDismiss;
+		this.onDismiss = null;
+		this.deactivate();
+		cb?.();
+		log.debug("SectionSuggest dismissed (no heading chosen)");
+	}
+
+	/**
+	 * Obsidian calls `close()` on Escape, click-outside, and after a selection.
+	 * Override it so that closing WITHOUT a heading pick finalizes the plain note
+	 * (via {@link dismiss}). `selectSuggestion` sets `dismissed` first, so the
+	 * post-selection close here is a no-op.
+	 */
+	close(): void {
+		super.close();
+		this.dismiss();
 	}
 
 	getSuggestions(inputStr: string): SectionSuggestion[] {
-		if (!this.isActive) {
+		if (!this.isActive || !this.targetFile) {
+			return [];
+		}
+
+		// The `#` marker must still be present; if it's gone the user backed out.
+		const hashIdx = inputStr.lastIndexOf("#");
+		if (hashIdx === -1) {
+			this.dismiss();
 			return [];
 		}
 
 		const cache = this.app.metadataCache.getFileCache(this.targetFile);
 		const headings = cache?.headings;
 		if (!headings || headings.length === 0) {
+			this.currentSuggestions = [];
 			return [];
 		}
 
-		// Extract query after `#`
-		const hashIdx = inputStr.lastIndexOf("#");
-		const query = hashIdx !== -1 ? inputStr.slice(hashIdx + 1).trim() : "";
+		const query = inputStr.slice(hashIdx + 1).trim();
 
 		const suggestions: SectionSuggestion[] = headings.map((h) => ({
 			heading: h.heading,
 			level: h.level,
-			filePath: this.targetFile.path,
+			filePath: this.targetFile!.path,
 		}));
 
 		if (!query) {
+			this.currentSuggestions = suggestions;
 			return suggestions;
 		}
 
-		// Filter by fuzzy match
+		// Filter by fuzzy match (headings often contain spaces, so the whole
+		// post-`#` string — spaces included — is the query).
 		const fuzzySearch = prepareFuzzySearch(query);
-		return suggestions.filter((s) => fuzzySearch(s.heading) !== null);
+		this.currentSuggestions = suggestions.filter((s) => fuzzySearch(s.heading) !== null);
+		return this.currentSuggestions;
 	}
 
 	renderSuggestion(suggestion: SectionSuggestion, el: HTMLElement): void {
@@ -523,7 +679,44 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 		});
 	}
 
+	/**
+	 * Select whatever the popover currently highlights — mirrors Enter. Used for
+	 * Tab-key selection. See {@link VaultNoteSuggest.selectHighlighted}.
+	 */
+	selectHighlighted(evt?: KeyboardEvent): void {
+		if (this.currentSuggestions.length === 0) return;
+
+		const controller = this.suggestions;
+		if (controller && typeof controller.useSelectedItem === "function") {
+			controller.useSelectedItem(evt ?? {});
+			return;
+		}
+
+		const domIdx = this.highlightedDomIndex();
+		if (domIdx >= 0 && domIdx < this.currentSuggestions.length) {
+			this.selectSuggestion(this.currentSuggestions[domIdx]!);
+			return;
+		}
+
+		this.selectSuggestion(this.currentSuggestions[0]!);
+	}
+
+	/** Index of the `.is-selected` row within the popover we own, or -1. */
+	private highlightedDomIndex(): number {
+		for (const c of Array.from(activeDocument.querySelectorAll(".suggestion-container"))) {
+			const items = Array.from(c.querySelectorAll(".suggestion-item"));
+			if (items.length !== this.currentSuggestions.length) continue;
+			const idx = items.findIndex((el) => el.classList.contains("is-selected"));
+			if (idx >= 0) return idx;
+		}
+		return -1;
+	}
+
 	selectSuggestion(suggestion: SectionSuggestion): void {
+		// A heading was chosen — this is a finalize, not a dismiss.
+		this.dismissed = true;
+		this.onDismiss = null;
+
 		const existing = this.existingAttachments();
 
 		// Check for duplicate
@@ -535,6 +728,7 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 		) {
 			new Notice("This section is already attached");
 			this.deactivate();
+			this.close();
 			return;
 		}
 
@@ -543,13 +737,14 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
 			suggestion.heading
 		);
 
-		// Insert inline token (replaces `[[query` text with a styled span)
+		// Insert inline token (replaces the live `[[Note#query` text with a styled span)
 		insertWikilinkToken(this.chatInputEl, attachment);
 
 		// Notify chat-view to track the attachment (no chip needed — token is inline)
 		this.onAttachmentAdded(attachment);
 
 		this.deactivate();
+		this.close();
 		log.debug("Section attached", {
 			path: suggestion.filePath,
 			section: suggestion.heading,

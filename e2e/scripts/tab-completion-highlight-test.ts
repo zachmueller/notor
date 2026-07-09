@@ -52,6 +52,9 @@ import {
 const NOTE_NAMES = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
 /** Workflow display names (files live under notor/workflows/<name>.md). */
 const WORKFLOW_NAMES = ["wf-alpha", "wf-bravo", "wf-charlie", "wf-delta"];
+/** A note with multiple section headings for the section-picker flow. */
+const SECTIONED_NOTE = "Sectioned";
+const SECTION_HEADINGS = ["Overview", "Key Findings", "Details", "Conclusion"];
 
 // ---------------------------------------------------------------------------
 // In-page probes (serializable snapshots — never return live objects).
@@ -77,15 +80,15 @@ interface DomProbe {
 	allTexts: string[];
 }
 
-/** Reach the live suggest instance ("vault" | "workflow") and snapshot it. */
-async function probeInstance(page: Page, which: "vault" | "workflow"): Promise<InstanceProbe> {
+/** Reach the live suggest instance and snapshot it. */
+async function probeInstance(page: Page, which: "vault" | "workflow" | "section"): Promise<InstanceProbe> {
 	return page.evaluate((kind) => {
 		const w = window as any;
 		const plugin = w.app?.plugins?.plugins?.["notor"];
 		const leaves = w.app?.workspace?.getLeavesOfType?.("notor-chat-view") ?? [];
 		const view = leaves[0]?.view ?? plugin?.getActiveOrchestrator?.()?.getView?.();
 		const ci = view?.chatInput;
-		const s = kind === "vault" ? ci?.vaultNoteSuggest : ci?.workflowSuggest;
+		const s = kind === "vault" ? ci?.vaultNoteSuggest : kind === "workflow" ? ci?.workflowSuggest : ci?.sectionSuggest;
 		if (!s) return { reachable: false };
 		const ctrl = s.suggestions; // Obsidian-internal SuggestionContainer (untyped)
 		return {
@@ -131,6 +134,29 @@ async function highlightedIdentity(
 				: item.workflow?.display_name != null ? `/${item.workflow.display_name}` : null;
 		return { idx, expectedToken };
 	}, which);
+}
+
+/**
+ * Identity of the highlighted SECTION heading. The section token is built as
+ * `[[${filename} § ${heading}]]` where filename includes the `.md` extension
+ * (see createVaultNoteSectionAttachment). We reconstruct that expected token
+ * from the highlighted SectionSuggestion.
+ */
+async function highlightedIdentitySection(
+	page: Page,
+): Promise<{ idx: number; expectedToken: string | null }> {
+	return page.evaluate(() => {
+		const w = window as any;
+		const plugin = w.app?.plugins?.plugins?.["notor"];
+		const leaves = w.app?.workspace?.getLeavesOfType?.("notor-chat-view") ?? [];
+		const view = leaves[0]?.view ?? plugin?.getActiveOrchestrator?.()?.getView?.();
+		const s = view?.chatInput?.sectionSuggest;
+		const idx = s?.suggestions?.selectedItem ?? -1;
+		const item = (s?.currentSuggestions ?? [])[idx];
+		if (!item?.filePath || item.heading == null) return { idx, expectedToken: null };
+		const filename = String(item.filePath).split("/").pop();
+		return { idx, expectedToken: `[[${filename} § ${item.heading}]]` };
+	});
 }
 
 /** Snapshot the currently-rendered suggestion popover DOM. */
@@ -452,6 +478,103 @@ async function testTabDoesNotSend(ctx: TestContext): Promise<void> {
 	await resetInput(page);
 }
 
+/** Test 7: note pick → section picker auto-opens → pick heading → `[[Note § Heading]]`. */
+async function testSectionFlowSelectsHeading(ctx: TestContext): Promise<void> {
+	console.log("\nTest 7: markdown note pick auto-opens section picker; heading → section token");
+	const { page } = ctx;
+	await resetInput(page);
+
+	// Type enough to bring the sectioned note to the top, then Tab to pick it.
+	await page.focus(".notor-text-input");
+	await page.keyboard.type(`[[${SECTIONED_NOTE}`);
+	const opened = await waitForSelector(page, ".suggestion-container .suggestion-item", 4_000);
+	if (!opened) {
+		ctx.fail("Section flow: `[[` popover", "Popover did not open for the sectioned note");
+		return;
+	}
+	// Highlighted item should be the sectioned note (exact-ish match ranks first).
+	await page.keyboard.press("Tab");
+	await page.waitForTimeout(600);
+
+	// The input should now hold live `[[Sectioned#` text (NOT an atomic token yet),
+	// and the section picker should have auto-opened.
+	const afterPick = await page.evaluate(() => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		const token = document.querySelector(".notor-wikilink-token");
+		return { text: el?.textContent ?? "", hasToken: !!token };
+	});
+	const sectionInst = await probeInstance(page, "section");
+	console.log(`  After note pick: text="${afterPick.text}" hasToken=${afterPick.hasToken} sectionActive=${sectionInst.active} len=${sectionInst.currentLen}`);
+
+	const liveTextOk = afterPick.text.includes(`[[${SECTIONED_NOTE}#`) && !afterPick.hasToken;
+	const pickerOpen = await waitForSelector(page, ".suggestion-container .suggestion-item", 3_000);
+	if (liveTextOk && sectionInst.active && pickerOpen) {
+		ctx.pass("Section picker auto-opens after note pick", `Input shows live "${afterPick.text}", section suggest active with ${sectionInst.currentLen} headings`);
+	} else {
+		const shot = await ctx.screenshot("07-section-open-fail");
+		ctx.fail(
+			"Section picker auto-opens after note pick",
+			`Expected live "[[${SECTIONED_NOTE}#" + active section suggest; got text="${afterPick.text}", hasToken=${afterPick.hasToken}, sectionActive=${sectionInst.active}, pickerOpen=${!!pickerOpen}`,
+			shot,
+		);
+		return;
+	}
+
+	// Navigate to the 2nd heading and pick it.
+	await page.keyboard.press("ArrowDown");
+	await page.waitForTimeout(120);
+	const hi = await highlightedIdentitySection(page);
+	console.log(`  Highlighted heading before Tab: expectedToken=${hi.expectedToken} (idx ${hi.idx})`);
+	await page.keyboard.press("Tab");
+	await page.waitForTimeout(500);
+	const inserted = await readToken(page, ".notor-wikilink-token");
+	const shot = await ctx.screenshot("07-section-picked");
+	console.log(`  Inserted section token: "${inserted}"`);
+
+	const matches = !!inserted && !!hi.expectedToken && inserted === hi.expectedToken;
+	if (matches) {
+		ctx.pass("Section pick inserts `[[Note § Heading]]`", `Highlighted idx ${hi.idx} (${hi.expectedToken}) → inserted "${inserted}"`, shot);
+	} else {
+		ctx.fail("Section pick inserts `[[Note § Heading]]`", `Expected ${hi.expectedToken}, inserted "${inserted}"`, shot);
+	}
+	await resetInput(page);
+}
+
+/** Test 8: pressing Escape in the section picker finalizes the plain `[[Note]]`. */
+async function testSectionFlowEscapeFinalizesPlainNote(ctx: TestContext): Promise<void> {
+	console.log("\nTest 8: Escape in section picker finalizes the plain note token");
+	const { page } = ctx;
+	await resetInput(page);
+
+	await page.focus(".notor-text-input");
+	await page.keyboard.type(`[[${SECTIONED_NOTE}`);
+	if (!(await waitForSelector(page, ".suggestion-container .suggestion-item", 4_000))) {
+		ctx.fail("Section escape: `[[` popover", "Popover did not open");
+		return;
+	}
+	await page.keyboard.press("Tab"); // pick note → opens section picker
+	await page.waitForTimeout(600);
+	if (!(await waitForSelector(page, ".suggestion-container .suggestion-item", 3_000))) {
+		ctx.fail("Section escape: picker open", "Section picker did not open after note pick");
+		return;
+	}
+
+	// Escape should dismiss the section picker and finalize the plain note.
+	await page.keyboard.press("Escape");
+	await page.waitForTimeout(500);
+	const inserted = await readToken(page, ".notor-wikilink-token");
+	const shot = await ctx.screenshot("08-section-escape");
+	console.log(`  Token after Escape: "${inserted}"`);
+
+	const expected = `[[${SECTIONED_NOTE}.md]]`;
+	if (inserted === expected) {
+		ctx.pass("Escape finalizes plain note", `Section picker dismissed → "${inserted}"`, shot);
+	} else {
+		ctx.fail("Escape finalizes plain note", `Expected "${expected}" after Escape, got "${inserted}"`, shot);
+	}
+	await resetInput(page);
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -472,6 +595,8 @@ async function tests(ctx: TestContext): Promise<void> {
 	await testMechanismMatrix(ctx);
 	await testWorkflowSuggest(ctx);
 	await testTabDoesNotSend(ctx);
+	await testSectionFlowSelectsHeading(ctx);
+	await testSectionFlowEscapeFinalizesPlainNote(ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -493,6 +618,12 @@ runTest(
 				fs.writeFileSync(path.join(vaultPath, `${name}.md`), `# ${name}\n\nBody of ${name}.\n`);
 			}
 
+			// A note with several headings to drive the section-header picker.
+			fs.writeFileSync(
+				path.join(vaultPath, `${SECTIONED_NOTE}.md`),
+				SECTION_HEADINGS.map((h) => `# ${h}\n\nContent under ${h}.\n`).join("\n"),
+			);
+
 			// Workflows so `/` yields multiple results.
 			const workflowsDir = path.join(vaultPath, "notor", "workflows");
 			fs.mkdirSync(workflowsDir, { recursive: true });
@@ -506,6 +637,7 @@ runTest(
 		},
 		cleanupFiles: [
 			...NOTE_NAMES.map((n) => `${n}.md`),
+			`${SECTIONED_NOTE}.md`,
 			...WORKFLOW_NAMES.map((n) => `notor/workflows/${n}.md`),
 		],
 	},
