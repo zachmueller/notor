@@ -416,6 +416,12 @@
 	color: var(--text-muted);
 }
 
+/* Inline validation error for a provider setting (e.g. bad custom-params JSON) */
+.notor-provider-group > p.notor-provider-error {
+	color: var(--text-error, var(--color-red));
+	padding-bottom: var(--size-4-4);
+}
+
 /* Preset list — spaced card rows */
 .notor-preset-list {
 	display: flex;

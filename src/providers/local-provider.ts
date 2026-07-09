@@ -179,11 +179,18 @@ export class LocalProvider implements LLMProvider {
 	private readonly endpoint: string;
 	private readonly instanceId: string;
 	private readonly app: App;
+	/** User-supplied extra request-body fields (e.g. Ollama `keep_alive`). */
+	private readonly extraBodyParams: Record<string, unknown>;
 
 	constructor(config: LLMProviderConfig, app: App) {
 		this.endpoint = (config.endpoint || "").replace(/\/+$/, "");
 		this.instanceId = config.id;
 		this.app = app;
+		const extras = config.extra_body_params;
+		this.extraBodyParams =
+			extras && typeof extras === "object" && !Array.isArray(extras)
+				? extras
+				: {};
 	}
 
 	/**
@@ -217,7 +224,8 @@ export class LocalProvider implements LLMProvider {
 		}
 
 		const body: Record<string, unknown> = {
-			model: options.model,
+			...this.extraBodyParams, // user extras first
+			model: options.model, // fixed protocol fields win over extras
 			messages: toOpenAIMessages(messages),
 			stream: true,
 			stream_options: { include_usage: true },

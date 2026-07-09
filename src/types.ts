@@ -471,6 +471,8 @@ export interface LLMProviderConfig {
 	model_cache?: ModelInfo[] | null;
 	/** When the model list was last fetched (ISO 8601). */
 	model_cache_timestamp?: string | null;
+	/** Free-form extra fields merged into the request body (local provider only). */
+	extra_body_params?: Record<string, unknown> | null;
 }
 
 // ---------------------------------------------------------------------------
