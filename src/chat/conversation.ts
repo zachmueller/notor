@@ -114,6 +114,7 @@ export class ConversationManager {
 			title?: string;
 			use_extended_context?: boolean;
 			preset_name?: string | null;
+			thinking_level?: string | null;
 		}
 	): Conversation {
 		const now = new Date().toISOString();
@@ -152,6 +153,9 @@ export class ConversationManager {
 			}),
 			...(workflowMetadata?.use_extended_context && {
 				use_extended_context: workflowMetadata.use_extended_context,
+			}),
+			...(workflowMetadata?.thinking_level !== undefined && {
+				thinking_level: workflowMetadata.thinking_level,
 			}),
 		};
 
@@ -220,6 +224,11 @@ export class ConversationManager {
 		currentModelId: string,
 		currentMode: ConversationMode,
 		forkMode: ForkMode = "resume",
+		selection?: {
+			useExtendedContext?: boolean;
+			thinkingLevel?: string | null;
+			presetName?: string | null;
+		},
 	): { conversation: Conversation; messages: Message[] } | null {
 		if (!this.activeConversation) return null;
 
@@ -349,7 +358,18 @@ export class ConversationManager {
 			...(parent.workflow_deactivated !== undefined && { workflow_deactivated: parent.workflow_deactivated }),
 			...(parent.persona_name !== undefined && { persona_name: parent.persona_name }),
 			is_background: false,
-			...(parent.use_extended_context && { use_extended_context: parent.use_extended_context }),
+			// Model-selection state carried onto the fork. Prefer the caller's active
+			// selection (what the selector actually shows at fork time); fall back to
+			// the parent header so older callers that pass no `selection` still inherit.
+			...((selection?.useExtendedContext ?? parent.use_extended_context) && {
+				use_extended_context: selection?.useExtendedContext ?? parent.use_extended_context,
+			}),
+			...((selection?.thinkingLevel ?? parent.thinking_level) != null && {
+				thinking_level: selection?.thinkingLevel ?? parent.thinking_level,
+			}),
+			...((selection?.presetName ?? parent.preset_name) != null && {
+				preset_name: selection?.presetName ?? parent.preset_name,
+			}),
 			// Fork provenance
 			forked_from_conversation_id: parent.id,
 			forked_from_message_id: forkAtMessageId,
@@ -422,6 +442,8 @@ export class ConversationManager {
 		thinking_duration_ms?: number | null;
 		tool_call?: ToolCall | null;
 		tool_result?: ToolResult | null;
+		/** Provider/turn error diagnostics (error role only). */
+		error?: Message["error"];
 		auto_context?: string | null;
 		attachments?: Message["attachments"];
 		hook_injections?: string[] | null;
@@ -461,6 +483,7 @@ export class ConversationManager {
 			// used for fork/replay/compaction.
 			tool_call: params.tool_call ? (JSON.parse(JSON.stringify(params.tool_call)) as ToolCall) : null,
 			tool_result: params.tool_result ?? null,
+			error: params.error ?? null,
 			truncated: false,
 			auto_context: params.auto_context ?? null,
 			attachments: params.attachments ?? null,

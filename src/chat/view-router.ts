@@ -75,6 +75,11 @@ export class ViewRouter {
 			case "extension_block":
 				this.view?.renderExtensionBlock(message);
 				break;
+			case "error":
+				this.view?.showError(
+					typeof message.content === "string" ? message.content : "Provider error",
+				);
+				break;
 			default:
 				assertUnreachable(message.role);
 		}

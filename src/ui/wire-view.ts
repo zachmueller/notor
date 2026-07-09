@@ -34,6 +34,27 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 
 	const updateThisView = () => view.updateActivityIndicator();
 
+	/**
+	 * Persist the FULL model-selection subset to the displayed conversation
+	 * header from the orchestrator's current active state. All model-selection
+	 * handlers (provider / model / preset / persona) call this instead of each
+	 * writing a different partial subset — divergence between those partial
+	 * writes was the root of the "screwy selector on fork/reopen" behavior.
+	 * Mutate orchestrator active-state FIRST, then call this to snapshot it.
+	 */
+	const applyModelSelectionToHeader = (context: string) => {
+		const conv = orchestrator.getDisplayedConversation();
+		if (!conv) return;
+		conv.provider_id = orchestrator.getActiveProviderId();
+		conv.model_id = orchestrator.getActiveModelId();
+		conv.use_extended_context = orchestrator.getActiveUseExtendedContext();
+		conv.thinking_level = orchestrator.getActiveThinkingLevel();
+		conv.preset_name = orchestrator.getActivePresetName();
+		historyManager.updateConversationHeader(conv).catch((e) => {
+			log.error(`Failed to update conversation header on ${context}`, { error: String(e) });
+		});
+	};
+
 	view.setOnCloseCleanup(async () => {
 		view._loadConversationAbort?.abort();
 		clearTimeout(view._loadFallbackTimeout);
@@ -119,10 +140,10 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		const conv = orchestrator.getDisplayedConversation();
 		if (conv) {
 			conv.persona_name = persona?.name ?? null;
-			historyManager.updateConversationHeader(conv).catch((e) => {
-				log.error("Failed to update conversation header on persona change", { error: String(e) });
-			});
 		}
+		// A persona override may have changed provider/model/preset/thinking, so
+		// snapshot the full selection alongside persona_name (single write path).
+		applyModelSelectionToHeader("persona change");
 
 		toolDispatcher.setActivePersonaName(persona?.name ?? null);
 
@@ -461,13 +482,9 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 			log.error("Failed to save provider change", { error: String(e) });
 		});
 
-		const conv = orchestrator.getDisplayedConversation();
-		if (conv) {
-			conv.provider_id = providerId;
-			historyManager.updateConversationHeader(conv).catch((e) => {
-				log.error("Failed to update conversation header on provider change", { error: String(e) });
-			});
-		}
+		// setActiveProvider resets model/extended from the provider config, so
+		// snapshot the whole selection (not just provider_id) into the header.
+		applyModelSelectionToHeader("provider change");
 	});
 
 	// Model change
@@ -491,14 +508,7 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 			}
 		}
 
-		const conv = orchestrator.getDisplayedConversation();
-		if (conv) {
-			conv.model_id = modelId;
-			conv.use_extended_context = isExtendedContext;
-			historyManager.updateConversationHeader(conv).catch((e) => {
-				log.error("Failed to update conversation header on model change", { error: String(e) });
-			});
-		}
+		applyModelSelectionToHeader("model change");
 	});
 
 	// Refresh models
@@ -587,18 +597,7 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		plugin.saveSettings().catch((e) => {
 			log.error("Failed to save preset change", { error: String(e) });
 		});
-		const conv = orchestrator.getDisplayedConversation();
-		if (conv) {
-			conv.preset_name = presetName;
-			if (providerId) conv.provider_id = providerId;
-			if (modelId) {
-				conv.model_id = modelId;
-				conv.use_extended_context = useExtendedContext ?? false;
-			}
-			historyManager.updateConversationHeader(conv).catch((e) => {
-				log.error("Failed to update conversation header on preset change", { error: String(e) });
-			});
-		}
+		applyModelSelectionToHeader("preset change");
 	});
 
 	// Available presets
@@ -620,6 +619,9 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 	});
 	view.setOnThinkingLevelChange((level) => {
 		orchestrator.setActiveThinkingLevel(level);
+		// Persist so reopen/fork restore the level from the header instead of
+		// dropping it (the "stored" resolver branch now reads thinking_level).
+		applyModelSelectionToHeader("thinking level change");
 	});
 
 	// Checkpoint callbacks

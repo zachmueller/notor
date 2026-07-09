@@ -22,6 +22,7 @@ import type { ToolDispatcher } from "./dispatcher";
 import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./tool-orchestration";
 import { toChatMessages, processStream, calculateCost } from "./message-pipeline";
 import { supportsThinking } from "../providers/model-metadata";
+import { resolveConversationModel } from "../presets/preset-resolver";
 import { ConfigResolver } from "./config-resolver";
 import { HookDispatcher } from "./hook-dispatcher";
 import { CompactionManager } from "./compaction-manager";
@@ -296,6 +297,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			() => this.activeProviderId,
 			() => this.activeModelId,
 			() => this.activeUseExtendedContext,
+			() => this.activeThinkingLevel,
 			(id) => { this.activeProviderId = id; },
 			(modelId) => { this.activeModelId = modelId; },
 			(useExtended) => { this.activeUseExtendedContext = useExtended; },
@@ -1036,30 +1038,36 @@ export class ChatOrchestrator implements ToolSessionContext {
 		// conversations or if the stored provider is no longer configured.
 		const pinnedPersona = this.activePersona;
 
-		const headerProviderId = snapshotConv.provider_id as string | undefined;
-		let headerProviderConfig = headerProviderId
-			? this.providerRegistry.getConfig(headerProviderId)
-			: null;
-		// Backward compat: if the header stores a bare type, resolve to first instance
-		if (!headerProviderConfig && headerProviderId) {
-			const resolvedId = this.providerRegistry.resolveTypeToId(headerProviderId);
-			if (resolvedId) headerProviderConfig = this.providerRegistry.getConfig(resolvedId);
-		}
-		// Fall back to per-orchestrator provider for new conversations or
-		// when the header's provider is no longer configured.
-		const providerId = headerProviderConfig
-			? headerProviderConfig.id
+		// Resolve provider/model/extended/thinking through the SAME authority the
+		// reopen path uses (resolveConversationModel: preset > stored-header >
+		// default), so thinking level and model come from one source of truth and
+		// can never disagree with the selector. Falls back to per-orchestrator
+		// active state only when no configured preset resolution is possible.
+		const isProviderAccessible = (pid: string) =>
+			!!this.providerRegistry.getConfig(pid) || !!this.providerRegistry.resolveTypeToId(pid);
+		const resolution = resolveConversationModel(
+			snapshotConv,
+			this.settings.model_presets,
+			this.settings.default_preset,
+			isProviderAccessible,
+		);
+		// Normalize the resolved provider id to a concrete configured instance
+		// (the header/preset may carry a bare type for back-compat).
+		const resolvedProviderId = resolution
+			? (this.providerRegistry.getConfig(resolution.providerId)?.id
+				?? this.providerRegistry.resolveTypeToId(resolution.providerId)
+				?? resolution.providerId)
 			: this.activeProviderId;
-		const providerConfig = headerProviderConfig ?? this.providerRegistry.getConfig(providerId);
-
-		// Use the header's model_id if the header's provider is still configured,
-		// otherwise fall back to per-orchestrator model.
-		const modelId = headerProviderConfig
-			? (snapshotConv.model_id || (providerConfig?.model_id ?? ""))
+		const providerConfig = this.providerRegistry.getConfig(resolvedProviderId);
+		const providerId = resolvedProviderId;
+		const modelId = resolution
+			? (resolution.modelId || (providerConfig?.model_id ?? ""))
 			: this.activeModelId;
-		const useExtendedContext = headerProviderConfig
-			? (snapshotConv.use_extended_context ?? false)
+		const useExtendedContext = resolution
+			? resolution.useExtendedContext
 			: this.activeUseExtendedContext;
+		const thinkingLevel = resolution ? resolution.thinkingLevel : this.activeThinkingLevel;
+		const presetName = resolution ? resolution.presetName : this.activePresetName;
 
 		// Re-hydrate workflow tool configs for follow-up turns. The transient
 		// WorkflowAssemblyResult only lives for the first execution session
@@ -1101,7 +1109,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			providerId,
 			modelId,
 			useExtendedContext,
-			thinkingLevel: this.activeThinkingLevel,
+			thinkingLevel,
 			workflowAssembly,
 			approvalCallback,
 			interactionCallback,
@@ -1116,11 +1124,20 @@ export class ChatOrchestrator implements ToolSessionContext {
 		const headerDirty =
 			sessionConv.persona_name !== (pinnedPersona?.name ?? null) ||
 			sessionConv.provider_id !== providerId ||
-			sessionConv.model_id !== modelId;
+			sessionConv.model_id !== modelId ||
+			(sessionConv.use_extended_context ?? false) !== useExtendedContext ||
+			(sessionConv.thinking_level ?? null) !== (thinkingLevel ?? null) ||
+			(sessionConv.preset_name ?? null) !== (presetName ?? null);
 		if (headerDirty) {
+			// Write the FULL selection subset so the header always matches what
+			// this session will actually send (previously only persona/provider/
+			// model were written, letting extended/thinking/preset drift).
 			sessionConv.persona_name = pinnedPersona?.name ?? null;
 			sessionConv.provider_id = providerId;
 			sessionConv.model_id = modelId;
+			sessionConv.use_extended_context = useExtendedContext;
+			sessionConv.thinking_level = thinkingLevel;
+			sessionConv.preset_name = presetName;
 			await this.historyManager.updateConversationHeader(sessionConv);
 		}
 
@@ -1153,6 +1170,23 @@ export class ChatOrchestrator implements ToolSessionContext {
 			await session.responsePromise;
 		} catch (e) {
 			session.setStatus("errored");
+			// Persist a thrown provider error into the conversation JSONL so the
+			// failure is diagnosable on reload (mirrors the yielded-error path).
+			try {
+				const errMsg = e instanceof Error ? e.message : String(e);
+				const details = e instanceof ProviderError ? e.details : undefined;
+				session.conversationManager.addMessage({
+					role: "error",
+					content: errMsg,
+					error: {
+						name: e instanceof Error ? e.name : undefined,
+						message: details?.rawMessage ?? errMsg,
+						offending_fields: details?.offendingFields,
+					},
+				});
+			} catch {
+				// Best-effort — never let error persistence mask the original error.
+			}
 			this.handleError(e);
 		} finally {
 			if (session.status === "running" || session.status === "waiting_approval") {
@@ -1497,6 +1531,18 @@ export class ChatOrchestrator implements ToolSessionContext {
 						: (result.error as unknown) instanceof Error
 							? (result.error as unknown as Error).message
 							: JSON.stringify(result.error);
+					// Persist the error into the conversation JSONL so a failed chat
+					// carries diagnostic detail (previously errors were UI-only and
+					// lost on reload). Auto-persists via the onMessageAdded wiring.
+					convManager.addMessage({
+						role: "error",
+						content: errStr,
+						error: {
+							name: result.details?.name,
+							message: result.details?.rawMessage ?? errStr,
+							offending_fields: result.details?.offendingFields,
+						},
+					});
 					this.getViewForSession(session)?.showError(errStr);
 				}
 			}

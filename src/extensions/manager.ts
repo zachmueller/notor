@@ -128,6 +128,15 @@ export class UserToolAdapter implements Tool {
 			// structured error ToolResult, so the LLM sees a diagnosable tool error
 			// instead of the conversation wedging. Composes with (does not clobber)
 			// the merged `options?.abortSignal` set on `utils` above.
+			//
+			// Interactive tools (ask_user, or any tool declaring `awaitsUserInput`)
+			// park at an await awaiting a human answer; `withTimeout` fires at that
+			// boundary, so the global timeout would auto-cancel a slow-to-answer user.
+			// Exempt such a tool from the timeout when a live foreground interaction
+			// channel exists — the user can still Stop it (the dispatcher's abort race
+			// is untouched). Headless/no-channel runs keep the guard (ask_user returns
+			// a clean error there anyway), and `auto_skip_user_input_prompts` opts back
+			// into the timeout on purpose.
 			const compiledFn = this.definition.compiledFn!;
 			const invoke = () => compiledFn(
 				this.plugin.app,
@@ -138,8 +147,12 @@ export class UserToolAdapter implements Tool {
 				shared,
 				params,
 			);
+			const isInteractive = this.definition.awaitsUserInput === true;
+			const hasLiveChannel = !!options?.interactionCallback;
+			const skipUserPrompts = this.plugin.settings.auto_skip_user_input_prompts === true;
+			const exemptFromTimeout = isInteractive && hasLiveChannel && !skipUserPrompts;
 			const timeoutSeconds = this.plugin.settings.extension_execution_timeout_seconds;
-			const returnValue = timeoutSeconds > 0
+			const returnValue = (!exemptFromTimeout && timeoutSeconds > 0)
 				? await withTimeout(invoke, timeoutSeconds * 1000)
 				: await invoke();
 
@@ -320,6 +333,7 @@ export class ExtensionManager {
 				"notor-mode": scaffold.mode,
 			};
 			if (scaffold.featureGroup) frontmatter["notor-feature-group"] = scaffold.featureGroup;
+			if (scaffold.awaitsUserInput) frontmatter["notor-awaits-user-input"] = true;
 			const resolvedToolContent = this.plugin.getTemplateRegistry().resolve(scaffold.scaffoldContent);
 			const parsed = parseExtensionFile(
 				resolvedToolContent,

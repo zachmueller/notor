@@ -85,6 +85,8 @@ function renderMessage(msg: Message): string | null {
 			return renderToolResult(msg);
 		case "extension_block":
 			return renderExtensionBlock(msg);
+		case "error":
+			return typeof msg.content === "string" ? `> [!warning] Error\n> ${msg.content}` : null;
 		default:
 			assertUnreachable(msg.role);
 	}

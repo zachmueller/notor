@@ -773,6 +773,71 @@ describe("execution timeout", () => {
 		const returned = await manager.executeAutomation(automation, {});
 		expect(returned).toBe("approved");
 	});
+
+	// Interactive-tool exemption: a tool declaring `awaitsUserInput` is not
+	// auto-cancelled by the execution timeout when a live interaction channel
+	// exists (the foreground case), unless the user opts back in via
+	// `auto_skip_user_input_prompts`.
+	it("interactive tool + live channel: NOT cancelled by the timeout (guard bypassed)", async () => {
+		// A short real delay: with the guard bypassed the promise must actually
+		// resolve. A 1ms guard would fire long before 20ms if it were active, so
+		// resolving proves the exemption skipped withTimeout.
+		const compiledFn = vi.fn(() => new Promise<string>((resolve) => setTimeout(() => resolve("answered"), 20)));
+		const toolDef = makeToolDef({ compiledFn, awaitsUserInput: true });
+
+		const plugin = pluginWithTimeout(0.001);
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const adapter = new UserToolAdapter(toolDef, manager, plugin as never);
+
+		const result = await adapter.execute({ query: "test" }, { interactionCallback: vi.fn() });
+
+		expect(result.success).toBe(true);
+		expect(result.result).toBe("answered");
+	});
+
+	it("interactive tool but NO channel: still times out (headless keeps the guard)", async () => {
+		const compiledFn = vi.fn(() => new Promise<string>((resolve) => setTimeout(() => resolve("late"), 5000)));
+		const toolDef = makeToolDef({ compiledFn, awaitsUserInput: true });
+
+		const plugin = pluginWithTimeout(0.001);
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const adapter = new UserToolAdapter(toolDef, manager, plugin as never);
+
+		// No interactionCallback → no live foreground channel → guard still applies.
+		const result = await adapter.execute({ query: "test" });
+
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/timeout|await boundary/i);
+	});
+
+	it("interactive tool + live channel + auto_skip_user_input_prompts: times out again", async () => {
+		const compiledFn = vi.fn(() => new Promise<string>((resolve) => setTimeout(() => resolve("late"), 5000)));
+		const toolDef = makeToolDef({ compiledFn, awaitsUserInput: true });
+
+		const plugin = pluginWithTimeout(0.001);
+		(plugin.settings as Record<string, unknown>).auto_skip_user_input_prompts = true;
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const adapter = new UserToolAdapter(toolDef, manager, plugin as never);
+
+		const result = await adapter.execute({ query: "test" }, { interactionCallback: vi.fn() });
+
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/timeout|await boundary/i);
+	});
+
+	it("non-interactive tool + live channel: still times out (exemption is opt-in)", async () => {
+		const compiledFn = vi.fn(() => new Promise<string>((resolve) => setTimeout(() => resolve("late"), 5000)));
+		const toolDef = makeToolDef({ compiledFn }); // awaitsUserInput unset
+
+		const plugin = pluginWithTimeout(0.001);
+		const manager = new ExtensionManager(plugin as never, vi.fn());
+		const adapter = new UserToolAdapter(toolDef, manager, plugin as never);
+
+		const result = await adapter.execute({ query: "test" }, { interactionCallback: vi.fn() });
+
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/timeout|await boundary/i);
+	});
 });
 
 // ---------------------------------------------------------------------------

@@ -56,7 +56,7 @@ export interface ConversationModelResolution {
  * Returns null only if no resolution is possible (no configured presets at all).
  */
 export function resolveConversationModel(
-	conversation: { preset_name?: string | null; provider_id: string; model_id: string; use_extended_context?: boolean },
+	conversation: { preset_name?: string | null; provider_id: string; model_id: string; use_extended_context?: boolean; thinking_level?: string | null },
 	presets: ModelPreset[],
 	defaultPresetName: string,
 	isProviderAccessible: (providerId: string) => boolean,
@@ -76,14 +76,16 @@ export function resolveConversationModel(
 		}
 	}
 
-	// Step 2: Fall back to stored provider/model if provider is still accessible
+	// Step 2: Fall back to stored provider/model if provider is still accessible.
+	// Carry the conversation's persisted thinking_level so reopening a preset-less
+	// conversation preserves its thinking level instead of silently zeroing it.
 	if (isProviderAccessible(conversation.provider_id)) {
 		return {
 			presetName: null,
 			providerId: conversation.provider_id,
 			modelId: conversation.model_id,
 			useExtendedContext: conversation.use_extended_context ?? false,
-			thinkingLevel: null,
+			thinkingLevel: conversation.thinking_level ?? null,
 			source: "stored",
 		};
 	}

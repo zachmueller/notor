@@ -33,6 +33,7 @@ Everything outside the fences (prose, headings, etc.) is ignored by the runtime 
 | `notor-tool-name` | yes | Unique tool identifier. If it matches a built-in tool name, overrides the built-in. |
 | `notor-description` | yes | Human-readable description sent to the AI. |
 | `notor-mode` | yes | `"read"` or `"write"`. Determines [Plan/Act mode](safety.md) behavior. |
+| `notor-awaits-user-input` | no | Set `true` for a tool that suspends awaiting human input (e.g. via `utils.ask`/`utils.askMany`). When a live foreground interaction channel exists, the tool is exempt from the execution timeout so a slow-to-answer user is never auto-cancelled (Stop still cancels it). Headless/no-channel runs keep the timeout. Users can opt back into auto-skipping via Settings → Tools → "Auto-skip stale user-input prompts". |
 
 ### Parameter schema
 

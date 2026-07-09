@@ -182,6 +182,35 @@ describe("ConversationManager.prepareFork()", () => {
 			expect(fork!.conversation.model_id).toBe("claude-3");
 			expect(fork!.conversation.mode).toBe("plan");
 		});
+
+		// Regression: a fork must carry the caller's active selection (preset,
+		// thinking level, extended context), not silently drop it.
+		it("carries caller-provided thinking level, preset, and extended context", () => {
+			const { u1 } = setupStandardConversation(mgr);
+
+			const fork = mgr.prepareFork(u1.id, "bedrock", "global.anthropic.claude-opus-4-8", "act", "resume", {
+				useExtendedContext: true,
+				thinkingLevel: "high",
+				presetName: "large",
+			});
+			expect(fork!.conversation.thinking_level).toBe("high");
+			expect(fork!.conversation.preset_name).toBe("large");
+			expect(fork!.conversation.use_extended_context).toBe(true);
+		});
+
+		it("falls back to the parent header when no selection is provided", () => {
+			mgr.createConversation("bedrock", "global.anthropic.claude-opus-4-8", "act", {
+				preset_name: "large",
+				thinking_level: "medium",
+				use_extended_context: true,
+			});
+			const u1 = mgr.addMessage({ role: "user", content: "Hello" });
+
+			const fork = mgr.prepareFork(u1.id, "bedrock", "global.anthropic.claude-opus-4-8", "act");
+			expect(fork!.conversation.thinking_level).toBe("medium");
+			expect(fork!.conversation.preset_name).toBe("large");
+			expect(fork!.conversation.use_extended_context).toBe(true);
+		});
 	});
 
 	// -----------------------------------------------------------------------

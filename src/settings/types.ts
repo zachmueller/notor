@@ -537,4 +537,16 @@ export interface NotorSettings {
 	 * an unbounded synchronous loop is not interruptible.
 	 */
 	extension_execution_timeout_seconds: number;
+
+	/**
+	 * When true, tools that suspend awaiting human input (e.g. `ask_user`, or any
+	 * tool declaring `notor-awaits-user-input`) are subject to the execution
+	 * timeout like any other tool, so a stale prompt auto-skips once
+	 * {@link extension_execution_timeout_seconds} elapses. Default false: such
+	 * tools wait indefinitely for the human in a foreground session (a live
+	 * interaction channel), which is the usual intent — the user can still cancel
+	 * via Stop. Has no effect when the execution timeout is `0` (guard disabled)
+	 * or in headless/no-channel runs (which keep the guard regardless).
+	 */
+	auto_skip_user_input_prompts: boolean;
 }

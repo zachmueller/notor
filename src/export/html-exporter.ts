@@ -399,6 +399,10 @@ function renderMessage(msg: Message, subAgentConversations?: SubAgentConversatio
 			return renderToolResultHtml(msg, subAgentConversations);
 		case "extension_block":
 			return renderExtensionBlockHtml(msg);
+		case "error":
+			return typeof msg.content === "string"
+				? `<div class="message error"><strong>⚠ Error:</strong> ${escapeHtml(msg.content)}</div>`
+				: null;
 		default:
 			assertUnreachable(msg.role);
 	}
@@ -646,6 +650,9 @@ function renderSubAgentMessage(msg: Message): string | null {
 		}
 		case "extension_block":
 			// Sub-agents don't emit extension_block messages, but handle gracefully
+			return null;
+		case "error":
+			// Sub-agents surface errors via their runner, not as persisted messages.
 			return null;
 		default:
 			assertUnreachable(msg.role);

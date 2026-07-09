@@ -13,7 +13,7 @@
 
 import type { Message } from "../types";
 import { assertUnreachable } from "../utils/assert-unreachable";
-import type { ChatMessage, StreamChunk } from "../providers/provider";
+import type { ChatMessage, ProviderErrorDetails, StreamChunk } from "../providers/provider";
 import type { ContentBlock } from "../media/types";
 import { getModelMetadata } from "../providers/model-metadata";
 import { parseStreamEvents, type ParseStreamOpts } from "./stream-utils";
@@ -77,7 +77,7 @@ export type StreamResult =
 	| { type: "text"; text: string; thinking: string; thinkingDurationMs: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; thinking: string; thinkingDurationMs: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "cancelled"; text: string; thinking: string; thinkingDurationMs: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "error"; error: string; text: string; inputTokens: number; outputTokens: number };
+	| { type: "error"; error: string; details?: ProviderErrorDetails; text: string; inputTokens: number; outputTokens: number };
 
 /**
  * Process a provider stream into a typed result.
@@ -223,6 +223,7 @@ export async function processStream(
 				return {
 					type: "error",
 					error: event.message,
+					details: event.details,
 					text: textContent,
 					inputTokens,
 					outputTokens,
@@ -367,6 +368,10 @@ export function toChatMessages(messages: Message[], systemPrompt: string): ChatM
 				// null → drop entirely (zero wire tokens)
 				break;
 			}
+
+			case "error":
+				// Error records are diagnostic-only — never replayed to the LLM.
+				break;
 
 			default:
 				assertUnreachable(msg.role);

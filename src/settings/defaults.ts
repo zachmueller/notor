@@ -237,6 +237,11 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	// Execution timeout for user tools + automations (0 = disabled)
 	extension_execution_timeout_seconds: 300,
 
+	// Auto-skip stale user-input prompts (ask_user etc.) via the execution
+	// timeout. Off by default: user-input tools wait indefinitely in a
+	// foreground session (Stop still cancels them).
+	auto_skip_user_input_prompts: false,
+
 	// Developer escape hatch
 	log_level: "error",
 

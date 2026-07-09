@@ -114,7 +114,7 @@ export type StreamChunk =
 			 */
 			stop_reason?: string;
 	  }
-	| { type: "error"; error: string };
+	| { type: "error"; error: string; details?: ProviderErrorDetails };
 
 // ---------------------------------------------------------------------------
 // ProviderError
@@ -132,6 +132,18 @@ export type ProviderErrorCode =
 	| "UNKNOWN";
 
 /**
+ * Structured diagnostic detail attached to a provider failure so the raw
+ * cause survives into the conversation history (see Message.error). Captures
+ * the underlying exception name, the raw provider message, and the keys of
+ * any request fields that may have triggered the rejection.
+ */
+export interface ProviderErrorDetails {
+	name?: string;
+	rawMessage?: string;
+	offendingFields?: string[];
+}
+
+/**
  * Structured error class for provider failures.
  *
  * Includes the provider name and a categorized error code so the chat
@@ -143,7 +155,8 @@ export class ProviderError extends Error {
 		message: string,
 		public readonly provider: string,
 		public readonly code: ProviderErrorCode,
-		public readonly cause?: Error
+		public readonly cause?: Error,
+		public readonly details?: ProviderErrorDetails
 	) {
 		super(message);
 		this.name = "ProviderError";

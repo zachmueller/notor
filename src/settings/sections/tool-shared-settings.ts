@@ -69,6 +69,21 @@ export function renderExtensionTimeoutSetting(
 					}
 				}),
 		);
+
+	new Setting(containerEl)
+		.setName("Auto-skip stale user-input prompts")
+		.setDesc(
+			"Auto-skip prompts from tools waiting on your input (e.g. ask_user) once the execution timeout above elapses, instead of waiting indefinitely. " +
+				"Off by default so you can always step in — you can still cancel a prompt with Stop. Requires the execution timeout above to be greater than 0.",
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(ctx.settings.auto_skip_user_input_prompts)
+				.onChange(async (value) => {
+					ctx.settings.auto_skip_user_input_prompts = value;
+					await ctx.saveSettings();
+				}),
+		);
 }
 
 /**

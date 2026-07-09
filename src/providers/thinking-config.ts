@@ -1,4 +1,4 @@
-import { getThinkingMode } from "./model-metadata";
+import { getThinkingCapability } from "./model-metadata";
 
 const ANTHROPIC_BUDGET_MAP: Record<string, number> = {
 	low: 1024,
@@ -40,10 +40,17 @@ export function resolveAnthropicThinking(
 ): ResolvedAnthropicThinking | undefined {
 	if (!level || level === "off") return undefined;
 
+	const { mode } = getThinkingCapability(modelId);
+
+	// Unknown / unsupported models: send NO thinking or output_config fields.
+	// Guessing a dialect risks a provider rejection (e.g. Fable 5 before its
+	// dialect is confirmed) — running without thinking is always safe.
+	if (mode === "none") return undefined;
+
 	// Effort models (Opus 4.8+) use adaptive thinking + output_config.effort and
 	// reject thinking.type=enabled. Named levels map directly; a custom integer
 	// budget has no effort meaning, so default to medium.
-	if (getThinkingMode(modelId) === "effort") {
+	if (mode === "effort") {
 		return {
 			thinking: { type: "adaptive" },
 			effort: EFFORT_MAP[level] ?? "medium",
