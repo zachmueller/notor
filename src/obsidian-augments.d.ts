@@ -85,4 +85,32 @@ declare module "obsidian" {
 	interface WorkspaceLeaf {
 		id: string;
 	}
+
+	/**
+	 * Obsidian's internal suggestion controller, exposed at runtime on every
+	 * `PopoverSuggest`/`AbstractInputSuggest` instance as `.suggestions`. It owns
+	 * the *real* keyboard highlight (moved by the popover's own `scope` on
+	 * ArrowUp/Down) — distinct from any bookkeeping a subclass may keep. Not in
+	 * the published type definitions. Only the members we rely on are declared.
+	 */
+	interface SuggestionContainer<T> {
+		/**
+		 * Accept the currently-highlighted item. This is exactly what Obsidian's
+		 * own Enter handler calls; it invokes the owner's `selectSuggestion(value, evt)`
+		 * with the highlighted value. The evt is forwarded to `selectSuggestion`.
+		 */
+		useSelectedItem(evt: KeyboardEvent | MouseEvent | Record<string, never>): void;
+		/** Index of the highlighted item within `values` (the real selection). */
+		selectedItem: number;
+		/** The rendered suggestion values, in display order. */
+		values: T[];
+	}
+
+	interface AbstractInputSuggest<T> {
+		/**
+		 * Undocumented runtime controller holding the real highlight. Optional
+		 * because it is untyped/internal — guard with a runtime check before use.
+		 */
+		suggestions?: SuggestionContainer<T>;
+	}
 }

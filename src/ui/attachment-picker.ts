@@ -187,7 +187,6 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	private isActive = false;
 	private triggerStartIndex = -1;
 	private currentSuggestions: VaultNoteSuggestion[] = [];
-	private selectedIndex = -1;
 
 	constructor(
 		app: App,
@@ -206,7 +205,6 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	activate(triggerStartIndex: number): void {
 		this.isActive = true;
 		this.triggerStartIndex = triggerStartIndex;
-		this.selectedIndex = -1;
 		log.debug("VaultNoteSuggest activated", { triggerStartIndex });
 	}
 
@@ -215,7 +213,6 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 		this.isActive = false;
 		this.triggerStartIndex = -1;
 		this.currentSuggestions = [];
-		this.selectedIndex = -1;
 		log.debug("VaultNoteSuggest deactivated");
 	}
 
@@ -225,44 +222,47 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	}
 
 	/**
-	 * Move the tracked selection index by `delta` (+1 down, −1 up), wrapping at
-	 * the list boundaries. Called by the chat-view keydown handler for ArrowDown/Up
-	 * so that Tab-key selection honours the user's navigation.
+	 * Select whatever the popover currently highlights — mirrors what pressing
+	 * Enter does. Used for Tab-key selection.
+	 *
+	 * Obsidian's `AbstractInputSuggest` owns the real, visible highlight (moved by
+	 * its own `scope` on ArrowUp/Down); there is no typed API to read it, so we
+	 * drive Obsidian's internal controller directly (Mechanism C), falling back to
+	 * reading the `.is-selected` DOM row (B), then the first item, so Tab is never
+	 * worse than before. See ideas/Tab completion in suggester….md.
 	 */
-	navigateSelection(delta: 1 | -1): void {
-		const len = this.currentSuggestions.length;
-		if (len === 0) {
-			log.debug("VaultNoteSuggest navigateSelection skipped: no suggestions");
+	selectHighlighted(evt?: KeyboardEvent): void {
+		if (this.currentSuggestions.length === 0) return;
+
+		// Mechanism C: the exact call Obsidian's own Enter handler makes. It routes
+		// back through this class's selectSuggestion(value, evt) with the real
+		// highlighted value, reusing all the insert/deactivate/close logic below.
+		const controller = this.suggestions;
+		if (controller && typeof controller.useSelectedItem === "function") {
+			controller.useSelectedItem(evt ?? {});
 			return;
 		}
-		const prev = this.selectedIndex;
-		if (this.selectedIndex === -1) {
-			this.selectedIndex = delta === 1 ? 0 : len - 1;
-		} else {
-			this.selectedIndex = (this.selectedIndex + delta + len) % len;
+
+		// Mechanism B: map the highlighted DOM row into our current list order.
+		const domIdx = this.highlightedDomIndex();
+		if (domIdx >= 0 && domIdx < this.currentSuggestions.length) {
+			this.selectSuggestion(this.currentSuggestions[domIdx]!);
+			return;
 		}
-		log.debug("VaultNoteSuggest navigateSelection", {
-			delta,
-			prev,
-			next: this.selectedIndex,
-			listLength: len,
-			item: this.currentSuggestions[this.selectedIndex]?.file.path,
-		});
+
+		// Fallback: first item (never worse than the previous Tab behaviour).
+		this.selectSuggestion(this.currentSuggestions[0]!);
 	}
 
-	/** Select the currently highlighted suggestion (or the first if none navigated). Used for Tab-key selection. */
-	selectFirst(): void {
-		const idx = this.selectedIndex >= 0 ? this.selectedIndex : 0;
-		const item = this.currentSuggestions[idx];
-		log.debug("VaultNoteSuggest selectFirst", {
-			selectedIndex: this.selectedIndex,
-			resolvedIdx: idx,
-			item: item?.file.path ?? null,
-			listLength: this.currentSuggestions.length,
-		});
-		if (item !== undefined) {
-			this.selectSuggestion(item);
+	/** Index of the `.is-selected` row within the popover we own, or -1. */
+	private highlightedDomIndex(): number {
+		for (const c of Array.from(activeDocument.querySelectorAll(".suggestion-container"))) {
+			const items = Array.from(c.querySelectorAll(".suggestion-item"));
+			if (items.length !== this.currentSuggestions.length) continue; // not our popover
+			const idx = items.findIndex((el) => el.classList.contains("is-selected"));
+			if (idx >= 0) return idx;
 		}
+		return -1;
 	}
 
 	getSuggestions(inputStr: string): VaultNoteSuggestion[] {
@@ -291,7 +291,6 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 				match: null,
 				matchSource: "name" as const,
 			}));
-			this.selectedIndex = -1;
 			log.debug("VaultNoteSuggest suggestions updated (no query)", { count: this.currentSuggestions.length });
 			return this.currentSuggestions;
 		}
@@ -344,7 +343,6 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 		});
 
 		this.currentSuggestions = results.slice(0, this.limit);
-		this.selectedIndex = -1;
 		log.debug("VaultNoteSuggest suggestions updated (query)", { query, count: this.currentSuggestions.length });
 		return this.currentSuggestions;
 	}

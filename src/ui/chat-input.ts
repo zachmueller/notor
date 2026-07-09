@@ -119,31 +119,31 @@ export class ChatInput {
 		this.resizeHandler = () => this.recalcInputHeight();
 		window.addEventListener("resize", this.resizeHandler);
 
-		// Enter to send, Shift+Enter for newline; Tab to select workflow or note suggestion
+		// Enter to send, Shift+Enter for newline; Tab to select the highlighted
+		// workflow or note suggestion.
+		//
+		// ArrowUp/Down are intentionally NOT handled here: Obsidian's
+		// AbstractInputSuggest owns arrow navigation via its own keymap scope and
+		// moves the visible highlight itself. Tab delegates selection to that same
+		// native highlight through `selectHighlighted()` (which calls Obsidian's
+		// own `useSelectedItem`), so it always matches what the user sees — the
+		// exact behaviour Enter already has while the popover is open.
 		this.textInputEl.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey) {
 				e.preventDefault();
 				if (this.tryHandleBtw()) return;
 				void this.handleSend();
 			} else if (e.key === "Tab") {
+				// stopPropagation guarantees Tab can never fall through to any other
+				// handler (e.g. reach an Enter path that would trigger handleSend()).
 				if (this.workflowSuggest?.active) {
 					e.preventDefault();
-					this.workflowSuggest.selectFirst();
+					e.stopPropagation();
+					this.workflowSuggest.selectHighlighted(e);
 				} else if (this.vaultNoteSuggest?.active) {
 					e.preventDefault();
-					this.vaultNoteSuggest.selectFirst();
-				}
-			} else if (e.key === "ArrowDown") {
-				if (this.workflowSuggest?.active) {
-					this.workflowSuggest.navigateSelection(1);
-				} else if (this.vaultNoteSuggest?.active) {
-					this.vaultNoteSuggest.navigateSelection(1);
-				}
-			} else if (e.key === "ArrowUp") {
-				if (this.workflowSuggest?.active) {
-					this.workflowSuggest.navigateSelection(-1);
-				} else if (this.vaultNoteSuggest?.active) {
-					this.vaultNoteSuggest.navigateSelection(-1);
+					e.stopPropagation();
+					this.vaultNoteSuggest.selectHighlighted(e);
 				}
 			}
 		});
