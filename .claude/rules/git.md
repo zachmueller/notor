@@ -10,7 +10,7 @@ Use the Git MCP tools — **not** raw `git` CLI commands — for all git operati
 
 1. **Check status:** `mcp__git__status` to identify what changed and ensure only intended files are modified
 2. **Commit:** `mcp__git__commit` with:
-   - `files` — only files intentionally modified as part of the task
+   - `files` — **required.** You MUST manually assemble and pass the explicit list of files you touched during the recent work; the tool does not auto-detect or stage them. Only include files intentionally modified as part of the task — omitting this list means those changes are not committed.
    - `summary` — concise action summary (e.g., "Add retry logic to API client")
    - `change_details` — each entry is a plain string (the tool prepends `- ` automatically)
    - `human_input` — the user's prompt (full text if ≤255 words, otherwise summarized to ~1 paragraph)
