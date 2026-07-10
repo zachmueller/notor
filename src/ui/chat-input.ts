@@ -730,6 +730,9 @@ export class ChatInput {
 		let match: RegExpExecArray | null;
 		let lastIndex = 0;
 		let insertedAny = false;
+		// Each inserted token emits a trailing spacer, so collapse a single leading
+		// space in the text that immediately follows a token to avoid a double space.
+		let afterToken = false;
 
 		while ((match = pattern.exec(text)) !== null) {
 			const inner = match[1] ?? "";
@@ -763,17 +766,20 @@ export class ChatInput {
 			}
 
 			// Emit the plain text preceding this match, then the token span.
-			const before = text.slice(lastIndex, match.index);
+			let before = text.slice(lastIndex, match.index);
+			if (afterToken && before.startsWith(" ")) before = before.slice(1);
 			if (before) this.insertTextAtCursor(before);
 			this.insertWikilinkTokenAtCursor(attachment);
 			lastIndex = match.index + match[0].length;
 			insertedAny = true;
+			afterToken = true;
 		}
 
 		if (!insertedAny) return false;
 
 		// Emit any trailing text after the final matched link.
-		const after = text.slice(lastIndex);
+		let after = text.slice(lastIndex);
+		if (afterToken && after.startsWith(" ")) after = after.slice(1);
 		if (after) this.insertTextAtCursor(after);
 
 		return true;
