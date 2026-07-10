@@ -21,6 +21,8 @@ import { detectMediaFormat } from "../media/format-detector";
 import { processImage } from "../media/image-processor";
 import { processPdf } from "../media/pdf-processor";
 import type { ImageMediaType } from "../media/types";
+import type { PersistedAttachmentMeta } from "../types";
+import { hashBytes } from "../utils/attachment-hash";
 
 // ---------------------------------------------------------------------------
 // ATT-001: Attachment data model
@@ -56,6 +58,12 @@ export interface Attachment {
 	content_length: number | null;
 	/** Base64-encoded binary for images/PDFs (post-processing: resized/compressed for images). */
 	binary_content: string | null;
+	/**
+	 * sha256 hex of the SOURCE file bytes captured at resolve time (vault media
+	 * only). Persisted in the JSONL snapshot so re-dispatch can detect whether
+	 * the source drifted. Null for non-vault-media or when not yet resolved.
+	 */
+	content_hash: string | null;
 	/** Detected MIME type (e.g., "image/png"). */
 	media_type: string | null;
 	/** Image width in pixels after processing (null for non-image attachments). */
@@ -93,23 +101,33 @@ function generateUUID(): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Derive the display label for a vault note from its path, dropping a single
+ * trailing `.md` extension (Obsidian hides `.md` on note titles). Only `.md`
+ * is stripped — image/PDF extensions are meaningful and left intact by their
+ * own factories.
+ */
+function noteDisplayName(path: string): string {
+	const base = path.split("/").pop() ?? path;
+	return base.endsWith(".md") ? base.slice(0, -3) : base;
+}
+
+/**
  * Create an attachment for a full vault note.
  *
  * @param path - Vault-relative path to the note.
  * @returns A pending Attachment ready for resolution at send time.
  */
 export function createVaultNoteAttachment(path: string): Attachment {
-	// Extract filename without extension for display
-	const filename = path.split("/").pop() ?? path;
 	return {
 		id: generateUUID(),
 		type: "vault_note",
 		path,
 		section: null,
-		display_name: filename,
+		display_name: noteDisplayName(path),
 		content: null,
 		content_length: null,
 		binary_content: null,
+		content_hash: null,
 		media_type: null,
 		width: null,
 		height: null,
@@ -130,16 +148,16 @@ export function createVaultNoteSectionAttachment(
 	path: string,
 	section: string
 ): Attachment {
-	const filename = path.split("/").pop() ?? path;
 	return {
 		id: generateUUID(),
 		type: "vault_note_section",
 		path,
 		section,
-		display_name: `${filename} § ${section}`,
+		display_name: `${noteDisplayName(path)} § ${section}`,
 		content: null,
 		content_length: null,
 		binary_content: null,
+		content_hash: null,
 		media_type: null,
 		width: null,
 		height: null,
@@ -174,6 +192,7 @@ export function createExternalFileAttachment(
 		content,
 		content_length: content.length,
 		binary_content: null,
+		content_hash: null,
 		media_type: null,
 		width: null,
 		height: null,
@@ -202,6 +221,7 @@ export function createVaultImageAttachment(path: string): Attachment {
 		content: null,
 		content_length: null,
 		binary_content: null,
+		content_hash: null,
 		media_type: null,
 		width: null,
 		height: null,
@@ -239,6 +259,7 @@ export function createExternalBinaryAttachment(
 		content: null,
 		content_length: null,
 		binary_content: base64,
+		content_hash: null,
 		media_type: mediaType,
 		width: width ?? null,
 		height: height ?? null,
@@ -267,6 +288,7 @@ export function createVaultPdfAttachment(path: string): Attachment {
 		content: null,
 		content_length: null,
 		binary_content: null,
+		content_hash: null,
 		media_type: null,
 		width: null,
 		height: null,
@@ -302,6 +324,7 @@ export function createExternalPdfAttachment(
 		content: extractedText ?? null,
 		content_length: pageCount ?? null,
 		binary_content: base64,
+		content_hash: null,
 		media_type: "application/pdf",
 		width: null,
 		height: null,
@@ -385,6 +408,8 @@ export async function resolveAttachment(
 				};
 			}
 
+			// Hash the SOURCE bytes (pre-processing) so re-dispatch can detect drift.
+			const sourceHash = hashBytes(arrayBuffer);
 			const mediaType = `image/${format}` as ImageMediaType;
 			const block = await processImage(buffer, mediaType, {
 				maxDimension: imageSettings?.maxDimension,
@@ -402,6 +427,7 @@ export async function resolveAttachment(
 			return {
 				...attachment,
 				binary_content: block.data,
+				content_hash: sourceHash,
 				media_type: block.media_type,
 				width: block.width ?? null,
 				height: block.height ?? null,
@@ -441,6 +467,8 @@ export async function resolveAttachment(
 				};
 			}
 
+			// Hash the SOURCE bytes (pre-processing) so re-dispatch can detect drift.
+			const sourceHash = hashBytes(arrayBuffer);
 			const result = await processPdf(buffer, {
 				providerType: providerType ?? "local",
 			});
@@ -451,6 +479,7 @@ export async function resolveAttachment(
 				return {
 					...attachment,
 					binary_content: docBlock.data,
+					content_hash: sourceHash,
 					media_type: "application/pdf",
 					content: result.textSummary,
 					content_length: result.textSummary.length,
@@ -466,6 +495,7 @@ export async function resolveAttachment(
 					...attachment,
 					content: textBlock.text,
 					content_length: textBlock.text.length,
+					content_hash: sourceHash,
 					media_type: "application/pdf",
 					status: "resolved",
 					error_message: null,
@@ -819,4 +849,180 @@ function escapeXmlAttr(value: string): string {
 		.replace(/"/g, "&quot;")
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;");
+}
+
+// ---------------------------------------------------------------------------
+// Part 3: Attachment snapshot persistence + dispatch-time reconstruction
+// ---------------------------------------------------------------------------
+
+/** Media attachment types whose bytes originate outside the vault. */
+function isExternalMedia(type: string): boolean {
+	return type === "external_image" || type === "external_pdf";
+}
+
+/** Media attachment types re-resolvable from the vault at dispatch time. */
+function isVaultMedia(type: string): boolean {
+	return type === "vault_image" || type === "vault_pdf";
+}
+
+/**
+ * Build the per-attachment JSONL snapshot from a resolved attachment.
+ *
+ * The snapshot lets the `<attachments>` block be rebuilt at dispatch time
+ * (see `reconstructResolvedAttachment`) rather than being embedded in the
+ * stored message `content`:
+ *  - text notes/sections/external files persist their full resolved `content`;
+ *  - vault images/PDFs persist a `content_hash` of the source bytes (no base64)
+ *    and are re-read from the vault at dispatch;
+ *  - external media persist their `binary_content` (base64) so they survive a
+ *    reload, since they have no re-resolvable source.
+ */
+export function buildAttachmentSnapshot(resolved: Attachment): PersistedAttachmentMeta {
+	const base: PersistedAttachmentMeta = {
+		id: resolved.id,
+		type: resolved.type,
+		path: resolved.path,
+		section: resolved.section,
+		display_name: resolved.display_name,
+		content_length: resolved.content_length,
+		status: resolved.status,
+	};
+
+	if (isExternalMedia(resolved.type)) {
+		// External media: keep the base64 bytes (authoritative — no vault source).
+		return {
+			...base,
+			content: resolved.content, // external_pdf text route carries extracted text
+			binary_content: resolved.binary_content,
+			media_type: resolved.media_type,
+			width: resolved.width,
+			height: resolved.height,
+			extracted_images: resolved.extracted_images,
+		};
+	}
+
+	if (isVaultMedia(resolved.type)) {
+		// Vault media: hash only — re-resolved from the vault at dispatch.
+		return {
+			...base,
+			content: resolved.content, // vault_pdf text route carries extracted text
+			content_hash: resolved.content_hash,
+			media_type: resolved.media_type,
+			width: resolved.width,
+			height: resolved.height,
+		};
+	}
+
+	// Text attachments (vault_note, vault_note_section, external_file): store the
+	// full resolved text so replay is faithful to what was originally sent.
+	return {
+		...base,
+		content: resolved.content,
+	};
+}
+
+/**
+ * True if a persisted attachment entry carries a Part-3 resolved snapshot (as
+ * opposed to a legacy metadata-only record whose content was baked into the
+ * message `content` string).
+ */
+export function hasAttachmentSnapshot(meta: PersistedAttachmentMeta): boolean {
+	return meta.content != null || meta.content_hash != null || meta.binary_content != null;
+}
+
+/**
+ * Rebuild a resolved {@link Attachment} from a persisted snapshot for
+ * dispatch-time reconstruction of the `<attachments>` block.
+ *
+ * - Text types: rebuilt in-memory from the stored `content` (no disk read).
+ * - Vault media: re-resolved from the vault via {@link resolveAttachment};
+ *   the source is re-hashed and compared to the stored `content_hash`. On
+ *   mismatch we still send the current bytes but surface a `warning`. If the
+ *   file is missing or resolution errors, returns `{ attachment: null, warning }`
+ *   so the caller drops it gracefully.
+ * - External media: rebuilt directly from the stored base64 `binary_content`.
+ */
+export async function reconstructResolvedAttachment(
+	app: App,
+	meta: PersistedAttachmentMeta,
+	imageSettings?: { maxDimension: number; compressionQuality: number },
+	providerType?: string,
+): Promise<{ attachment: Attachment | null; warning?: string }> {
+	// Vault media — re-resolve from disk and compare hashes.
+	if (isVaultMedia(meta.type)) {
+		const pending =
+			meta.type === "vault_image"
+				? createVaultImageAttachment(meta.path)
+				: createVaultPdfAttachment(meta.path);
+		const resolved = await resolveAttachment(app, pending, imageSettings, providerType);
+		if (resolved.status !== "resolved") {
+			return {
+				attachment: null,
+				warning:
+					resolved.error_message ??
+					`Attachment could not be re-resolved: ${meta.path}`,
+			};
+		}
+		if (
+			meta.content_hash &&
+			resolved.content_hash &&
+			meta.content_hash !== resolved.content_hash
+		) {
+			return {
+				attachment: resolved,
+				warning: `Attached file changed since it was sent — using current version: ${meta.path}`,
+			};
+		}
+		return { attachment: resolved };
+	}
+
+	// External media — bytes are stored in the snapshot; rebuild in-memory.
+	if (isExternalMedia(meta.type)) {
+		if (!meta.binary_content) {
+			return {
+				attachment: null,
+				warning: `External attachment is no longer available: ${meta.display_name}`,
+			};
+		}
+		return {
+			attachment: {
+				id: meta.id,
+				type: meta.type as AttachmentType,
+				path: meta.path,
+				section: meta.section,
+				display_name: meta.display_name,
+				content: meta.content ?? null,
+				content_length: meta.content_length,
+				binary_content: meta.binary_content,
+				content_hash: null,
+				media_type: meta.media_type ?? null,
+				width: meta.width ?? null,
+				height: meta.height ?? null,
+				extracted_images: (meta.extracted_images ?? null) as Attachment["extracted_images"],
+				status: "resolved",
+				error_message: null,
+			},
+		};
+	}
+
+	// Text attachments — rebuild from the stored content snapshot (no disk read).
+	return {
+		attachment: {
+			id: meta.id,
+			type: meta.type as AttachmentType,
+			path: meta.path,
+			section: meta.section,
+			display_name: meta.display_name,
+			content: meta.content ?? "",
+			content_length: meta.content_length,
+			binary_content: null,
+			content_hash: null,
+			media_type: null,
+			width: null,
+			height: null,
+			extracted_images: null,
+			status: "resolved",
+			error_message: null,
+		},
+	};
 }

@@ -11,7 +11,7 @@
  */
 
 import type { Message } from "../types";
-import { estimateTokenCount, estimateContentTokens } from "../utils/tokens";
+import { estimateTokenCount, estimateContentTokens, estimateAttachmentSnapshotTokens } from "../utils/tokens";
 import { getContextWindow } from "../providers/model-metadata";
 import { logger } from "../utils/logger";
 
@@ -82,6 +82,11 @@ export class ContextManager {
 		}
 
 		let total = estimateContentTokens(message.content);
+
+		// Part 3: attachment content is stored in the per-message snapshot and
+		// merged into the wire only at dispatch, so add its cost here (stored
+		// `content` is prose-only). Legacy embedded-XML messages count 0 here.
+		total += estimateAttachmentSnapshotTokens(message.attachments);
 
 		if (message.tool_call) {
 			total += estimateTokenCount(JSON.stringify(message.tool_call.parameters));

@@ -162,6 +162,9 @@ export class ChatInput {
 			if (!this.textInputEl.querySelector("[data-workflow-path]")) {
 				if (this.tryInsertPastedWorkflowToken(text)) return;
 			}
+			// Convert any `[[Note]]` / `[[Note#Section]]` wikilinks in the paste
+			// into inline attachment tokens (mirrors the live `[[` suggester).
+			if (this.tryInsertPastedWikilinkTokens(text)) return;
 			this.insertTextAtCursor(text);
 		});
 
@@ -706,6 +709,119 @@ export class ChatInput {
 		this.attachWorkflow(workflow);
 		log.debug("Workflow token inserted from paste", {
 			display_name: workflow.display_name,
+		});
+	}
+
+	/**
+	 * Scan pasted text for `[[Note]]` / `[[Note#Section]]` wikilinks and splice
+	 * each resolvable Markdown note in as an inline attachment token, keeping the
+	 * surrounding prose as plain text. Resolution uses Obsidian's own linkpath
+	 * resolver so behaviour matches the main editor; unresolvable links and
+	 * non-Markdown targets (images/PDFs) are left inert as plain text.
+	 *
+	 * Returns true if the paste was handled (so the caller skips the plain-text
+	 * fallback), false if no wikilink was present.
+	 */
+	private tryInsertPastedWikilinkTokens(text: string): boolean {
+		// Fast bail-out: no wikilink syntax at all.
+		if (!text.includes("[[")) return false;
+
+		const pattern = /\[\[([^\]]+)\]\]/g;
+		let match: RegExpExecArray | null;
+		let lastIndex = 0;
+		let insertedAny = false;
+
+		while ((match = pattern.exec(text)) !== null) {
+			const inner = match[1] ?? "";
+			const hashIdx = inner.indexOf("#");
+			const linkpath = (hashIdx === -1 ? inner : inner.slice(0, hashIdx)).trim();
+			const section = hashIdx === -1 ? null : inner.slice(hashIdx + 1).trim();
+
+			// Resolve via Obsidian's built-in linkpath resolver (matches main-editor
+			// link behaviour). Markdown notes only — leave media/unresolved inert.
+			const dest = linkpath
+				? this.deps.app.metadataCache.getFirstLinkpathDest(linkpath, "")
+				: null;
+			if (!dest || dest.extension !== "md") {
+				continue;
+			}
+
+			const attachment =
+				section && section.length > 0
+					? createVaultNoteSectionAttachment(dest.path, section)
+					: createVaultNoteAttachment(dest.path);
+
+			// Skip notes already attached (e.g. same link pasted twice, or already
+			// present from a prior action).
+			if (
+				isDuplicate(this.deps.getPendingAttachments(), {
+					path: attachment.path,
+					section: attachment.section,
+				})
+			) {
+				continue;
+			}
+
+			// Emit the plain text preceding this match, then the token span.
+			const before = text.slice(lastIndex, match.index);
+			if (before) this.insertTextAtCursor(before);
+			this.insertWikilinkTokenAtCursor(attachment);
+			lastIndex = match.index + match[0].length;
+			insertedAny = true;
+		}
+
+		if (!insertedAny) return false;
+
+		// Emit any trailing text after the final matched link.
+		const after = text.slice(lastIndex);
+		if (after) this.insertTextAtCursor(after);
+
+		return true;
+	}
+
+	/**
+	 * Insert a wikilink attachment token at the current caret position, splicing
+	 * it into surrounding text (mirrors {@link insertWorkflowTokenAtCursor}).
+	 *
+	 * Unlike `insertWikilinkToken` in attachment-picker.ts — which finds and
+	 * replaces a trailing `[[query` trigger — this inserts at the caret without
+	 * disturbing text on either side, which is what mid-paste splicing needs.
+	 * The `data-attachment-*` attributes let the MutationObserver auto-register
+	 * the pending attachment; we also register it directly so registration does
+	 * not depend on observer timing.
+	 */
+	private insertWikilinkTokenAtCursor(attachment: Attachment): void {
+		const sel = window.getSelection();
+		if (!sel || sel.rangeCount === 0) return;
+
+		const range = sel.getRangeAt(0);
+		range.deleteContents();
+
+		const tokenSpan = document.createElement("span");
+		tokenSpan.className = "notor-wikilink-token";
+		tokenSpan.contentEditable = "false";
+		tokenSpan.setAttribute("data-attachment-id", attachment.id);
+		tokenSpan.setAttribute("data-attachment-path", attachment.path);
+		tokenSpan.setAttribute("data-attachment-type", attachment.type);
+		if (attachment.section) {
+			tokenSpan.setAttribute("data-attachment-section", attachment.section);
+		}
+		tokenSpan.textContent = `[[${attachment.display_name}]]`;
+		range.insertNode(tokenSpan);
+
+		const spacer = document.createTextNode(" ");
+		tokenSpan.after(spacer);
+
+		const newRange = document.createRange();
+		newRange.setStart(spacer, 1);
+		newRange.collapse(true);
+		sel.removeAllRanges();
+		sel.addRange(newRange);
+
+		this.addWikilinkAttachment(attachment);
+		log.debug("Wikilink token inserted from paste", {
+			path: attachment.path,
+			section: attachment.section,
 		});
 	}
 

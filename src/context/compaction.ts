@@ -13,7 +13,7 @@
 import type { Message } from "../types";
 import type { NotorSettings } from "../settings";
 import type { LLMProvider, ChatMessage, SendMessageOptions } from "../providers/provider";
-import { estimateTokens, estimateContentTokens } from "../utils/tokens";
+import { estimateTokens, estimateContentTokens, estimateAttachmentSnapshotTokens } from "../utils/tokens";
 import { getTextContent } from "../media/types";
 import { getContextWindow } from "../providers/model-metadata";
 import { logger } from "../utils/logger";
@@ -122,6 +122,11 @@ function estimateSingleMessageTokens(msg: Message): number {
 	}
 
 	let total = estimateContentTokens(msg.content);
+
+	// Part 3: attachment content lives in the per-message snapshot (merged into
+	// the wire only at dispatch), so add its cost here for the compaction
+	// threshold + context-usage footer. Legacy embedded-XML messages count 0.
+	total += estimateAttachmentSnapshotTokens(msg.attachments);
 
 	if (msg.tool_call) {
 		total += estimateTokens(JSON.stringify(msg.tool_call.parameters));

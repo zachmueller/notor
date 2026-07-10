@@ -7,8 +7,9 @@
 
 import { MarkdownRenderer, Notice, setIcon } from "obsidian";
 import type { App, Component } from "obsidian";
-import type { Message } from "../types";
+import type { Message, PersistedAttachmentMeta } from "../types";
 import { readChildRunMetadata } from "../types";
+import { hasAttachmentSnapshot } from "../context/attachment";
 import type { NotorSettings } from "../settings/types";
 import type { ChatBlockRegistry } from "./chat-blocks/registry";
 import type { PendingMemoryManager } from "../memory/pending-memory-manager";
@@ -157,11 +158,22 @@ export class MessageRenderer {
 		const contentEl = msgEl.createDiv({ cls: "notor-message-content" });
 
 		const textContent = getTextContent(message.content);
-		const { attachmentsXml, remainder } = extractAttachmentsBlock(textContent);
-		if (attachmentsXml !== null) {
-			this.renderAttachmentsBlock(contentEl, attachmentsXml);
+
+		// Part 3: new-format messages store prose-only content plus an attachment
+		// snapshot, so rebuild the collapsible block from metadata. Legacy messages
+		// still have the `<attachments>` XML embedded in content — split it out.
+		const hasSnapshot = message.attachments?.some(hasAttachmentSnapshot) ?? false;
+		let textToRender: string;
+		if (hasSnapshot) {
+			this.renderAttachmentsFromMetadata(contentEl, message.attachments ?? []);
+			textToRender = textContent;
+		} else {
+			const { attachmentsXml, remainder } = extractAttachmentsBlock(textContent);
+			if (attachmentsXml !== null) {
+				this.renderAttachmentsBlock(contentEl, attachmentsXml);
+			}
+			textToRender = attachmentsXml !== null ? remainder : textContent;
 		}
-		const textToRender = attachmentsXml !== null ? remainder : textContent;
 
 		if (message.is_workflow_message) {
 			this.renderWorkflowMessage(contentEl, textToRender);
@@ -966,6 +978,41 @@ export class MessageRenderer {
 		details.createEl("summary", { text: "Attachments" });
 		const pre = details.createEl("pre", { cls: "notor-attachments-content" });
 		pre.createEl("code", { text: xml });
+	}
+
+	/**
+	 * Render the collapsible "Attachments" block from the Part-3 per-message
+	 * snapshot (replaces the legacy embedded-XML path). Text snapshots show their
+	 * resolved content; media snapshots show a one-line summary (their bytes are
+	 * re-resolved at dispatch and are not displayed inline).
+	 */
+	private renderAttachmentsFromMetadata(
+		container: HTMLElement,
+		attachments: PersistedAttachmentMeta[],
+	): void {
+		const snapshots = attachments.filter(hasAttachmentSnapshot);
+		if (snapshots.length === 0) return;
+
+		const details = container.createEl("details", { cls: "notor-attachments-details" });
+		details.createEl("summary", { text: "Attachments" });
+		const pre = details.createEl("pre", { cls: "notor-attachments-content" });
+
+		const parts: string[] = [];
+		for (const att of snapshots) {
+			const label =
+				att.type === "vault_note_section"
+					? `${att.path}${att.section ? ` § ${att.section}` : ""}`
+					: att.path;
+			if (att.content != null && att.content_hash == null && att.binary_content == null) {
+				// Pure text attachment — show its resolved content.
+				parts.push(`[[${label}]]\n${att.content}`);
+			} else {
+				// Media attachment — summarize (bytes re-resolved at dispatch).
+				const kind = att.media_type ?? att.type;
+				parts.push(`${att.display_name} (${kind})`);
+			}
+		}
+		pre.createEl("code", { text: parts.join("\n\n") });
 	}
 
 	private activateInternalLinks(containerEl: HTMLElement): void {

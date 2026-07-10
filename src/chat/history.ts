@@ -24,9 +24,15 @@
  * User messages may include:
  * - `auto_context` (string | null): The raw `<auto-context>` XML block injected
  *   into the message, or null if auto-context was disabled/empty.
- * - `attachments` (array | null): Metadata-only records of attached notes/files.
- *   Each entry: `{ id, type, path, section, display_name, content_length, status }`.
- *   Full attachment content is NOT stored — only metadata for auditability.
+ * - `attachments` (array | null): Per-attachment records for attached notes/files.
+ *   Base entry: `{ id, type, path, section, display_name, content_length, status }`.
+ *   Part 3 adds an optional resolved snapshot so the `<attachments>` block is
+ *   rebuilt at dispatch time rather than embedded in the stored message
+ *   `content`: text notes/sections/external files store their full `content`;
+ *   vault images/PDFs store a `content_hash` (sha256 of source bytes) and are
+ *   re-resolved from the vault at dispatch; external media store `binary_content`
+ *   (base64) plus `media_type`/`width`/`height`. All snapshot fields are optional
+ *   so older files parse unchanged. See `PersistedAttachmentMeta` in types.ts.
  * - `hook_injections` (string[] | null): Captured stdout from `pre_send` hooks
  *   that was injected into the assembled message.
  *

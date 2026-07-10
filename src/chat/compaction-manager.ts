@@ -9,6 +9,7 @@
  */
 
 import { Notice } from "obsidian";
+import type { App } from "obsidian";
 import type { Message } from "../types";
 import type { ProviderRegistry } from "../providers/index";
 import type { ConversationManager } from "./conversation";
@@ -19,12 +20,14 @@ import type { NotorSettings } from "../settings";
 import { shouldCompact, performCompaction } from "../context/compaction";
 import { showCompactingIndicator, showCompactionMarker } from "../ui/compaction-marker";
 import { extractPendingMessages } from "./message-pipeline";
+import { hydrateMessagesForDispatch } from "./attachment-hydration";
 import { logger } from "../utils/logger";
 
 const log = logger("CompactionManager");
 
 export class CompactionManager {
 	constructor(
+		private readonly app: App,
 		private readonly getSettings: () => NotorSettings,
 		private readonly providerRegistry: ProviderRegistry,
 		private readonly historyManager: HistoryManager,
@@ -34,6 +37,25 @@ export class CompactionManager {
 		private readonly getActiveModelId: () => string,
 		private readonly getActiveUseExtendedContext: () => boolean,
 	) {}
+
+	/**
+	 * Hydrate the summarizer's input so attachment text (stored in the per-message
+	 * snapshot, not the prose-only `content`) is visible to compaction. Media
+	 * blocks are rebuilt too but compaction omits them with a placeholder note.
+	 * Never persisted — the hydrated copies feed `performCompaction` only.
+	 */
+	private async hydrateForSummary(messages: Message[]): Promise<Message[]> {
+		const settings = this.getSettings();
+		return hydrateMessagesForDispatch(
+			this.app,
+			messages,
+			{
+				maxDimension: settings.image_max_dimension,
+				compressionQuality: settings.image_compression_quality,
+			},
+			this.providerRegistry.getActiveType(),
+		);
+	}
 
 	/**
 	 * Check compaction threshold and perform compaction if needed.
@@ -91,8 +113,9 @@ export class CompactionManager {
 			const provider = session
 				? this.providerRegistry.getProvider(session.providerId)
 				: this.providerRegistry.getActiveProvider();
+			const hydratedCompleted = await this.hydrateForSummary(completedMessages);
 			const result = await performCompaction(
-				completedMessages,
+				hydratedCompleted,
 				provider,
 				settings,
 				modelId,
@@ -221,8 +244,9 @@ export class CompactionManager {
 
 		try {
 			const provider = this.providerRegistry.getActiveProvider();
+			const hydratedCompleted = await this.hydrateForSummary(completedMessages);
 			const result = await performCompaction(
-				completedMessages,
+				hydratedCompleted,
 				provider,
 				settings,
 				modelId,

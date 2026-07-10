@@ -440,10 +440,19 @@ function renderUserMessage(msg: Message): string {
 		}
 	}
 
-	// Attachment metadata
+	// Attachment metadata. Part-3 text snapshots carry their resolved content
+	// (no longer embedded in the message content), so include it; media
+	// snapshots list metadata only.
 	if (msg.attachments?.length) {
 		const items = msg.attachments
-			.map((a) => `<li><strong>${escapeHtml(a.display_name)}</strong> (${escapeHtml(a.type)}, ${escapeHtml(a.status)})</li>`)
+			.map((a) => {
+				const header = `<strong>${escapeHtml(a.display_name)}</strong> (${escapeHtml(a.type)}, ${escapeHtml(a.status)})`;
+				const isText = a.content != null && a.content_hash == null && a.binary_content == null;
+				if (isText && a.content) {
+					return `<li>${header}<pre>${escapeHtml(a.content)}</pre></li>`;
+				}
+				return `<li>${header}</li>`;
+			})
 			.join("\n");
 		parts.push(detailsBlock("Attached files", `<ul>${items}</ul>`));
 	}

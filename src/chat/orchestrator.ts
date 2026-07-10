@@ -38,9 +38,9 @@ import type { NotorSettings } from "../settings";
 import type { VaultRuleManager } from "../rules/vault-rules";
 import type { PersonaManager } from "../personas/persona-manager";
 import { buildAutoContextBlock } from "../context/auto-context";
-import { assembleUserMessage, assembleUserContent } from "../context/message-assembler";
 import type { Attachment } from "../context/attachment";
-import { resolveAttachment, buildAttachmentsBlock } from "../context/attachment";
+import { resolveAttachment, buildAttachmentSnapshot } from "../context/attachment";
+import { hydrateMessagesForDispatch } from "./attachment-hydration";
 import type { LifecycleAutomationAccessors, ToolEventAutomationAccessors } from "../hooks/hook-events";
 import { dispatchOnConversationStart } from "../hooks/hook-events";
 import type { WorkflowHookOverrideManager } from "../hooks/workflow-hook-override";
@@ -276,6 +276,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 		});
 
 		this.compactionManager = new CompactionManager(
+			this.app,
 			() => this.settings,
 			this.providerRegistry,
 			this.historyManager,
@@ -847,9 +848,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 		const mode = this.conversationManager.getMode();
 
-		// Phase 3 (ATT-008): Resolve attachments and build XML/media blocks
-		let attachmentsText: string | null = null;
-		let attachmentContentBlocks: import("../media/types").ContentBlock[] = [];
+		// Phase 3 (ATT-008): Resolve attachments so we can persist a per-message
+		// snapshot. The resolved content is NOT embedded in the stored message
+		// content — the `<attachments>` block is rebuilt at dispatch time from the
+		// snapshot (see hydrateMessagesForDispatch). This keeps "Copy message
+		// contents" and the stored JSONL to the user's prose only.
 		const resolvedAttachments: Attachment[] = [];
 
 		if (attachments && attachments.length > 0) {
@@ -869,10 +872,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 					});
 				}
 			}
-
-			const built = buildAttachmentsBlock(resolvedAttachments);
-			attachmentsText = built.text;
-			attachmentContentBlocks = built.contentBlocks;
 		}
 
 		// Record vault attachment paths for rule trigger evaluation
@@ -895,27 +894,20 @@ export class ChatOrchestrator implements ToolSessionContext {
 			hookInjections = await this.hookDispatcher.dispatchPreSendHooks(conv.id);
 		}
 
-		// Assemble the user message content: attachments → user text
-		// (Auto-context is now injected into the system prompt per ACI-001;
-		//  hook output is sent as a separate message per ACI-002.)
-		const assembledText = assembleUserMessage({
-			attachments: attachmentsText ?? undefined,
-			userText: content,
-		});
-		const assembledContent = assembleUserContent(assembledText, attachmentContentBlocks);
+		// Stored message content is the user's typed prose only. Attachment
+		// content (the `<attachments>` XML + media blocks) is rebuilt at dispatch
+		// time from the snapshot below, so it never touches the persisted content.
+		// (Auto-context is injected into the system prompt per ACI-001; hook output
+		//  is sent as a separate message per ACI-002.)
+		const assembledContent = content;
 
-		// Build attachment metadata for JSONL logging (no content, just metadata)
-		const attachmentMetadata = resolvedAttachments.length > 0
-			? resolvedAttachments.map((a) => ({
-				id: a.id,
-				type: a.type,
-				path: a.path,
-				section: a.section,
-				display_name: a.display_name,
-				content_length: a.content_length,
-				status: a.status,
-			}))
-			: undefined;
+		// Persist a per-attachment snapshot for dispatch-time reconstruction.
+		// Only successfully-resolved attachments are snapshotted; errors are
+		// surfaced above and dropped so a broken attachment never reaches the LLM.
+		const attachmentSnapshots = resolvedAttachments
+			.filter((a) => a.status === "resolved")
+			.map((a) => buildAttachmentSnapshot(a));
+		const attachmentMetadata = attachmentSnapshots.length > 0 ? attachmentSnapshots : undefined;
 
 		// ACI-002: If hooks produced output, inject it as a separate user
 		// message so the LLM still sees it but it renders as a collapsible
@@ -1322,8 +1314,23 @@ export class ChatOrchestrator implements ToolSessionContext {
 					this.getViewForSession(session)?.showTruncationWarning(contextResult.truncatedCount);
 				}
 
+				// 4b. Part 3: rebuild the `<attachments>` block + media blocks from
+				// each user message's stored snapshot. Stored content is prose-only;
+				// this merges attachment content into the wire without touching the
+				// persisted messages. Covers fork/compaction re-send via this loop.
+				const hydratedMessages = await hydrateMessagesForDispatch(
+					this.app,
+					contextResult.messages,
+					{
+						maxDimension: this.settings.image_max_dimension,
+						compressionQuality: this.settings.image_compression_quality,
+					},
+					this.providerRegistry.getActiveType(),
+					(warning) => this.getViewForSession(session)?.showError(`Attachment warning: ${warning}`),
+				);
+
 				// 5. Convert to ChatMessage format for provider
-				const chatMessages = toChatMessages(contextResult.messages, systemPrompt);
+				const chatMessages = toChatMessages(hydratedMessages, systemPrompt);
 
 				// 6. Send to LLM
 				const view = this.getViewForSession(session);

@@ -225,6 +225,47 @@ export interface MessageError {
 	offending_fields?: string[];
 }
 
+/**
+ * Per-attachment metadata persisted on a user `Message` in the JSONL.
+ *
+ * Historically metadata-only (id/type/path/section/display_name/content_length/
+ * status). Part 3 adds an optional resolved *snapshot* so the `<attachments>`
+ * block can be rebuilt at dispatch time instead of being embedded in the stored
+ * message `content`:
+ *  - text notes/sections/external files store their full resolved `content`;
+ *  - vault images/PDFs store a `content_hash` of the source bytes and are
+ *    re-resolved from the vault at dispatch (no base64 bloat in JSONL);
+ *  - external images/PDFs (no re-resolvable source) keep their `binary_content`
+ *    base64 so they survive a reload.
+ *
+ * All snapshot fields are optional so pre-Part-3 JSONL parses unchanged. An
+ * entry is "new-format" (snapshot-bearing) iff it carries any of `content`,
+ * `content_hash`, or `binary_content`.
+ */
+export interface PersistedAttachmentMeta {
+	id: string;
+	type: string;
+	path: string;
+	section: string | null;
+	display_name: string;
+	content_length: number | null;
+	status: string;
+	/** Resolved text snapshot (vault_note, section, external_file, external_pdf text). */
+	content?: string | null;
+	/** sha256 hex of the source bytes at send time (vault_image, vault_pdf). */
+	content_hash?: string | null;
+	/** Base64 payload — external media only (external_image / external_pdf). */
+	binary_content?: string | null;
+	/** Detected MIME type for media snapshots (e.g. "image/png", "application/pdf"). */
+	media_type?: string | null;
+	/** Processed image width in pixels (image snapshots only). */
+	width?: number | null;
+	/** Processed image height in pixels (image snapshots only). */
+	height?: number | null;
+	/** Base64 page images extracted from an external PDF (external_pdf text route only). */
+	extracted_images?: Array<{ data: string; media_type: string; width: number; height: number }> | null;
+}
+
 /** A single message within a conversation. */
 export interface Message {
 	/** Unique message identifier (UUID v4). */
@@ -258,15 +299,7 @@ export interface Message {
 	/** Auto-context metadata logged for user messages (Phase 3). */
 	auto_context?: string | null;
 	/** Attachment metadata logged for user messages (Phase 3). */
-	attachments?: Array<{
-		id: string;
-		type: string;
-		path: string;
-		section: string | null;
-		display_name: string;
-		content_length: number | null;
-		status: string;
-	}> | null;
+	attachments?: PersistedAttachmentMeta[] | null;
 	/** Captured stdout from pre-send hooks (Phase 3). */
 	hook_injections?: string[] | null;
 	/** Whether this user message is a hook injection (ACI-002). */

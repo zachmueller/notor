@@ -125,10 +125,19 @@ function renderUserMessage(msg: Message): string {
 		}
 	}
 
-	// Render attachment metadata if present
+	// Render attachment metadata if present. Part-3 text snapshots carry their
+	// resolved content (the `<attachments>` block is no longer embedded in the
+	// message content), so include it here; media snapshots list metadata only.
 	if (msg.attachments?.length) {
 		const attachList = msg.attachments
-			.map((a) => `- **${a.display_name}** (${a.type}, ${a.status})`)
+			.map((a) => {
+				const header = `- **${a.display_name}** (${a.type}, ${a.status})`;
+				const isText = a.content != null && a.content_hash == null && a.binary_content == null;
+				if (isText && a.content) {
+					return `${header}\n\n\`\`\`\n${a.content}\n\`\`\``;
+				}
+				return header;
+			})
 			.join("\n");
 		parts.push(wrapCallout("info", "Attached files", attachList, true));
 	}
