@@ -25,6 +25,10 @@ import { WRITE_DOCX } from "./write-docx";
 import { WRITE_FILE } from "./write-file";
 import { REPLACE_IN_FILE } from "./replace-in-file";
 import { EXTRACT_DOCX_COMMENTS } from "./extract-docx-comments";
+import { READ_XLSX } from "./read-xlsx";
+import { WRITE_XLSX } from "./write-xlsx";
+import { IMPORT_XLSX } from "./import-xlsx";
+import { LIST_XLSX_SHEETS } from "./list-xlsx-sheets";
 import { SLEEP } from "./sleep";
 import { ASK_USER } from "./ask-user";
 import { SEARCH_CHAT_HISTORY } from "./search-chat-history";
@@ -75,6 +79,10 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[WRITE_FILE.name, WRITE_FILE],
 		[REPLACE_IN_FILE.name, REPLACE_IN_FILE],
 		[EXTRACT_DOCX_COMMENTS.name, EXTRACT_DOCX_COMMENTS],
+		[READ_XLSX.name, READ_XLSX],
+		[WRITE_XLSX.name, WRITE_XLSX],
+		[IMPORT_XLSX.name, IMPORT_XLSX],
+		[LIST_XLSX_SHEETS.name, LIST_XLSX_SHEETS],
 		[SLEEP.name, SLEEP],
 		[ASK_USER.name, ASK_USER],
 		[SEARCH_CHAT_HISTORY.name, SEARCH_CHAT_HISTORY],
@@ -112,7 +120,7 @@ export const BUILTIN_SHARED_SETTINGS_SCHEMA: readonly SettingsFieldSchema[] = [
 		key: "read_file_allowed_paths",
 		name: "Allowed file-system paths",
 		type: "string[]",
-		description: "Absolute paths outside the vault that read_file, write_file, replace_in_file, and DOCX tools may access.",
+		description: "Absolute paths outside the vault that read_file, write_file, replace_in_file, and the DOCX and XLSX tools may access.",
 		default: [],
 	},
 ];

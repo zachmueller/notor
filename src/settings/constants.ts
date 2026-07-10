@@ -140,6 +140,26 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Extract review comments from a .docx file into a structured note (desktop only).",
 		isWrite: true,
 	},
+	read_xlsx: {
+		name: "Read spreadsheet",
+		desc: "Read an .xlsx file and return its content as Markdown tables or JSON (desktop only).",
+		isWrite: false,
+	},
+	write_xlsx: {
+		name: "Write spreadsheet",
+		desc: "Create an .xlsx file from Markdown tables or JSON data (desktop only).",
+		isWrite: true,
+	},
+	import_xlsx: {
+		name: "Import spreadsheet",
+		desc: "Parse an .xlsx file and save its content as a Markdown note in the vault (desktop only).",
+		isWrite: true,
+	},
+	list_xlsx_sheets: {
+		name: "List spreadsheet sheets",
+		desc: "List the worksheet names in an .xlsx file with row and column counts (desktop only).",
+		isWrite: false,
+	},
 	use_subagent: {
 		name: "Use sub-agent",
 		desc: "Spawn a sub-agent to handle a delegated task.",

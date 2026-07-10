@@ -28,6 +28,10 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `write_file` | Write text content to a file on the filesystem (desktop only) | Act only |
 | `replace_in_file` | Make targeted find/replace edits in a text file (desktop only) | Act only |
 | `extract_docx_comments` | Extract review comments from a `.docx` file and write them as a structured note (desktop only) | Act only |
+| `list_xlsx_sheets` | List the worksheet names in an `.xlsx` file with row and column counts (desktop only) | Plan & Act |
+| `read_xlsx` | Read an `.xlsx` file and return its content as Markdown tables or JSON (desktop only) | Plan & Act |
+| `write_xlsx` | Create an `.xlsx` file from Markdown tables or JSON data (desktop only) | Act only |
+| `import_xlsx` | Parse an `.xlsx` file and save its content as a Markdown note in the vault (desktop only) | Act only |
 | `use_subagent` | Spawn a focused [sub-agent](sub-agents.md) child conversation for a specific task | Plan & Act |
 | `sleep` | Pause execution for a specified duration (useful in workflows and automations) | Plan & Act |
 | `search_chat_history` | Search past Notor conversations by keyword and return matching conversation metadata | Plan & Act |

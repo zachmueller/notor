@@ -106,6 +106,7 @@ export function buildLibs(): ExtensionLibs {
 		Turndown: TurndownService,
 		turndownGfm: { gfm },
 		unpdf: () => import("unpdf"),
+		exceljs: () => import("exceljs"),
 		docx,
 		PizZip,
 		marked,

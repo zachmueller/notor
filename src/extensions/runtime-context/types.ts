@@ -515,6 +515,7 @@ export interface ExtensionLibs {
 	Turndown: typeof TurndownService;
 	turndownGfm: { gfm: typeof gfm };
 	unpdf: () => Promise<typeof import("unpdf")>;
+	exceljs: () => Promise<typeof import("exceljs")>;
 	docx: typeof docx;
 	PizZip: typeof PizZip;
 	marked: typeof marked;

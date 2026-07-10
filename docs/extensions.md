@@ -443,6 +443,7 @@ All extension code executes with these variables in scope:
 | `libs.Turndown` | turndown | HTML to Markdown conversion |
 | `libs.turndownGfm` | turndown-plugin-gfm | GFM plugin for Turndown — `new libs.Turndown().use(libs.turndownGfm.gfm)` |
 | `libs.unpdf` | unpdf | PDF text extraction (lazy) — `const { getDocumentProxy } = await libs.unpdf()` |
+| `libs.exceljs` | exceljs | XLSX read/write (lazy) — `const ExcelJS = (await libs.exceljs()).default` |
 | `libs.docx` | docx | Programmatic DOCX generation |
 | `libs.PizZip` | pizzip | ZIP/DOCX archive manipulation |
 | `libs.marked` | marked | Markdown parsing and rendering |

@@ -39,6 +39,13 @@ function seedPathParams(): void {
 			{ paramName: "output_path", namespace: "filesystem" as const },
 			{ paramName: "template_path", namespace: "filesystem" as const },
 		],
+		read_xlsx: [{ paramName: "path", namespace: "filesystem" as const }],
+		write_xlsx: [{ paramName: "output_path", namespace: "filesystem" as const }],
+		list_xlsx_sheets: [{ paramName: "path", namespace: "filesystem" as const }],
+		import_xlsx: [
+			{ paramName: "path", namespace: "filesystem" as const },
+			{ paramName: "note_path", namespace: "vault" as const },
+		],
 		fetch_webpage: [],
 	});
 }
@@ -202,6 +209,43 @@ describe("enforcePathConstraints", () => {
 			const result = enforcePathConstraints(
 				"write_docx",
 				{ output_path: "/Users/test/vault/out.docx", template_path: "/Users/test/vault/template.docx" },
+				entry,
+				VAULT_ROOT,
+			);
+			expect(result).toBeNull();
+		});
+	});
+
+	describe("import_xlsx mixed filesystem + vault params both enforced", () => {
+		it("blocks when the filesystem source path is blocked", () => {
+			const entry = makeEntry({ blocked_paths: ["/tmp/blocked"] });
+			const result = enforcePathConstraints(
+				"import_xlsx",
+				{ path: "/tmp/blocked/data.xlsx", note_path: "notes/imported.md" },
+				entry,
+				VAULT_ROOT,
+			);
+			expect(result).not.toBeNull();
+			expect(result).toContain("is blocked");
+		});
+
+		it("blocks when the vault destination note is blocked", () => {
+			const entry = makeEntry({ blocked_paths: ["private/"] });
+			const result = enforcePathConstraints(
+				"import_xlsx",
+				{ path: "/Users/test/vault/data.xlsx", note_path: "private/imported.md" },
+				entry,
+				VAULT_ROOT,
+			);
+			expect(result).not.toBeNull();
+			expect(result).toContain("is blocked");
+		});
+
+		it("allows when both the filesystem source and vault destination are permitted", () => {
+			const entry = makeEntry({ allowed_paths: ["/Users/test/vault", "notes/"] });
+			const result = enforcePathConstraints(
+				"import_xlsx",
+				{ path: "/Users/test/vault/data.xlsx", note_path: "notes/imported.md" },
 				entry,
 				VAULT_ROOT,
 			);

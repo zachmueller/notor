@@ -182,7 +182,7 @@ The implementation receives these injected variables:
 - \`app\` — Obsidian App instance (\`app.vault\`, \`app.metadataCache\`, \`app.workspace\`, etc.)
 - \`obsidian\` — Obsidian API exports (\`requestUrl\`, \`Notice\`, \`TFile\`, \`TFolder\`, \`normalizePath\`, \`Platform\`, etc.)
 - \`utils\` — Notor utilities (see below)
-- \`libs\` — Bundled libraries (\`mammoth\`, \`Turndown\`, \`turndownGfm\`, \`unpdf\`, \`docx\`, \`PizZip\`, \`marked\`, \`xmldom\`, \`croner\` (\`Cron\`), \`fs\`, \`crypto\`, \`path\`)
+- \`libs\` — Bundled libraries (\`mammoth\`, \`Turndown\`, \`turndownGfm\`, \`unpdf\`, \`exceljs\` (lazy — \`(await libs.exceljs()).default\`), \`docx\`, \`PizZip\`, \`marked\`, \`xmldom\`, \`croner\` (\`Cron\`), \`fs\`, \`crypto\`, \`path\`)
 - \`settings\` — Per-tool settings values (from the YAML \`settings:\` block)
 - \`shared\` — Global shared settings (from \`{notor_dir}/settings.md\`)
 - \`params\` — Parameters the LLM passed when calling the tool
