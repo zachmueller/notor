@@ -730,9 +730,9 @@ export class ChatInput {
 		let match: RegExpExecArray | null;
 		let lastIndex = 0;
 		let insertedAny = false;
-		// Each inserted token emits a trailing spacer, so collapse a single leading
-		// space in the text that immediately follows a token to avoid a double space.
-		let afterToken = false;
+		// Track whether the paste ends on a token (no trailing text) so we can add
+		// a caret spacer only then — surrounding text otherwise supplies spacing.
+		let endedOnToken = false;
 
 		while ((match = pattern.exec(text)) !== null) {
 			const inner = match[1] ?? "";
@@ -765,22 +765,30 @@ export class ChatInput {
 				continue;
 			}
 
-			// Emit the plain text preceding this match, then the token span.
-			let before = text.slice(lastIndex, match.index);
-			if (afterToken && before.startsWith(" ")) before = before.slice(1);
+			// Emit the plain text preceding this match verbatim, then the token. The
+			// token no longer forces its own spacer, so the source's spacing (a
+			// space in "[[A]] for me", none in "[[A]], ok") is preserved exactly.
+			const before = text.slice(lastIndex, match.index);
 			if (before) this.insertTextAtCursor(before);
 			this.insertWikilinkTokenAtCursor(attachment);
 			lastIndex = match.index + match[0].length;
 			insertedAny = true;
-			afterToken = true;
+			endedOnToken = true;
 		}
 
 		if (!insertedAny) return false;
 
-		// Emit any trailing text after the final matched link.
-		let after = text.slice(lastIndex);
-		if (afterToken && after.startsWith(" ")) after = after.slice(1);
-		if (after) this.insertTextAtCursor(after);
+		// Emit any trailing text after the final matched link verbatim.
+		const after = text.slice(lastIndex);
+		if (after) {
+			this.insertTextAtCursor(after);
+			endedOnToken = false;
+		}
+
+		// If the paste ends on an atomic token span with no following text, append
+		// a single trailing spacer so the caret can rest after it (a bare trailing
+		// contenteditable=false span is hard to type past).
+		if (endedOnToken) this.insertTextAtCursor(" ");
 
 		return true;
 	}
@@ -795,6 +803,10 @@ export class ChatInput {
 	 * The `data-attachment-*` attributes let the MutationObserver auto-register
 	 * the pending attachment; we also register it directly so registration does
 	 * not depend on observer timing.
+	 *
+	 * No trailing spacer is emitted here — the caller supplies the surrounding
+	 * text verbatim (preserving the source's own spacing) and adds a caret spacer
+	 * only when the paste ends on a token.
 	 */
 	private insertWikilinkTokenAtCursor(attachment: Attachment): void {
 		const sel = window.getSelection();
@@ -815,11 +827,10 @@ export class ChatInput {
 		tokenSpan.textContent = `[[${attachment.display_name}]]`;
 		range.insertNode(tokenSpan);
 
-		const spacer = document.createTextNode(" ");
-		tokenSpan.after(spacer);
-
+		// Place the caret immediately after the token so the caller's next
+		// insertTextAtCursor() lands right after it.
 		const newRange = document.createRange();
-		newRange.setStart(spacer, 1);
+		newRange.setStartAfter(tokenSpan);
 		newRange.collapse(true);
 		sel.removeAllRanges();
 		sel.addRange(newRange);
