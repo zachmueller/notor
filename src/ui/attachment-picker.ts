@@ -253,6 +253,14 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	 * non-section callers keep the finalize-immediately behaviour.
 	 */
 	private onBeginSectionFlow: ((file: TFile) => void) | null = null;
+	/**
+	 * How the pending selection was triggered. `"tab"` enters the section flow;
+	 * `"enter"` (the default, also used for mouse clicks) finalizes the plain note.
+	 * Set only by {@link selectHighlighted} (the Tab entry point); read and reset
+	 * at the top of {@link selectSuggestion}. Mirrors Obsidian's link editor where
+	 * Enter accepts the plain note and Tab continues into sub-navigation.
+	 */
+	private pendingSelectVia: "enter" | "tab" = "enter";
 
 	constructor(
 		app: App,
@@ -309,6 +317,12 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	 */
 	selectHighlighted(evt?: KeyboardEvent): void {
 		if (this.currentSuggestions.length === 0) return;
+
+		// Tab is the only caller of selectHighlighted; mark the pending selection so
+		// selectSuggestion routes markdown notes into the section flow. Enter and
+		// mouse clicks reach selectSuggestion without touching this method, so the
+		// flag stays at its "enter" default and they finalize the plain note.
+		this.pendingSelectVia = "tab";
 
 		// Mechanism C: the exact call Obsidian's own Enter handler makes. It routes
 		// back through this class's selectSuggestion(value, evt) with the real
@@ -467,6 +481,11 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 	}
 
 	selectSuggestion(suggestion: VaultNoteSuggestion): void {
+		// Capture and reset the trigger intent up front so every early return below
+		// also clears it (a later selection must not inherit a stale "tab").
+		const via = this.pendingSelectVia;
+		this.pendingSelectVia = "enter";
+
 		const existing = this.existingAttachments();
 
 		// Check for duplicate
@@ -478,13 +497,15 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 			return;
 		}
 
-		// Markdown notes can have section headings — hand off to the section
+		// Markdown notes can have section headings. On Tab, hand off to the section
 		// picker so the user may optionally append `#heading` (Obsidian-style),
 		// leaving the note as live `[[Basename#` text until they pick or dismiss.
-		// Image/PDF files have no headings, so they finalize immediately.
+		// On Enter (or mouse click), finalize the plain `[[Note]]` immediately — the
+		// user asked for the note itself, not a section. Image/PDF files have no
+		// headings, so they finalize immediately regardless of key.
 		const ext = "." + suggestion.file.extension.toLowerCase();
 		const isMarkdown = !IMAGE_EXTENSIONS.has(ext) && !PDF_EXTENSIONS.has(ext);
-		if (isMarkdown && this.onBeginSectionFlow) {
+		if (isMarkdown && via === "tab" && this.onBeginSectionFlow) {
 			// Replace `[[query` with editable `[[Basename#` and open the section
 			// picker. The suggest text uses the basename (no extension) for a clean
 			// query surface; the final token/attachment still uses the full path.

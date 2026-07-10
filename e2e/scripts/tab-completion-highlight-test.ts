@@ -317,6 +317,56 @@ async function testVaultEnterSelects(ctx: TestContext): Promise<void> {
 	}
 }
 
+/**
+ * Test 2b: Enter on a note WITH headings must finalize the plain `[[Note]]` and
+ * must NOT open the section picker (mirrors Obsidian: Enter = accept as-is, Tab =
+ * continue into sub-navigation). Guards the Enter-vs-Tab split.
+ */
+async function testVaultEnterDoesNotOpenSectionPicker(ctx: TestContext): Promise<void> {
+	console.log("\nTest 2b: `[[` Enter on a sectioned note finalizes plain note, no section picker");
+	const { page } = ctx;
+	await resetInput(page);
+
+	await page.focus(".notor-text-input");
+	await page.keyboard.type(`[[${SECTIONED_NOTE}`);
+	if (!(await waitForSelector(page, ".suggestion-container .suggestion-item", 4_000))) {
+		ctx.fail("Enter no-section: `[[` popover", "Popover did not open for the sectioned note");
+		return;
+	}
+	await page.waitForTimeout(200);
+
+	// Enter should finalize the plain note token, not enter the section flow.
+	await page.keyboard.press("Enter");
+	await page.waitForTimeout(500);
+
+	const inserted = await readToken(page, ".notor-wikilink-token");
+	const sectionInst = await probeInstance(page, "section");
+	const stillHasPopover = await page.evaluate(() => {
+		const c = document.querySelector(".suggestion-container .suggestion-item");
+		return !!c;
+	});
+	const shot = await ctx.screenshot("02b-enter-no-section");
+	console.log(`  After Enter: token="${inserted}" sectionActive=${sectionInst.active} popoverOpen=${stillHasPopover}`);
+
+	const expected = `[[${SECTIONED_NOTE}.md]]`;
+	const ok = inserted === expected && !sectionInst.active && !stillHasPopover;
+	if (ok) {
+		ctx.pass(
+			"Enter finalizes plain note without opening section picker",
+			`Inserted "${inserted}"; section suggest inactive; no popover remaining`,
+			shot,
+		);
+	} else {
+		ctx.fail(
+			"Enter finalizes plain note without opening section picker",
+			`Expected plain "${expected}" and NO section picker, got token="${inserted}", ` +
+				`sectionActive=${sectionInst.active}, popoverOpen=${stillHasPopover}`,
+			shot,
+		);
+	}
+	await resetInput(page);
+}
+
 /** Test 3 + 4: mechanism-availability matrix (drives the implementation choice). */
 async function testMechanismMatrix(ctx: TestContext): Promise<void> {
 	console.log("\nTest 3/4: probe selection mechanisms (C = useSelectedItem, B = DOM is-selected)");
@@ -592,6 +642,7 @@ async function tests(ctx: TestContext): Promise<void> {
 
 	await testVaultTabRepro(ctx);
 	await testVaultEnterSelects(ctx);
+	await testVaultEnterDoesNotOpenSectionPicker(ctx);
 	await testMechanismMatrix(ctx);
 	await testWorkflowSuggest(ctx);
 	await testTabDoesNotSend(ctx);
