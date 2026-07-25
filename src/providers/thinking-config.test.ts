@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolveAnthropicThinking } from "./thinking-config";
-import { getThinkingMode } from "./model-metadata";
+import { getThinkingMode, supportsThinking } from "./model-metadata";
 
 describe("resolveAnthropicThinking", () => {
 	describe("effort models (Opus 4.8)", () => {
@@ -159,5 +159,46 @@ describe("getThinkingMode", () => {
 	it("defaults to 'effort' for an unknown/future model id", () => {
 		expect(getThinkingMode("claude-opus-5-0")).toBe("effort");
 		expect(getThinkingMode("global.anthropic.claude-sonnet-5-0")).toBe("effort");
+	});
+
+	// The 5-series (Opus 5 / Sonnet 5 / Fable 5) rejects legacy thinking.type=enabled
+	// and serves encrypted adaptive reasoning (live converse probe), so it must
+	// classify "effort" — NOT the legacy "enabled" protocol.
+	it("is 'effort' for the 5-series (Opus 5 / Sonnet 5 / Fable 5)", () => {
+		const fiveSeries = [
+			"claude-opus-5",
+			"claude-sonnet-5",
+			"claude-fable-5",
+			"us.anthropic.claude-opus-5",
+			"global.anthropic.claude-opus-5",
+			"us.anthropic.claude-sonnet-5",
+			"global.anthropic.claude-sonnet-5",
+			"us.anthropic.claude-fable-5",
+			"global.anthropic.claude-fable-5",
+		];
+		for (const id of fiveSeries) {
+			expect(getThinkingMode(id)).toBe("effort");
+		}
+	});
+});
+
+describe("supportsThinking", () => {
+	// Regression: without the 5-series patterns, supportsThinking returned false
+	// for Opus 5 / Sonnet 5 / Fable 5, so thinking was never offered at all.
+	it("is true for the 5-series (direct + Bedrock ids)", () => {
+		const fiveSeries = [
+			"claude-opus-5",
+			"claude-sonnet-5",
+			"claude-fable-5",
+			"us.anthropic.claude-opus-5",
+			"global.anthropic.claude-opus-5",
+			"us.anthropic.claude-sonnet-5",
+			"global.anthropic.claude-sonnet-5",
+			"us.anthropic.claude-fable-5",
+			"global.anthropic.claude-fable-5",
+		];
+		for (const id of fiveSeries) {
+			expect(supportsThinking(id)).toBe(true);
+		}
 	});
 });

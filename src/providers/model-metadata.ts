@@ -60,6 +60,24 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 	// -----------------------------------------------------------------------
 	// Anthropic models (direct API)
 	// -----------------------------------------------------------------------
+	"claude-opus-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015, // verify pricing
+		output_price_per_1k: 0.075, // verify pricing
+		display_name: "Claude Opus 5",
+	},
+	"claude-sonnet-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003, // verify pricing
+		output_price_per_1k: 0.015, // verify pricing
+		display_name: "Claude Sonnet 5",
+	},
+	"claude-fable-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.010, // verify pricing
+		output_price_per_1k: 0.050, // verify pricing
+		display_name: "Claude Fable 5",
+	},
 	"claude-opus-4-8": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015, // verify pricing
@@ -272,6 +290,97 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 			beta_flag: "context-1m-2025-08-07",
 			input_price_per_1k: 0.030,
 			output_price_per_1k: 0.150,
+		},
+	},
+
+	// -----------------------------------------------------------------------
+	// Claude 5-series (Opus 5 / Sonnet 5 / Fable 5) — 1M context beta supported.
+	//
+	// As of 2026-07, Bedrock ships only the `us.` and `global.` inference
+	// profiles for these models (no `eu.`/`apac.` variants yet, unlike Opus 4.8)
+	// — the omission of those two geo prefixes is intentional, not an oversight.
+	// The `context-1m-2025-08-07` beta header is accepted by all three (live
+	// converse probe), and each rejects legacy thinking.type=enabled in favor of
+	// adaptive/effort — so they classify "effort" via the getThinkingMode()
+	// default and need no LEGACY_ENABLED_THINKING_PATTERNS entry.
+	// -----------------------------------------------------------------------
+
+	// Claude Opus 5 — pricing copied from Opus 4.8 (verify)
+	"us.anthropic.claude-opus-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		display_name: "Claude Opus 5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030,
+			output_price_per_1k: 0.150,
+		},
+	},
+	"global.anthropic.claude-opus-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		display_name: "Claude Opus 5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030,
+			output_price_per_1k: 0.150,
+		},
+	},
+
+	// Claude Sonnet 5 — pricing copied from Sonnet 4.6 (verify)
+	"us.anthropic.claude-sonnet-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "Claude Sonnet 5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
+	},
+	"global.anthropic.claude-sonnet-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003,
+		output_price_per_1k: 0.015,
+		display_name: "Claude Sonnet 5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.006,
+			output_price_per_1k: 0.030,
+		},
+	},
+
+	// Claude Fable 5 — base pricing per Anthropic first-party rates (verify pricing);
+	// extended-tier premium unconfirmed, set equal to base for now (verify).
+	"us.anthropic.claude-fable-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.010, // verify pricing
+		output_price_per_1k: 0.050, // verify pricing
+		display_name: "Claude Fable 5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.010, // verify
+			output_price_per_1k: 0.050, // verify
+		},
+	},
+	"global.anthropic.claude-fable-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.010, // verify pricing
+		output_price_per_1k: 0.050, // verify pricing
+		display_name: "Claude Fable 5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.010, // verify
+			output_price_per_1k: 0.050, // verify
 		},
 	},
 
@@ -685,12 +794,16 @@ export function getKnownModelIds(): string[] {
 // ---------------------------------------------------------------------------
 
 const THINKING_PATTERNS = [
-	// Anthropic direct API — Claude 3.5 Sonnet, 3.7 Sonnet, Sonnet 4+, Opus 4+
+	// Anthropic direct API — Claude 3.5 Sonnet, 3.7 Sonnet, Sonnet/Opus 4+ and 5-series
 	/^claude-(opus|sonnet)-4/,
+	/^claude-(opus|sonnet)-5/,
+	/^claude-fable-5/,
 	/^claude-3-7-sonnet/,
 	/^claude-3-5-sonnet/,
 	// Bedrock Anthropic inference profiles
 	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet)-4/,
+	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet)-5/,
+	/^(us|eu|apac|global)\.anthropic\.claude-fable-5/,
 	/^(us|eu|apac|global)\.anthropic\.claude-3-7-sonnet/,
 	/^(us|eu|apac|global)\.anthropic\.claude-3-5-sonnet/,
 	// OpenAI o-series reasoning models

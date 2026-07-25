@@ -22,6 +22,21 @@ describe("getContextWindow", () => {
 		expect(getContextWindow("us.anthropic.claude-opus-4-6-v1", true)).toBe(1_000_000);
 	});
 
+	it("returns 200K base / 1M extended for the 5-series (Opus 5 / Sonnet 5 / Fable 5)", () => {
+		const fiveSeries = [
+			"us.anthropic.claude-opus-5",
+			"global.anthropic.claude-opus-5",
+			"us.anthropic.claude-sonnet-5",
+			"global.anthropic.claude-sonnet-5",
+			"us.anthropic.claude-fable-5",
+			"global.anthropic.claude-fable-5",
+		];
+		for (const id of fiveSeries) {
+			expect(getContextWindow(id)).toBe(200_000);
+			expect(getContextWindow(id, true)).toBe(1_000_000);
+		}
+	});
+
 	it("returns default for unknown model even with useExtendedContext true", () => {
 		expect(getContextWindow("unknown-model-id", true)).toBe(128_000);
 	});
@@ -34,6 +49,12 @@ describe("getContextWindow", () => {
 			"global.anthropic.claude-sonnet-4-6",
 			"us.anthropic.claude-opus-4-6-v1",
 			"global.anthropic.claude-opus-4-6-v1",
+			"us.anthropic.claude-opus-5",
+			"global.anthropic.claude-opus-5",
+			"us.anthropic.claude-sonnet-5",
+			"global.anthropic.claude-sonnet-5",
+			"us.anthropic.claude-fable-5",
+			"global.anthropic.claude-fable-5",
 		];
 		for (const id of variants) {
 			expect(getContextWindow(id, true)).toBe(1_000_000);
