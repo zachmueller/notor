@@ -37,6 +37,41 @@ describe("getContextWindow", () => {
 		}
 	});
 
+	it("returns 200K base / 1M extended for Opus 4.7 and Opus 4.5", () => {
+		const oneMillion = [
+			"us.anthropic.claude-opus-4-7",
+			"global.anthropic.claude-opus-4-7",
+			"us.anthropic.claude-opus-4-5-20251101-v1:0",
+			"global.anthropic.claude-opus-4-5-20251101-v1:0",
+		];
+		for (const id of oneMillion) {
+			expect(getContextWindow(id)).toBe(200_000);
+			expect(getContextWindow(id, true)).toBe(1_000_000);
+		}
+	});
+
+	it("returns 200K for Opus 4.1 / Claude 3 Bedrock profiles (no extended context)", () => {
+		const base200k = [
+			"us.anthropic.claude-opus-4-1-20250805-v1:0",
+			"us.anthropic.claude-3-haiku-20240307-v1:0",
+			"us.anthropic.claude-3-sonnet-20240229-v1:0",
+		];
+		for (const id of base200k) {
+			expect(getContextWindow(id)).toBe(200_000);
+			// No extended_context — asking for extended returns the base window.
+			expect(getContextWindow(id, true)).toBe(200_000);
+		}
+	});
+
+	it("returns correct windows for newly-registered non-Anthropic Bedrock profiles", () => {
+		expect(getContextWindow("us.amazon.nova-2-lite-v1:0")).toBe(300_000);
+		expect(getContextWindow("us.meta.llama3-3-70b-instruct-v1:0")).toBe(128_000);
+		expect(getContextWindow("us.meta.llama3-1-8b-instruct-v1:0")).toBe(128_000);
+		expect(getContextWindow("us.mistral.pixtral-large-2502-v1:0")).toBe(128_000);
+		expect(getContextWindow("us.writer.palmyra-x4-v1:0")).toBe(128_000);
+		expect(getContextWindow("us.writer.palmyra-x5-v1:0")).toBe(1_000_000);
+	});
+
 	it("returns default for unknown model even with useExtendedContext true", () => {
 		expect(getContextWindow("unknown-model-id", true)).toBe(128_000);
 	});
@@ -55,6 +90,10 @@ describe("getContextWindow", () => {
 			"global.anthropic.claude-sonnet-5",
 			"us.anthropic.claude-fable-5",
 			"global.anthropic.claude-fable-5",
+			"us.anthropic.claude-opus-4-7",
+			"global.anthropic.claude-opus-4-7",
+			"us.anthropic.claude-opus-4-5-20251101-v1:0",
+			"global.anthropic.claude-opus-4-5-20251101-v1:0",
 		];
 		for (const id of variants) {
 			expect(getContextWindow(id, true)).toBe(1_000_000);

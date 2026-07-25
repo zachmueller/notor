@@ -122,9 +122,13 @@ describe("getThinkingMode", () => {
 			"claude-opus-4-1-20250805",
 			"us.anthropic.claude-opus-4-1-20250805-v1:0",
 			"global.anthropic.claude-opus-4-1-20250805-v1:0",
-			// 4.5
+			// 4.5 — Sonnet 4.5 and Opus 4.5 (Opus 4.5 visible transcript confirmed
+			// by live Bedrock probe: reasoningText.text populated, 332 chars)
 			"claude-sonnet-4-5-20250929",
 			"apac.anthropic.claude-sonnet-4-5-20250929-v1:0",
+			"claude-opus-4-5",
+			"us.anthropic.claude-opus-4-5-20251101-v1:0",
+			"global.anthropic.claude-opus-4-5-20251101-v1:0",
 			// 4.6
 			"claude-opus-4-6",
 			"claude-sonnet-4-6",
@@ -200,5 +204,21 @@ describe("supportsThinking", () => {
 		for (const id of fiveSeries) {
 			expect(supportsThinking(id)).toBe(true);
 		}
+	});
+
+	// Opus 4.7 (effort) and Opus 4.5 (enabled) both support thinking — they must
+	// not be missed just because they were newly added to the metadata table.
+	it("is true for Opus 4.7 and Opus 4.5 Bedrock profiles", () => {
+		expect(supportsThinking("us.anthropic.claude-opus-4-7")).toBe(true);
+		expect(supportsThinking("global.anthropic.claude-opus-4-7")).toBe(true);
+		expect(supportsThinking("us.anthropic.claude-opus-4-5-20251101-v1:0")).toBe(true);
+		expect(supportsThinking("global.anthropic.claude-opus-4-5-20251101-v1:0")).toBe(true);
+	});
+
+	// Claude 3 Haiku / 3 Sonnet have no thinking support — the newly-registered
+	// Bedrock profiles must NOT be offered reasoning.
+	it("is false for Claude 3 Haiku / 3 Sonnet (no thinking)", () => {
+		expect(supportsThinking("us.anthropic.claude-3-haiku-20240307-v1:0")).toBe(false);
+		expect(supportsThinking("us.anthropic.claude-3-sonnet-20240229-v1:0")).toBe(false);
 	});
 });

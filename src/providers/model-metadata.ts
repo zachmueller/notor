@@ -84,6 +84,24 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		output_price_per_1k: 0.075, // verify pricing
 		display_name: "Claude Opus 4.8",
 	},
+	"claude-opus-4-7": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015, // verify pricing
+		output_price_per_1k: 0.075, // verify pricing
+		display_name: "Claude Opus 4.7",
+	},
+	"claude-opus-4-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015, // verify pricing
+		output_price_per_1k: 0.075, // verify pricing
+		display_name: "Claude Opus 4.5",
+	},
+	"claude-opus-4-1": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015,
+		output_price_per_1k: 0.075,
+		display_name: "Claude Opus 4.1",
+	},
 	"claude-opus-4-6": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015,
@@ -155,6 +173,12 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		input_price_per_1k: 0.00025,
 		output_price_per_1k: 0.00125,
 		display_name: "Claude 3 Haiku",
+	},
+	"claude-3-sonnet-20240229": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003, // verify pricing
+		output_price_per_1k: 0.015, // verify pricing
+		display_name: "Claude 3 Sonnet",
 	},
 
 	// -----------------------------------------------------------------------
@@ -290,6 +314,60 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 			beta_flag: "context-1m-2025-08-07",
 			input_price_per_1k: 0.030,
 			output_price_per_1k: 0.150,
+		},
+	},
+
+	// Claude Opus 4.7 — 1M context beta supported; classifies "effort" (rejects
+	// legacy thinking.type=enabled — live converse probe). us./global. only.
+	"us.anthropic.claude-opus-4-7": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015, // verify pricing
+		output_price_per_1k: 0.075, // verify pricing
+		display_name: "Claude Opus 4.7",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030, // verify
+			output_price_per_1k: 0.150, // verify
+		},
+	},
+	"global.anthropic.claude-opus-4-7": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015, // verify pricing
+		output_price_per_1k: 0.075, // verify pricing
+		display_name: "Claude Opus 4.7",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030, // verify
+			output_price_per_1k: 0.150, // verify
+		},
+	},
+
+	// Claude Opus 4.5 — 1M context beta supported; classifies "enabled" (visible
+	// reasoning transcript confirmed by live converse probe). us./global. only.
+	"us.anthropic.claude-opus-4-5-20251101-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015, // verify pricing
+		output_price_per_1k: 0.075, // verify pricing
+		display_name: "Claude Opus 4.5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030, // verify
+			output_price_per_1k: 0.150, // verify
+		},
+	},
+	"global.anthropic.claude-opus-4-5-20251101-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015, // verify pricing
+		output_price_per_1k: 0.075, // verify pricing
+		display_name: "Claude Opus 4.5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			input_price_per_1k: 0.030, // verify
+			output_price_per_1k: 0.150, // verify
 		},
 	},
 
@@ -544,6 +622,17 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		},
 	},
 
+	// Claude Opus 4.1 — LEGACY foundation model but profile still ACTIVE; classifies
+	// "enabled" (visible reasoning transcript confirmed by live converse probe).
+	// No extended_context: 4.1 predates the 1M era (matches the dated Opus 4.0 entry).
+	// us. only.
+	"us.anthropic.claude-opus-4-1-20250805-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.015, // verify pricing
+		output_price_per_1k: 0.075, // verify pricing
+		display_name: "Claude Opus 4.1",
+	},
+
 	// Claude Opus 4
 	"us.anthropic.claude-opus-4-20250514-v1:0": {
 		context_window: 200_000,
@@ -612,6 +701,21 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		output_price_per_1k: 0.004,
 	},
 
+	// Claude 3 (LEGACY foundation models, profiles still ACTIVE in us-east-1).
+	// No thinking support (supportsThinking() false). us. only.
+	"us.anthropic.claude-3-haiku-20240307-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.00025,
+		output_price_per_1k: 0.00125,
+		display_name: "Claude 3 Haiku",
+	},
+	"us.anthropic.claude-3-sonnet-20240229-v1:0": {
+		context_window: 200_000,
+		input_price_per_1k: 0.003, // verify pricing
+		output_price_per_1k: 0.015, // verify pricing
+		display_name: "Claude 3 Sonnet",
+	},
+
 	// -----------------------------------------------------------------------
 	// AWS Bedrock — Amazon Nova inference profiles
 	// -----------------------------------------------------------------------
@@ -674,7 +778,12 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		output_price_per_1k: 0.00014,
 	},
 
-	// Nova 2 Lite (global only as of July 2026)
+	// Nova 2 Lite (us. + global. as of July 2026)
+	"us.amazon.nova-2-lite-v1:0": {
+		context_window: 300_000,
+		input_price_per_1k: 0.00006,
+		output_price_per_1k: 0.00024,
+	},
 	"global.amazon.nova-2-lite-v1:0": {
 		context_window: 300_000,
 		input_price_per_1k: 0.00006,
@@ -682,7 +791,7 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 	},
 
 	// -----------------------------------------------------------------------
-	// AWS Bedrock — Meta Llama 4 inference profiles
+	// AWS Bedrock — Meta Llama inference profiles
 	// -----------------------------------------------------------------------
 	"us.meta.llama4-maverick-17b-instruct-v1:0": {
 		context_window: 128_000,
@@ -693,6 +802,70 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		context_window: 128_000,
 		input_price_per_1k: 0.00017,
 		output_price_per_1k: 0.00017,
+	},
+
+	// Llama 3.x — profiles ACTIVE in us-east-1 (Llama 3.2 foundation models are
+	// LEGACY/EOL but their inference profiles remain ACTIVE, so they still list).
+	// 128K context; pricing per AWS Bedrock rates (verify). us. only.
+	"us.meta.llama3-3-70b-instruct-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.00072, // verify pricing
+		output_price_per_1k: 0.00072, // verify pricing
+	},
+	"us.meta.llama3-2-90b-instruct-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.00072, // verify pricing
+		output_price_per_1k: 0.00072, // verify pricing
+	},
+	"us.meta.llama3-2-11b-instruct-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.00016, // verify pricing
+		output_price_per_1k: 0.00016, // verify pricing
+	},
+	"us.meta.llama3-2-3b-instruct-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.00015, // verify pricing
+		output_price_per_1k: 0.00015, // verify pricing
+	},
+	"us.meta.llama3-2-1b-instruct-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.0001, // verify pricing
+		output_price_per_1k: 0.0001, // verify pricing
+	},
+	"us.meta.llama3-1-70b-instruct-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.00072, // verify pricing
+		output_price_per_1k: 0.00072, // verify pricing
+	},
+	"us.meta.llama3-1-8b-instruct-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.00022, // verify pricing
+		output_price_per_1k: 0.00022, // verify pricing
+	},
+
+	// -----------------------------------------------------------------------
+	// AWS Bedrock — Mistral inference profiles
+	// -----------------------------------------------------------------------
+	// Pixtral Large (vision-capable). 128K context; pricing per Bedrock rates (verify).
+	"us.mistral.pixtral-large-2502-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.002, // verify pricing
+		output_price_per_1k: 0.006, // verify pricing
+	},
+
+	// -----------------------------------------------------------------------
+	// AWS Bedrock — Writer inference profiles
+	// -----------------------------------------------------------------------
+	// Palmyra X4 (128K) and X5 (1M advertised). Pricing per Bedrock rates (verify).
+	"us.writer.palmyra-x4-v1:0": {
+		context_window: 128_000,
+		input_price_per_1k: 0.0025, // verify pricing
+		output_price_per_1k: 0.01, // verify pricing
+	},
+	"us.writer.palmyra-x5-v1:0": {
+		context_window: 1_000_000, // verify (Writer advertises 1M context)
+		input_price_per_1k: 0.0006, // verify pricing
+		output_price_per_1k: 0.006, // verify pricing
 	},
 
 	// -----------------------------------------------------------------------
