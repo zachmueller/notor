@@ -92,6 +92,12 @@ describe("baseKeyToLabel", () => {
 		expect(baseKeyToLabel("anthropic.claude-opus-4-6")).toBe("Claude Opus 4.6");
 	});
 
+	it("converts the 5-series (single-digit version)", () => {
+		expect(baseKeyToLabel("anthropic.claude-opus-5")).toBe("Claude Opus 5");
+		expect(baseKeyToLabel("anthropic.claude-sonnet-5")).toBe("Claude Sonnet 5");
+		expect(baseKeyToLabel("anthropic.claude-fable-5")).toBe("Claude Fable 5");
+	});
+
 	it("converts anthropic.claude-3-7-sonnet", () => {
 		// Strips date suffix, then humanizes
 		expect(baseKeyToLabel("anthropic.claude-3-7-sonnet-20250219")).toBe("Claude 3.7 Sonnet");
@@ -99,6 +105,15 @@ describe("baseKeyToLabel", () => {
 
 	it("converts deepseek.r1", () => {
 		expect(baseKeyToLabel("deepseek.r1")).toBe("R1");
+	});
+
+	it("humanizes newly-registered non-Anthropic base keys", () => {
+		// Documents current behavior (the Meta label quirk matches existing Llama 4 entries).
+		expect(baseKeyToLabel("meta.llama3-3-70b-instruct")).toBe("Llama3 3 70b Instruct");
+		expect(baseKeyToLabel("meta.llama3-1-8b-instruct")).toBe("Llama3 1 8b Instruct");
+		expect(baseKeyToLabel("mistral.pixtral-large-2502")).toBe("Pixtral Large 2502");
+		expect(baseKeyToLabel("writer.palmyra-x5")).toBe("Palmyra X5");
+		expect(baseKeyToLabel("amazon.nova-2-lite")).toBe("Nova 2 Lite");
 	});
 
 	it("handles id without provider prefix", () => {
@@ -207,6 +222,46 @@ describe("groupModels", () => {
 		expect(extVariant!.optionValue).toBe("us.anthropic.claude-sonnet-4-6::1m");
 		expect(extVariant!.contextLabel).toBe("1M");
 		expect(extVariant!.model.context_window).toBe(1_000_000);
+	});
+
+	it("synthesizes a 1M variant for Opus 5 (real extended_context metadata)", () => {
+		const models: ModelInfo[] = [
+			{ id: "us.anthropic.claude-opus-5", display_name: "us.anthropic.claude-opus-5", context_window: 200_000 },
+			{ id: "global.anthropic.claude-opus-5", display_name: "global.anthropic.claude-opus-5", context_window: 200_000 },
+		];
+
+		const groups = groupModels(models);
+		expect(groups).toHaveLength(1);
+		expect(groups[0]!.key).toBe("anthropic.claude-opus-5");
+		expect(groups[0]!.label).toBe("Claude Opus 5");
+		// 2 base + 2 synthesized 1M variants
+		expect(groups[0]!.variants.length).toBe(4);
+
+		const ext = groups[0]!.variants.find((v) => v.isExtendedContext && v.region === "US");
+		expect(ext).toBeDefined();
+		expect(ext!.optionValue).toBe("us.anthropic.claude-opus-5::1m");
+		expect(ext!.contextLabel).toBe("1M");
+		expect(ext!.model.context_window).toBe(1_000_000);
+	});
+
+	it("synthesizes a 1M variant for Opus 4.7 (real extended_context metadata)", () => {
+		const models: ModelInfo[] = [
+			{ id: "us.anthropic.claude-opus-4-7", display_name: "us.anthropic.claude-opus-4-7", context_window: 200_000 },
+			{ id: "global.anthropic.claude-opus-4-7", display_name: "global.anthropic.claude-opus-4-7", context_window: 200_000 },
+		];
+
+		const groups = groupModels(models);
+		expect(groups).toHaveLength(1);
+		expect(groups[0]!.key).toBe("anthropic.claude-opus-4-7");
+		expect(groups[0]!.label).toBe("Claude Opus 4.7");
+		// 2 base + 2 synthesized 1M variants
+		expect(groups[0]!.variants.length).toBe(4);
+
+		const ext = groups[0]!.variants.find((v) => v.isExtendedContext && v.region === "US");
+		expect(ext).toBeDefined();
+		expect(ext!.optionValue).toBe("us.anthropic.claude-opus-4-7::1m");
+		expect(ext!.contextLabel).toBe("1M");
+		expect(ext!.model.context_window).toBe(1_000_000);
 	});
 
 	it("does not synthesize 1M for models without extended_context", () => {

@@ -80,14 +80,26 @@ describe("resolveAnthropicThinking", () => {
 		});
 	});
 
-	describe("unknown / unsupported models (mode:none)", () => {
-		// Fable 5 and any model outside THINKING_PATTERNS must emit NO thinking
-		// payload, even with a level set — guessing a dialect risks a rejection.
-		it("returns undefined for Claude Fable 5 even with a level set", () => {
-			expect(resolveAnthropicThinking("high", "global.anthropic.claude-fable-5")).toBeUndefined();
-			expect(resolveAnthropicThinking("medium", "claude-fable-5")).toBeUndefined();
+	describe("5-series (Fable 5 / Sonnet 5 / Opus 5) — adaptive + effort", () => {
+		// Live Bedrock converse probe (us-west-2, 2026-07): all three 5-series
+		// profiles REJECT thinking.type=enabled with "not supported ... Use
+		// thinking.type.adaptive and output_config.effort", so they resolve to
+		// adaptive + effort exactly like Opus 4.8 — NOT to an undefined/no-op payload.
+		it("maps a level to adaptive + effort for Claude Fable 5", () => {
+			expect(resolveAnthropicThinking("high", "global.anthropic.claude-fable-5")).toEqual({
+				thinking: { type: "adaptive" },
+				effort: "high",
+			});
+			expect(resolveAnthropicThinking("medium", "claude-fable-5")).toEqual({
+				thinking: { type: "adaptive" },
+				effort: "medium",
+			});
 		});
+	});
 
+	describe("unknown / unsupported models (mode:none)", () => {
+		// A model outside THINKING_PATTERNS must emit NO thinking payload, even with
+		// a level set — guessing a dialect risks a provider rejection.
 		it("returns undefined for a wholly unknown model with a level set", () => {
 			expect(resolveAnthropicThinking("high", "some-unknown-model-v9")).toBeUndefined();
 		});
@@ -135,9 +147,13 @@ describe("getThinkingMode", () => {
 			"claude-opus-4-1-20250805",
 			"us.anthropic.claude-opus-4-1-20250805-v1:0",
 			"global.anthropic.claude-opus-4-1-20250805-v1:0",
-			// 4.5
+			// 4.5 — Sonnet 4.5 and Opus 4.5 (Opus 4.5 visible transcript confirmed
+			// by live Bedrock probe: reasoningText.text populated, 332 chars)
 			"claude-sonnet-4-5-20250929",
 			"apac.anthropic.claude-sonnet-4-5-20250929-v1:0",
+			"claude-opus-4-5",
+			"us.anthropic.claude-opus-4-5-20251101-v1:0",
+			"global.anthropic.claude-opus-4-5-20251101-v1:0",
 			// 4.6
 			"claude-opus-4-6",
 			"claude-sonnet-4-6",
@@ -173,6 +189,63 @@ describe("getThinkingMode", () => {
 		expect(getThinkingMode("claude-opus-5-0")).toBe("effort");
 		expect(getThinkingMode("global.anthropic.claude-sonnet-5-0")).toBe("effort");
 	});
+
+	// The 5-series (Opus 5 / Sonnet 5 / Fable 5) rejects legacy thinking.type=enabled
+	// and serves encrypted adaptive reasoning (live converse probe), so it must
+	// classify "effort" — NOT the legacy "enabled" protocol.
+	it("is 'effort' for the 5-series (Opus 5 / Sonnet 5 / Fable 5)", () => {
+		const fiveSeries = [
+			"claude-opus-5",
+			"claude-sonnet-5",
+			"claude-fable-5",
+			"us.anthropic.claude-opus-5",
+			"global.anthropic.claude-opus-5",
+			"us.anthropic.claude-sonnet-5",
+			"global.anthropic.claude-sonnet-5",
+			"us.anthropic.claude-fable-5",
+			"global.anthropic.claude-fable-5",
+		];
+		for (const id of fiveSeries) {
+			expect(getThinkingMode(id)).toBe("effort");
+		}
+	});
+});
+
+describe("supportsThinking", () => {
+	// Regression: without the 5-series patterns, supportsThinking returned false
+	// for Opus 5 / Sonnet 5 / Fable 5, so thinking was never offered at all.
+	it("is true for the 5-series (direct + Bedrock ids)", () => {
+		const fiveSeries = [
+			"claude-opus-5",
+			"claude-sonnet-5",
+			"claude-fable-5",
+			"us.anthropic.claude-opus-5",
+			"global.anthropic.claude-opus-5",
+			"us.anthropic.claude-sonnet-5",
+			"global.anthropic.claude-sonnet-5",
+			"us.anthropic.claude-fable-5",
+			"global.anthropic.claude-fable-5",
+		];
+		for (const id of fiveSeries) {
+			expect(supportsThinking(id)).toBe(true);
+		}
+	});
+
+	// Opus 4.7 (effort) and Opus 4.5 (enabled) both support thinking — they must
+	// not be missed just because they were newly added to the metadata table.
+	it("is true for Opus 4.7 and Opus 4.5 Bedrock profiles", () => {
+		expect(supportsThinking("us.anthropic.claude-opus-4-7")).toBe(true);
+		expect(supportsThinking("global.anthropic.claude-opus-4-7")).toBe(true);
+		expect(supportsThinking("us.anthropic.claude-opus-4-5-20251101-v1:0")).toBe(true);
+		expect(supportsThinking("global.anthropic.claude-opus-4-5-20251101-v1:0")).toBe(true);
+	});
+
+	// Claude 3 Haiku / 3 Sonnet have no thinking support — the newly-registered
+	// Bedrock profiles must NOT be offered reasoning.
+	it("is false for Claude 3 Haiku / 3 Sonnet (no thinking)", () => {
+		expect(supportsThinking("us.anthropic.claude-3-haiku-20240307-v1:0")).toBe(false);
+		expect(supportsThinking("us.anthropic.claude-3-sonnet-20240229-v1:0")).toBe(false);
+	});
 });
 
 describe("getThinkingCapability (single source of truth)", () => {
@@ -195,13 +268,19 @@ describe("getThinkingCapability (single source of truth)", () => {
 		});
 	});
 
-	// Fable 5 and unknown models: NOT supported, mode none — the safe default.
-	it("classifies Claude Fable 5 and unknown ids as unsupported none", () => {
+	// Claude Fable 5: supported adaptive/effort — live Bedrock probe (us-west-2,
+	// 2026-07) confirmed it rejects thinking.type=enabled and serves adaptive
+	// reasoning, so it classifies effort exactly like the rest of the 5-series.
+	it("classifies Claude Fable 5 as supported effort", () => {
 		expect(getThinkingCapability("global.anthropic.claude-fable-5")).toEqual({
-			supported: false,
-			mode: "none",
+			supported: true,
+			mode: "effort",
 		});
-		expect(getThinkingCapability("claude-fable-5")).toEqual({ supported: false, mode: "none" });
+		expect(getThinkingCapability("claude-fable-5")).toEqual({ supported: true, mode: "effort" });
+	});
+
+	// A wholly unknown model id: NOT supported, mode none — the safe default.
+	it("classifies unknown ids as unsupported none", () => {
 		expect(getThinkingCapability("totally-unknown-model")).toEqual({
 			supported: false,
 			mode: "none",
