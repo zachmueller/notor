@@ -214,7 +214,7 @@ export function intersectToolConfig(
  * - empty ∩ empty = empty (no restrictions)
  * - [a, b] ∩ [b, c] = [b] (only paths in both)
  */
-function intersectPaths(a: string[], b: string[]): string[] {
+export function intersectPaths(a: string[], b: string[]): string[] {
 	if (a.length === 0) return b;
 	if (b.length === 0) return a;
 	const setB = new Set(b);
@@ -222,7 +222,7 @@ function intersectPaths(a: string[], b: string[]): string[] {
 }
 
 /** Union two `blocked_paths` arrays, deduplicating. */
-function unionPaths(a: string[], b: string[]): string[] {
+export function unionPaths(a: string[], b: string[]): string[] {
 	if (a.length === 0) return b;
 	if (b.length === 0) return a;
 	return [...new Set([...a, ...b])];

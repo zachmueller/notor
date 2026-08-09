@@ -100,6 +100,44 @@ export function enforcePathConstraints(
 	return null;
 }
 
+/**
+ * Find the first prefix in `prefixes` that `pathValue` falls under.
+ *
+ * The single matcher shared by both severity tiers: the hard access gate
+ * (`allowed_paths` / `blocked_paths`, below) and the soft approval gate
+ * (`auto_approve_paths` / `never_auto_approve_paths`). Returns the winning
+ * prefix — not just a boolean — so callers can name it in an error message or
+ * an auto-approve reason label.
+ *
+ * @param namespace - `vault` compares normalized vault-relative prefixes;
+ *   `filesystem` expands `~`, resolves relative paths against the vault root,
+ *   and compares absolute paths.
+ * @returns The matching prefix, or `null` if none match (including when
+ *   `prefixes` is empty).
+ */
+export function matchesPathPrefixes(
+	pathValue: string,
+	namespace: PathNamespace,
+	prefixes: string[],
+	vaultRootPath: string,
+): string | null {
+	if (prefixes.length === 0) return null;
+
+	if (namespace === "vault") {
+		const normalized = normalizePath(pathValue);
+		for (const prefix of prefixes) {
+			if (vaultPathMatchesPrefix(normalized, prefix)) return prefix;
+		}
+		return null;
+	}
+
+	const absolutePath = toAbsolutePath(pathValue, vaultRootPath);
+	for (const prefix of prefixes) {
+		if (isPathWithin(absolutePath, toAbsolutePath(prefix, vaultRootPath))) return prefix;
+	}
+	return null;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -133,34 +171,24 @@ function checkVaultPath(
 	entry: ResolvedToolConfigEntry,
 	sessionAllowedPaths?: string[],
 ): string | null {
-	const normalized = normalizePath(vaultPath);
-
 	// blocked_paths takes precedence over allowed_paths (and over session-allow)
-	if (entry.blocked_paths.length > 0) {
-		for (const blocked of entry.blocked_paths) {
-			if (vaultPathMatchesPrefix(normalized, blocked)) {
-				return `Path "${vaultPath}" is blocked by path constraint "${blocked}".`;
-			}
-		}
+	const blocked = matchesPathPrefixes(vaultPath, "vault", entry.blocked_paths, "");
+	if (blocked !== null) {
+		return `Path "${vaultPath}" is blocked by path constraint "${blocked}".`;
 	}
 
 	// Per-session auto-allow (FR-121): a path under any session prefix is allowed
 	// IN ADDITION to entry.allowed_paths.
-	if (sessionAllowedPaths && sessionAllowedPaths.length > 0) {
-		const sessionAllowed = sessionAllowedPaths.some((prefix) =>
-			vaultPathMatchesPrefix(normalized, prefix),
-		);
-		if (sessionAllowed) return null;
+	if (matchesPathPrefixes(vaultPath, "vault", sessionAllowedPaths ?? [], "") !== null) {
+		return null;
 	}
 
 	// allowed_paths: empty means no restriction
-	if (entry.allowed_paths.length > 0) {
-		const allowed = entry.allowed_paths.some((prefix) =>
-			vaultPathMatchesPrefix(normalized, prefix),
-		);
-		if (!allowed) {
-			return `Path "${vaultPath}" is not within any allowed path: [${entry.allowed_paths.join(", ")}].`;
-		}
+	if (
+		entry.allowed_paths.length > 0 &&
+		matchesPathPrefixes(vaultPath, "vault", entry.allowed_paths, "") === null
+	) {
+		return `Path "${vaultPath}" is not within any allowed path: [${entry.allowed_paths.join(", ")}].`;
 	}
 
 	return null;
@@ -179,51 +207,37 @@ function checkFilesystemPath(
 	vaultRootPath: string,
 	sessionAllowedPaths?: string[],
 ): string | null {
-	const expandedPath = expandTilde(rawPath);
-	const absolutePath = isAbsolute(expandedPath)
-		? normalize(expandedPath)
-		: normalize(resolve(vaultRootPath, expandedPath));
-
 	// blocked_paths takes precedence
-	if (entry.blocked_paths.length > 0) {
-		for (const blocked of entry.blocked_paths) {
-			const expandedBlocked = expandTilde(blocked);
-			const absBlocked = isAbsolute(expandedBlocked)
-				? normalize(expandedBlocked)
-				: normalize(resolve(vaultRootPath, expandedBlocked));
-			if (isPathWithin(absolutePath, absBlocked)) {
-				return `Path "${rawPath}" is blocked by path constraint "${blocked}".`;
-			}
-		}
+	const blocked = matchesPathPrefixes(rawPath, "filesystem", entry.blocked_paths, vaultRootPath);
+	if (blocked !== null) {
+		return `Path "${rawPath}" is blocked by path constraint "${blocked}".`;
 	}
 
 	// Per-session auto-allow (FR-121): allowed in addition to entry.allowed_paths.
-	if (sessionAllowedPaths && sessionAllowedPaths.length > 0) {
-		const sessionAllowed = sessionAllowedPaths.some((prefix) => {
-			const expandedPrefix = expandTilde(prefix);
-			const absAllowed = isAbsolute(expandedPrefix)
-				? normalize(expandedPrefix)
-				: normalize(resolve(vaultRootPath, expandedPrefix));
-			return isPathWithin(absolutePath, absAllowed);
-		});
-		if (sessionAllowed) return null;
+	if (
+		matchesPathPrefixes(rawPath, "filesystem", sessionAllowedPaths ?? [], vaultRootPath) !== null
+	) {
+		return null;
 	}
 
 	// allowed_paths: empty means no restriction
-	if (entry.allowed_paths.length > 0) {
-		const allowed = entry.allowed_paths.some((prefix) => {
-			const expandedPrefix = expandTilde(prefix);
-			const absAllowed = isAbsolute(expandedPrefix)
-				? normalize(expandedPrefix)
-				: normalize(resolve(vaultRootPath, expandedPrefix));
-			return isPathWithin(absolutePath, absAllowed);
-		});
-		if (!allowed) {
-			return `Path "${rawPath}" is not within any allowed path: [${entry.allowed_paths.join(", ")}].`;
-		}
+	if (
+		entry.allowed_paths.length > 0 &&
+		matchesPathPrefixes(rawPath, "filesystem", entry.allowed_paths, vaultRootPath) === null
+	) {
+		return `Path "${rawPath}" is not within any allowed path: [${entry.allowed_paths.join(", ")}].`;
 	}
 
 	return null;
+}
+
+/**
+ * Resolve a filesystem path to absolute form: expand `~`, then resolve
+ * relative paths against the vault root. Collapses `.` / `..` segments.
+ */
+function toAbsolutePath(rawPath: string, vaultRootPath: string): string {
+	const expanded = expandTilde(rawPath);
+	return isAbsolute(expanded) ? normalize(expanded) : normalize(resolve(vaultRootPath, expanded));
 }
 
 /**
@@ -239,8 +253,31 @@ function vaultPathMatchesPrefix(path: string, prefix: string): boolean {
 }
 
 /**
- * Normalize a vault-relative path: trim, replace backslashes, remove leading/trailing slashes.
+ * Normalize a vault-relative path: trim, replace backslashes, remove
+ * leading/trailing slashes, and collapse `.` / `..` segments.
+ *
+ * The `..` collapse keeps the vault namespace's notion of path identity aligned
+ * with the filesystem namespace, which gets it from `path.normalize()`. A `..`
+ * that would escape the vault root is preserved as a literal segment, so such a
+ * path matches no prefix and fails closed.
  */
 function normalizePath(p: string): string {
-	return p.trim().replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+	const trimmed = p.trim().replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+	if (!trimmed.includes(".")) return trimmed;
+
+	const out: string[] = [];
+	for (const segment of trimmed.split("/")) {
+		if (segment === "" || segment === ".") continue;
+		if (segment === "..") {
+			// Only collapse against a real segment; a leading `..` escapes the
+			// vault and is kept literal so it matches nothing.
+			const last = out[out.length - 1];
+			if (last !== undefined && last !== "..") {
+				out.pop();
+				continue;
+			}
+		}
+		out.push(segment);
+	}
+	return out.join("/");
 }

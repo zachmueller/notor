@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { enforcePathConstraints, TOOL_PATH_PARAMS } from "./path-enforcer";
+import { enforcePathConstraints, matchesPathPrefixes, TOOL_PATH_PARAMS } from "./path-enforcer";
 import type { ResolvedToolConfigEntry } from "./types";
 
 // Mock os.homedir() for deterministic tilde expansion
@@ -53,6 +53,38 @@ function seedPathParams(): void {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+// The shared matcher both tiers use. It returns the winning prefix so callers
+// can name it in an error message or an auto-approve reason label.
+describe("matchesPathPrefixes", () => {
+	it("returns the matching vault prefix", () => {
+		expect(matchesPathPrefixes("ai/notes/x.md", "vault", ["other/", "ai/"], "")).toBe("ai/");
+	});
+
+	it("returns null when no vault prefix matches", () => {
+		expect(matchesPathPrefixes("private/x.md", "vault", ["ai/"], "")).toBeNull();
+	});
+
+	it("returns null for an empty prefix list", () => {
+		expect(matchesPathPrefixes("ai/x.md", "vault", [], "")).toBeNull();
+	});
+
+	it("respects `/` boundaries rather than doing a bare string prefix match", () => {
+		expect(matchesPathPrefixes("ai-private/x.md", "vault", ["ai"], "")).toBeNull();
+	});
+
+	it("returns the matching filesystem prefix, expanding tilde", () => {
+		expect(
+			matchesPathPrefixes("~/Documents/f.txt", "filesystem", ["~/Documents"], VAULT_ROOT),
+		).toBe("~/Documents");
+	});
+
+	it("resolves relative filesystem paths against the vault root", () => {
+		expect(matchesPathPrefixes("sub/f.txt", "filesystem", [VAULT_ROOT], VAULT_ROOT)).toBe(
+			VAULT_ROOT,
+		);
+	});
+});
 
 describe("enforcePathConstraints", () => {
 	beforeEach(() => {
@@ -500,6 +532,60 @@ describe("enforcePathConstraints", () => {
 					undefined,
 					[fsScratch],
 				),
+			).toBeNull();
+		});
+	});
+
+	// -- Path normalization: `.` / `..` collapse ------------------------------
+	// The vault namespace collapses `.` and `..` so it agrees with the filesystem
+	// namespace (which gets this from path.normalize()) on what a path *means*.
+	describe("vault-namespace: `.` and `..` segment collapse", () => {
+		it("collapses `..` so a traversal out of an allowed prefix is not allowed", () => {
+			const entry = makeEntry({ allowed_paths: ["ai/"] });
+			// ai/../private/x collapses to private/x → outside ai/ → rejected.
+			const result = enforcePathConstraints(
+				"read_note", { path: "ai/../private/x.md" }, entry, VAULT_ROOT,
+			);
+			expect(result).not.toBeNull();
+			expect(result).toContain("not within any allowed path");
+		});
+
+		it("collapses `..` so a traversal INTO a blocked prefix is still blocked", () => {
+			const entry = makeEntry({ blocked_paths: ["private/"] });
+			const result = enforcePathConstraints(
+				"write_note", { path: "ai/../private/secret.md" }, entry, VAULT_ROOT,
+			);
+			expect(result).not.toBeNull();
+			expect(result).toContain("is blocked");
+		});
+
+		it("collapses `.` segments", () => {
+			const entry = makeEntry({ allowed_paths: ["ai/"] });
+			expect(
+				enforcePathConstraints("read_note", { path: "ai/./x.md" }, entry, VAULT_ROOT),
+			).toBeNull();
+		});
+
+		it("collapses an interior `..` that stays within the allowed prefix", () => {
+			const entry = makeEntry({ allowed_paths: ["ai/"] });
+			// ai/sub/../x.md collapses to ai/x.md → still inside ai/.
+			expect(
+				enforcePathConstraints("read_note", { path: "ai/sub/../x.md" }, entry, VAULT_ROOT),
+			).toBeNull();
+		});
+
+		it("keeps a leading `..` literal so it escapes nothing and fails closed", () => {
+			const entry = makeEntry({ allowed_paths: ["ai/"] });
+			expect(
+				enforcePathConstraints("read_note", { path: "../outside.md" }, entry, VAULT_ROOT),
+			).not.toBeNull();
+		});
+
+		it("normalizes prefixes as well as paths", () => {
+			const entry = makeEntry({ allowed_paths: ["ai/sub/../"] });
+			// Prefix collapses to `ai`, so ai/x.md matches.
+			expect(
+				enforcePathConstraints("read_note", { path: "ai/x.md" }, entry, VAULT_ROOT),
 			).toBeNull();
 		});
 	});
