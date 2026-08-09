@@ -47,6 +47,17 @@ const VALID_FIELDS = new Set([
 /** Regex to detect MCP server wildcard keys like `serverName__*`. */
 const MCP_WILDCARD_REGEX = /^(.+)__\*$/;
 
+/**
+ * Global path-scoping group names. Not valid config keys — they exist only in
+ * Settings — but worth recognizing so the error message can say so.
+ */
+const PATH_GROUP_NAMES: ReadonlySet<string> = new Set([
+	"vault-read",
+	"vault-write",
+	"filesystem-read",
+	"filesystem-write",
+]);
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -129,9 +140,15 @@ export function extractToolConfigs(
 
 			// Validate tool name (skip for wildcards — they don't match a specific tool)
 			if (!isWildcard && knownSet && !knownSet.has(toolName)) {
+				// Path-scoping group names are Settings-only vocabulary, so someone who
+				// read the Settings UI will reasonably try `vault-write:` here. Say what
+				// to do instead rather than just rejecting the key.
+				const hint = PATH_GROUP_NAMES.has(toolName)
+					? ` "${toolName}" is a Settings-only group name for global path scoping; in a tool config, list the individual tools instead (e.g. write_note, replace_in_note).`
+					: "";
 				errors.push({
 					sourceFile,
-					detail: `Unrecognized tool name "${toolName}" in <notor_tool_config>. Skipping this tool entry.`,
+					detail: `Unrecognized tool name "${toolName}" in <notor_tool_config>. Skipping this tool entry.${hint}`,
 				});
 				continue;
 			}

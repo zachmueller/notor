@@ -15,9 +15,9 @@ export const EXECUTE_COMMAND = scaffold(
     path_namespace: filesystem
 settings:
   execute_command_allowed_paths:
-    name: "Allowed Working Directories"
+    name: "Additional working directories (expands access)"
     type: string[]
-    description: "Additional filesystem paths allowed as working directories. The vault root is always allowed."
+    description: "Additional filesystem paths allowed as working directories. This expands reach — the vault root is always allowed, and adding a path here grants access rather than restricting it. To restrict instead, use Settings → Tools → Path scoping."
     default: []
   execute_command_timeout:
     name: "Command Timeout (seconds)"

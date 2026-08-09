@@ -18,6 +18,7 @@ import type {
 	ResolvedToolConfigEntry,
 	ToolConfigSource,
 } from "../tool-config/types";
+import { PATH_SCOPE_LISTS, type PathScopeList } from "../settings/path-scoping";
 
 /** View type identifier for Obsidian's view registry. */
 export const INSPECTOR_VIEW_TYPE = "notor-tool-config-inspector";
@@ -175,8 +176,12 @@ export class EffectiveConfigInspectorView extends ItemView {
 			"Tool",
 			"Enabled",
 			"Auto-approve",
+			// Access tier — these block calls.
 			"Allowed paths",
 			"Blocked paths",
+			// Approval tier — these only decide whether a prompt is shown.
+			"Auto-approve paths",
+			"Never auto-approve",
 			"Source",
 		]) {
 			headerRow.createEl("th", { text: label });
@@ -213,22 +218,10 @@ export class EffectiveConfigInspectorView extends ItemView {
 			text: entry.auto_approve ? "Yes" : "No",
 		});
 
-		// Allowed paths
-		const allowedCell = row.createEl("td");
-		if (entry.allowed_paths.length === 0) {
-			allowedCell.setText("(none)");
-			allowedCell.addClass("notor-config-inspector-muted");
-		} else {
-			allowedCell.setText(entry.allowed_paths.join(", "));
-		}
-
-		// Blocked paths
-		const blockedCell = row.createEl("td");
-		if (entry.blocked_paths.length === 0) {
-			blockedCell.setText("(none)");
-			blockedCell.addClass("notor-config-inspector-muted");
-		} else {
-			blockedCell.setText(entry.blocked_paths.join(", "));
+		// Path lists: the flat per-context value plus any global group scope the
+		// tool inherits, labelled by origin so the two are never confused.
+		for (const list of PATH_SCOPE_LISTS) {
+			this.renderPathCell(row, entry, list);
 		}
 
 		// Source
@@ -250,6 +243,40 @@ export class EffectiveConfigInspectorView extends ItemView {
 		// Mute row when all values are at defaults (enabled=true, auto_approve from global)
 		if (!source) {
 			row.addClass("notor-config-inspector-default-row");
+		}
+	}
+
+	/**
+	 * Render one path-list cell: the tool's own value, plus any global group
+	 * scopes it inherits, tagged with the group they came from.
+	 *
+	 * Group scopes are shown separately rather than pre-combined because they
+	 * apply only to the tool's parameters in that group — a single tool can
+	 * inherit different rules for its read and write parameters.
+	 */
+	private renderPathCell(
+		row: HTMLElement,
+		entry: ResolvedToolConfigEntry,
+		list: PathScopeList,
+	): void {
+		const cell = row.createEl("td");
+		const own = entry[list];
+		const inherited = Object.entries(entry.path_scopes)
+			.map(([group, lists]) => ({ group, paths: lists?.[list] ?? [] }))
+			.filter(({ paths }) => paths.length > 0);
+
+		if (own.length === 0 && inherited.length === 0) {
+			cell.setText("(none)");
+			cell.addClass("notor-config-inspector-muted");
+			return;
+		}
+
+		if (own.length > 0) cell.createDiv({ text: own.join(", ") });
+		for (const { group, paths } of inherited) {
+			cell.createDiv({
+				cls: "notor-config-inspector-muted",
+				text: `global ${group}: ${paths.join(", ")}`,
+			});
 		}
 	}
 

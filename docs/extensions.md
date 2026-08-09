@@ -58,7 +58,9 @@ Each parameter supports:
 | `description` | string | Sent to the AI to explain the parameter. |
 | `default` | matches type | Makes the parameter optional. Params without a default are required. |
 | `enum` | string[] | Constrains to listed values (string type only). |
-| `path_namespace` | string | `"vault"` or `"filesystem"` — enables automatic [path enforcement](vault-tools.md#per-context-tool-configuration). |
+| `path_namespace` | string | `"vault"` or `"filesystem"` — enables automatic [path enforcement](vault-tools.md#path-scoping). |
+| `path_resolve_as` | string | `"note"` — resolve a bare note name to its true vault path before checking constraints. |
+| `path_access` | string | `"read"` or `"write"` — which [path scoping](vault-tools.md#path-scoping) group this parameter belongs to. Defaults to the tool's `notor-mode`; set it only when a parameter's direction differs (e.g. a template a write tool reads). |
 
 ### Return value
 

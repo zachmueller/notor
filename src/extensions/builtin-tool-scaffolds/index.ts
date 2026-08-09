@@ -118,9 +118,9 @@ export const BUILTIN_SHARED_SETTINGS_SCHEMA: readonly SettingsFieldSchema[] = [
 	},
 	{
 		key: "read_file_allowed_paths",
-		name: "Allowed file-system paths",
+		name: "Additional file-system paths (expands access)",
 		type: "string[]",
-		description: "Absolute paths outside the vault that read_file, write_file, replace_in_file, and the DOCX and XLSX tools may access.",
+		description: "Absolute paths OUTSIDE the vault that read_file, write_file, replace_in_file, and the DOCX and XLSX tools may access. This expands reach — the vault is always reachable, and adding a path here grants access rather than restricting it. To restrict instead, use Tools → Path scoping above.",
 		default: [],
 	},
 ];

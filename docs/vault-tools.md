@@ -98,15 +98,18 @@ filesystem__read_file:
 |-------|------|-------------|
 | `enabled` | boolean | Whether the tool is available |
 | `auto_approve` | boolean | Whether the tool auto-approves |
-| `allowed_paths` | string[] | Allowed filesystem paths (file tools only) |
-| `blocked_paths` | string[] | Blocked filesystem paths (file tools only) |
+| `allowed_paths` | string[] | Path prefixes the tool may operate on. Empty means no restriction. Blocks out-of-bounds calls. |
+| `blocked_paths` | string[] | Path prefixes the tool may never touch. Takes precedence over `allowed_paths`. |
+| `auto_approve_paths` | string[] | Path prefixes whose calls skip the approval prompt. Calls elsewhere still run, they just wait for approval. **Not a security boundary.** |
+| `never_auto_approve_paths` | string[] | Path prefixes that always require approval, even when `auto_approve` is true. |
 
 **Key behaviors:**
 
 - **Sparse merge** — omitted fields inherit from the next lower priority level. You only need to specify overrides.
 - **Precedence** (highest first): workflow → persona → rule → global defaults.
 - **MCP tools** use `server__tool` naming (e.g., `filesystem__read_file`).
-- **`allowed_paths` / `blocked_paths`** use replace semantics: the highest-priority config that sets the field completely replaces lower-level values.
+- **Path fields** use replace semantics between config levels: the highest-priority config that sets the field completely replaces lower-level values. They apply to every path parameter of the tool — both vault note paths and filesystem paths.
+- **Global path scoping is a floor for the access tier.** `allowed_paths` / `blocked_paths` set in **Settings → Notor → Tools → Path scoping** cannot be widened here: allow lists intersect and block lists union. The approval-tier lists are a plain default, so setting `auto_approve_paths` here replaces the global value.
 - [`<include_note>`](include-note.md) tags are resolved before tool config blocks are extracted.
 
 Use the **Copy tool config YAML** button in **Settings → Notor → Tools** to generate a starting snippet with your current settings.
@@ -420,6 +423,61 @@ Blocked patterns take precedence over allowed patterns. Patterns use glob syntax
 
 Command patterns can also be set via `<notor_tool_config>` blocks using `allowed_command_patterns` and `blocked_command_patterns` fields.
 
+## Path scoping
+
+Two ways to limit which paths the AI may touch, configured globally in **Settings → Notor → Tools → Path scoping** or per-context in a [`<notor_tool_config>`](#per-context-tool-configuration) block.
+
+Settings groups the lists by **what a tool parameter does**, not by tool: `vault-read`, `vault-write`, `filesystem-read`, and `filesystem-write`. Grouping this way is what makes "read anywhere, write only under `ai/`" expressible even for tools that straddle a boundary — `import_docx` reads a filesystem file (governed by `filesystem-read`) and writes a vault note (governed by `vault-write`), so one tool obeys two different rule sets.
+
+### Access tier — a hard boundary
+
+- **Allowed paths** — restrict a group to these prefixes. Empty means no restriction. An out-of-bounds call is blocked and the AI is told why.
+- **Blocked paths** — never allow these prefixes. Takes precedence over Allowed paths.
+
+A persona or workflow can narrow the global lists further but never widen them: allow lists intersect and block lists union. A sub-agent inherits the same floor.
+
+### Approval tier — convenience only
+
+- **Auto-approve paths** — skip the approval prompt for calls under these prefixes, even when the tool is not set to auto-approve.
+- **Never auto-approve paths** — always ask, even for a tool you have set to auto-approve.
+
+**This is not a security boundary.** It only decides whether a human sees a prompt; the call runs either way. If you mean to forbid access, use Blocked paths. Unlike the access tier, a per-context list replaces the global default outright — widening is harmless here, since the worst case is a prompt you opted out of.
+
+When a path rule skips review, the collapsed approval card says why (e.g. `auto-approved: matched ai/`).
+
+### The motivating example
+
+Auto-approve writes under `ai/` while still being able to propose edits elsewhere for manual review:
+
+```xml
+<notor_tool_config>
+write_note:
+  auto_approve: false
+  auto_approve_paths: ["ai/"]
+  never_auto_approve_paths: ["private/"]
+replace_in_note:
+  auto_approve: false
+  auto_approve_paths: ["ai/"]
+</notor_tool_config>
+```
+
+Writes under `ai/` proceed silently; writes anywhere else render a normal approval diff; nothing is hard-blocked. Using `allowed_paths: ["ai/"]` instead would make every write outside `ai/` an error.
+
+### Precedence, end to end
+
+1. The tool's `auto_approve` setting.
+2. For `execute_command`, command patterns (blocked → never, allowed → auto).
+3. Path rules: any parameter matching a never-list forces approval; **all** parameters matching an auto-approve list skips it. So `move_note` from `ai/x` to `private/y` still prompts.
+4. The hard gate: any parameter matching a block list, or a non-empty allow list with no match, blocks the call.
+
+### Rules and caveats
+
+- **Restrictive lists fire on any matching parameter; permissive lists require all of them to match.** This mirrors the hard gate's bias toward caution.
+- **Bare note names are resolved first**, so `Foo` matches the prefix `ai/` when the note lives at `ai/Foo.md`. A note that does not exist yet is checked against the raw path, so creating new notes under an allowed prefix works.
+- **Group names are Settings-only.** A `<notor_tool_config>` block keys on tool names, so narrow writes by listing the tools (`write_note`, `replace_in_note`, `move_note`, …).
+- **Restricting reads is not yet leak-proof.** The access tier gates direct operations, but `search_vault`, `list_vault`, `get_backlinks`, `get_outlinks`, and `read_note`'s backlink snippets can still surface paths from elsewhere in the vault. Restricting writes — the common case — is unaffected.
+- **Distinct from the *expansion* settings.** "Additional file-system paths" (Shared settings) and "Additional working directories" (execute_command) *grant* access outside the vault. The lists here *restrict*.
+
 ## Task tracking
 
 The AI uses an internal `update_tasks` tool to maintain a structured task checklist during multi-step operations. Tasks appear in a collapsible panel below the chat input with status indicators (pending, in progress, completed).
@@ -432,11 +490,13 @@ The AI uses an internal `update_tasks` tool to maintain a structured task checkl
 
 The three file-system tools let the AI read and write files outside the vault, with first-class support for Word (`.docx`) documents. All three are **desktop only** and share a single configurable allowed-paths list.
 
-### Allowed paths
+### Reachable paths
 
-All three tools validate the resolved path against the vault root and the **Allowed read/write paths** list configured in **Settings → Notor → Word & file tools**. The vault root is always implicitly allowed. Paths outside that set are rejected with a `"Path '...' is outside the allowed paths."` error.
+All three tools validate the resolved path against the vault root plus the **Additional file-system paths** list in **Settings → Notor → Tools → Shared settings**. The vault root is always implicitly allowed, and entries in that list *expand* reach beyond it. Paths outside the combined set are rejected with a `"Path '...' is outside the allowed paths."` error.
 
 Vault-relative paths (e.g. `reports/Q1.docx`) are resolved from the vault root. Absolute paths are used as-is.
+
+To *restrict* these tools rather than expand them, use [path scoping](#path-scoping) — the `filesystem-read` and `filesystem-write` groups.
 
 ### `read_file`
 
@@ -530,7 +590,7 @@ Writes text content to a file on the filesystem. Creates the file if it does not
 
 - Content is limited to 5 MB.
 - Existing files are overwritten without backup. Use version control for safety.
-- Path must be within the vault or a user-configured allowed path (see **Settings → Notor → Word & file tools → Allowed read/write paths**).
+- Path must be within the vault or a user-configured allowed path (see **Settings → Notor → Tools → Shared settings → Additional file-system paths**).
 - Write tool — available in Act mode only; requires explicit approval unless auto-approved.
 - Auto-approve default: off.
 - Desktop only.
@@ -549,7 +609,7 @@ Makes targeted find/replace edits within a text file on the filesystem — the f
 - Multiple edits are applied in order — earlier replacements affect the text seen by later edits.
 - An empty `new_text` deletes the matched text.
 - Binary files (detected by null bytes in the first 8 KB) are rejected.
-- Path must be within the vault or a user-configured allowed path (see **Settings → Notor → Word & file tools → Allowed read/write paths**).
+- Path must be within the vault or a user-configured allowed path (see **Settings → Notor → Tools → Shared settings → Additional file-system paths**).
 - Write tool — available in Act mode only; requires explicit approval unless auto-approved.
 - Auto-approve default: off.
 - Desktop only.
@@ -591,10 +651,10 @@ Extracts review comments from a `.docx` file and writes them as a structured Obs
 
 ### Settings
 
-Configure Word & file tools under **Settings → Notor → Word & file tools**:
+Configure Word & file tools under **Settings → Notor → Tools**:
 
 | Setting | Description |
 |---------|-------------|
-| **Allowed read/write paths** | Additional filesystem directories accessible to all three tools. Vault root is always implicitly included. |
+| **Additional file-system paths** (Shared settings) | Filesystem directories outside the vault that the three tools may reach. Vault root is always implicitly included. This *expands* access; to *restrict* it, use [path scoping](#path-scoping). |
 | **Default output directory** | Default output directory for `write_docx`. Accepts vault-relative or absolute path. Leave empty to require `output_path` per call. |
 | **Default template path** | Default `.docx` template applied by `write_docx`. Accepts vault-relative or absolute path. Leave empty to use no template. Validated on blur — an inline error appears if the path does not exist or is not a `.docx` file. |

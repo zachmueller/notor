@@ -102,6 +102,8 @@ The effective tool set is the **intersection** of the parent conversation's enab
 - A tool must be enabled in **both** the parent context and the sub-agent profile to be available.
 - `allowed_paths` are intersected (path must appear in both).
 - `blocked_paths` are unioned (either block applies).
+- `auto_approve_paths` are intersected and `never_auto_approve_paths` unioned, so a sub-agent can never widen the set of paths its parent silently approves.
+- Global [path scoping](vault-tools.md#path-scoping) groups are inherited unchanged — a sub-agent cannot escape them.
 - Read-only tools are auto-approved by default (configurable via `sub_agent_auto_approve_reads` in settings).
 - Write tools inherit the parent's auto-approve settings — if manual approval is needed, the prompt surfaces in the main chat.
 

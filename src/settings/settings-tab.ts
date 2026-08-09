@@ -27,6 +27,7 @@ import { renderProviderModelReferenceSection } from "./sections/provider-referen
 import { renderGeneralSection } from "./sections/general";
 import { renderNotificationsSection } from "./sections/notifications";
 import { renderToolsSection } from "./sections/tools";
+import { renderPathScopingSection } from "./sections/path-scoping";
 import { renderHistorySection } from "./sections/history";
 import { renderCheckpointSection } from "./sections/checkpoints";
 import { renderModelPricingSection } from "./sections/model-pricing";
@@ -224,6 +225,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		// --- Tools (expanded by default) ---
 		const toolsGroup = createSettingsGroup(containerEl, "Tools", true, persisted, onToggle);
 		renderToolsSection(toolsGroup, ctx);
+		renderPathScopingSection(toolsGroup, ctx);
 		renderSharedSettingsSection(toolsGroup, ctx);
 		renderExtensionTimeoutSetting(toolsGroup, ctx);
 		renderReloadExtensionsButton(toolsGroup, ctx);
