@@ -418,6 +418,38 @@ placeholder
 				blocked_paths: ["private/"],
 			});
 		});
+
+		it("parses the approval-tier path lists correctly", () => {
+			const mockParser = () => ({
+				write_note: {
+					auto_approve: false,
+					auto_approve_paths: ["ai/"],
+					never_auto_approve_paths: ["private/"],
+				},
+			});
+			const text = `<notor_tool_config>
+placeholder
+</notor_tool_config>`;
+			const result = extractToolConfigs(text, "persona", "test.md", knownTools, mockParser);
+			expect(result.errors).toHaveLength(0);
+			expect(result.configs[0]!.tools.write_note).toEqual({
+				auto_approve: false,
+				auto_approve_paths: ["ai/"],
+				never_auto_approve_paths: ["private/"],
+			});
+		});
+
+		it("reports wrong type for auto_approve_paths", () => {
+			const mockParser = () => ({ write_note: { auto_approve_paths: "ai/" } });
+			const text = `<notor_tool_config>
+placeholder
+</notor_tool_config>`;
+			const result = extractToolConfigs(text, "persona", "test.md", knownTools, mockParser);
+			expect(result.errors).toHaveLength(1);
+			expect(result.errors[0]!.detail).toContain(
+				'"auto_approve_paths" must be an array of strings',
+			);
+		});
 	});
 
 	describe("tool entry that is not an object", () => {

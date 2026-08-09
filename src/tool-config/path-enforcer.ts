@@ -77,13 +77,7 @@ export function enforcePathConstraints(
 		if (pathValue.trim() === "") continue;
 
 		// Resolve note paths to canonical form before constraint check
-		let effectivePath = pathValue;
-		if (param.resolveAs === "note" && param.namespace === "vault" && resolveVaultPath) {
-			const resolved = resolveVaultPath(pathValue);
-			if (resolved !== null) {
-				effectivePath = resolved;
-			}
-		}
+		const effectivePath = canonicalizePath(pathValue, param, resolveVaultPath);
 
 		const error = checkPath(
 			effectivePath,
@@ -98,6 +92,86 @@ export function enforcePathConstraints(
 	}
 
 	return null;
+}
+
+/**
+ * The approval tier's verdict for a tool call's path arguments.
+ *
+ * - `never` — at least one path matched `never_auto_approve_paths`; approval is
+ *   forced even when `auto_approve` is true.
+ * - `allow` — every path argument matched `auto_approve_paths`; the prompt is
+ *   skipped even when `auto_approve` is false.
+ * - `none` — no path rule applies; the caller's existing decision stands.
+ */
+export interface PathApprovalVerdict {
+	verdict: "never" | "allow" | "none";
+	/** The prefix that produced the verdict, for the approval card's reason label. */
+	prefix?: string;
+}
+
+/**
+ * Decide whether a tool call's path arguments should skip or force the approval
+ * prompt. **Soft gate — ergonomics only.** The call runs either way; only the
+ * prompt is affected. The hard access gate is {@link enforcePathConstraints}.
+ *
+ * Quantifiers follow the hard gate's bias toward caution: the restrictive list
+ * fires when **any** path argument matches, while the permissive list requires
+ * **all** of them to match. So a `move_note` from `ai/x` to `private/y` still
+ * prompts.
+ *
+ * Note-namespace paths are canonicalized via `resolveVaultPath` first — the
+ * model often passes bare note names, and without resolution `Foo` would never
+ * match the prefix `ai/`. A `null` resolution means the note does not exist yet
+ * (the normal create path), so the raw value is checked as the intended
+ * destination.
+ */
+export function evaluatePathApproval(
+	toolName: string,
+	parameters: Record<string, unknown>,
+	entry: ResolvedToolConfigEntry,
+	vaultRootPath: string,
+	resolveVaultPath?: (path: string) => string | null,
+): PathApprovalVerdict {
+	const pathParams = TOOL_PATH_PARAMS[toolName];
+	if (pathParams === undefined || pathParams.length === 0) return { verdict: "none" };
+	if (entry.auto_approve_paths.length === 0 && entry.never_auto_approve_paths.length === 0) {
+		return { verdict: "none" };
+	}
+
+	let sawPathArg = false;
+	let allMatchedAllow = true;
+	let allowPrefix: string | undefined;
+
+	for (const param of pathParams) {
+		const rawValue = parameters[param.paramName];
+		if (typeof rawValue !== "string" || rawValue.trim() === "") continue;
+		sawPathArg = true;
+
+		const effectivePath = canonicalizePath(rawValue, param, resolveVaultPath);
+
+		// Restrictive list wins outright, on ANY matching argument.
+		const never = matchesPathPrefixes(
+			effectivePath,
+			param.namespace,
+			entry.never_auto_approve_paths,
+			vaultRootPath,
+		);
+		if (never !== null) return { verdict: "never", prefix: never };
+
+		const allow = matchesPathPrefixes(
+			effectivePath,
+			param.namespace,
+			entry.auto_approve_paths,
+			vaultRootPath,
+		);
+		if (allow === null) allMatchedAllow = false;
+		else allowPrefix ??= allow;
+	}
+
+	if (sawPathArg && allMatchedAllow && allowPrefix !== undefined) {
+		return { verdict: "allow", prefix: allowPrefix };
+	}
+	return { verdict: "none" };
 }
 
 /**
@@ -141,6 +215,26 @@ export function matchesPathPrefixes(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Canonicalize a path argument before matching.
+ *
+ * For `resolveAs: "note"` vault params, run the Obsidian-style resolver so bare
+ * note names become true vault paths. A `null` result means the note does not
+ * exist yet — the raw value is then the intended destination and is returned
+ * unchanged, which is what keeps new-note creation working under a non-empty
+ * `allowed_paths` / `auto_approve_paths`.
+ */
+function canonicalizePath(
+	pathValue: string,
+	param: ToolPathParam,
+	resolveVaultPath?: (path: string) => string | null,
+): string {
+	if (param.resolveAs === "note" && param.namespace === "vault" && resolveVaultPath) {
+		return resolveVaultPath(pathValue) ?? pathValue;
+	}
+	return pathValue;
+}
 
 /**
  * Check a single path value against allowed/blocked constraints.

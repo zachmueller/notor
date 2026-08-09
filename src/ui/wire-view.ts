@@ -2,6 +2,7 @@ import { Notice } from "obsidian";
 import type NotorPlugin from "../main";
 import type { NotorChatView } from "./chat-view";
 import type { ChatOrchestrator } from "../chat/orchestrator";
+import { autoApproveReasonOf } from "../chat/dispatcher";
 import { conversationFilename } from "../chat/history";
 import { parseOptionValue, buildOptionValue } from "../providers/model-grouping";
 import { resolvePersonaOverrides } from "../personas/persona-overrides";
@@ -645,7 +646,7 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 				? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
 				: view.getLastToolCallEl();
 			if (toolCallEl) {
-				void view.renderDiffApprovalPrompt(toolCallEl, toolCall.tool_name, toolCall.parameters ?? {}, true)
+				void view.renderDiffApprovalPrompt(toolCallEl, toolCall.tool_name, toolCall.parameters ?? {}, true, autoApproveReasonOf(autoApproved))
 					.catch((err) => {
 						// Best-effort diff card for auto-approved calls; control flow
 						// already returns "approved", so just swallow + log the

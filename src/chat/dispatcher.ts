@@ -28,8 +28,23 @@ export interface DispatchableTool {
 	execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult>;
 }
 
+/**
+ * Auto-approved state passed to an {@link ApprovalCallback}.
+ *
+ * `true` means "auto-approved, no reason to show"; the object form carries a
+ * short reason (e.g. `matched ai/`) that the collapsed card renders so a silent
+ * auto-approve is explicable. Objects are truthy, so `if (autoApproved)` checks
+ * keep working unchanged.
+ */
+export type AutoApprovedState = boolean | { reason?: string };
+
+/** Extract the reason label from an {@link AutoApprovedState}, if any. */
+export function autoApproveReasonOf(state: AutoApprovedState | undefined): string | undefined {
+	return typeof state === "object" && state !== null ? state.reason : undefined;
+}
+
 /** Callback for requesting user approval of a tool call. */
-export type ApprovalCallback = (toolCall: ToolCall, abortSignal?: AbortSignal, messageId?: string, autoApproved?: boolean) => Promise<"approved" | "rejected">;
+export type ApprovalCallback = (toolCall: ToolCall, abortSignal?: AbortSignal, messageId?: string, autoApproved?: AutoApprovedState) => Promise<"approved" | "rejected">;
 
 /**
  * Callback for requesting a user interaction (e.g. a follow-up question) from
@@ -384,7 +399,13 @@ export class ToolDispatcher {
 		} else if (approvalCb && !tool.internal) {
 			// Auto-approved: render the collapsed diff for after-the-fact review.
 			// Internal tools (only update_tasks) stay invisible — they fire no render.
-			void approvalCb(toolCall, abortSignal, messageId, true);
+			// Fire-and-forget, so the reason must travel at call time.
+			void approvalCb(
+				toolCall,
+				abortSignal,
+				messageId,
+				decision.autoApproveReason ? { reason: decision.autoApproveReason } : true,
+			);
 		}
 
 		// Mark as approved

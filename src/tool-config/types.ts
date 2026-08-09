@@ -62,6 +62,15 @@ export interface ToolConfigEntry {
 	allowed_command_patterns?: string[];
 	/** Command patterns that are NEVER auto-approved even when auto_approve is true (execute_command only). */
 	blocked_command_patterns?: string[];
+	/**
+	 * Path prefixes whose calls skip the approval prompt when `auto_approve` is
+	 * false. **Ergonomics, not a security boundary** — the call still runs either
+	 * way; this only decides whether a human sees the prompt. Use
+	 * `allowed_paths` / `blocked_paths` to actually gate access.
+	 */
+	auto_approve_paths?: string[];
+	/** Path prefixes that ALWAYS require approval, even when `auto_approve` is true. */
+	never_auto_approve_paths?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +107,13 @@ export interface ResolvedToolConfigEntry {
 	allowed_command_patterns: string[];
 	/** Command patterns that are NEVER auto-approved even when auto_approve is true (execute_command only). */
 	blocked_command_patterns: string[];
+	/**
+	 * Path prefixes whose calls skip the approval prompt when `auto_approve` is
+	 * false. Ergonomics only — see {@link ToolConfigEntry.auto_approve_paths}.
+	 */
+	auto_approve_paths: string[];
+	/** Path prefixes that ALWAYS require approval, even when `auto_approve` is true. */
+	never_auto_approve_paths: string[];
 }
 
 // ---------------------------------------------------------------------------

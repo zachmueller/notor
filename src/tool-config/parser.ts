@@ -41,6 +41,7 @@ const VERSION_ATTR_REGEX = /version\s*=\s*"([^"]*)"/;
 const VALID_FIELDS = new Set([
 	"enabled", "auto_approve", "allowed_paths", "blocked_paths",
 	"allowed_command_patterns", "blocked_command_patterns",
+	"auto_approve_paths", "never_auto_approve_paths",
 ]);
 
 /** Regex to detect MCP server wildcard keys like `serverName__*`. */
@@ -158,8 +159,14 @@ export function extractToolConfigs(
 					continue;
 				}
 
-				// MCP path field restriction
-				if (isMcp && (field === "allowed_paths" || field === "blocked_paths")) {
+				// MCP path field restriction — MCP tools have no registered path params
+				if (
+					isMcp &&
+					(field === "allowed_paths" ||
+						field === "blocked_paths" ||
+						field === "auto_approve_paths" ||
+						field === "never_auto_approve_paths")
+				) {
 					errors.push({
 						sourceFile,
 						detail: `Tool "${toolName}": "${field}" is not yet implemented for MCP tools. Skipping this field.`,
@@ -222,6 +229,24 @@ export function extractToolConfigs(
 						continue;
 					}
 					entry.blocked_command_patterns = value;
+				} else if (field === "auto_approve_paths") {
+					if (!isStringArray(value)) {
+						errors.push({
+							sourceFile,
+							detail: `Tool "${toolName}": "auto_approve_paths" must be an array of strings. Skipping this field.`,
+						});
+						continue;
+					}
+					entry.auto_approve_paths = value;
+				} else if (field === "never_auto_approve_paths") {
+					if (!isStringArray(value)) {
+						errors.push({
+							sourceFile,
+							detail: `Tool "${toolName}": "never_auto_approve_paths" must be an array of strings. Skipping this field.`,
+						});
+						continue;
+					}
+					entry.never_auto_approve_paths = value;
 				}
 			}
 

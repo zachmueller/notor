@@ -13,7 +13,7 @@ import type { ConversationMode } from "../types";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { DispatchableTool } from "./dispatcher";
 import { isDomainBlocked } from "../utils/domain-denylist";
-import { enforcePathConstraints } from "../tool-config/path-enforcer";
+import { enforcePathConstraints, evaluatePathApproval } from "../tool-config/path-enforcer";
 import { isMcpTool } from "../mcp/mcp-tool-adapter";
 import { matchCommandPattern } from "../utils/command-pattern-matcher";
 
@@ -54,6 +54,13 @@ export interface PolicyDecision {
 	allowed: boolean;
 	autoApproved: boolean;
 	error?: string;
+	/**
+	 * Why the call was auto-approved, when a path rule decided it (e.g.
+	 * `matched ai/`). Rendered on the collapsed approval card so a silent
+	 * auto-approve is explicable. Absent when auto-approval came from the plain
+	 * `auto_approve` setting or a command pattern.
+	 */
+	autoApproveReason?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +183,26 @@ export function evaluateToolPolicy(
 		}
 	}
 
+	// 4c. Path-based auto-approve override (any tool with registered path params).
+	// Soft gate: flips whether the human sees a prompt, never whether the call is
+	// allowed — that stays with step 5 below.
+	let autoApproveReason: string | undefined;
+	if (toolEntry) {
+		const match = evaluatePathApproval(
+			toolName,
+			parameters,
+			toolEntry,
+			ctx.vaultRootPath,
+			ctx.resolveVaultPath,
+		);
+		if (match.verdict === "never") {
+			finalAutoApproved = false;
+		} else if (match.verdict === "allow" && !finalAutoApproved) {
+			finalAutoApproved = true;
+			autoApproveReason = `matched ${match.prefix}`;
+		}
+	}
+
 	// 5. Path enforcement — check allowed_paths/blocked_paths (FR-84)
 	if (toolEntry) {
 		const pathError = enforcePathConstraints(
@@ -198,5 +225,6 @@ export function evaluateToolPolicy(
 	return {
 		allowed: true,
 		autoApproved: finalAutoApproved,
+		...(finalAutoApproved && autoApproveReason ? { autoApproveReason } : {}),
 	};
 }

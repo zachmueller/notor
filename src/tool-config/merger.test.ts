@@ -10,7 +10,7 @@ vi.mock("../mcp/mcp-tool-adapter", () => ({
 }));
 
 import { mergeToolConfigs, intersectToolConfig } from "./merger";
-import type { EffectiveToolConfig, ParsedToolConfig } from "./types";
+import type { EffectiveToolConfig, ParsedToolConfig, ResolvedToolConfigEntry } from "./types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -424,17 +424,7 @@ describe("mergeToolConfigs", () => {
 describe("intersectToolConfig", () => {
 	/** Build a parent EffectiveToolConfig from a partial map. */
 	function makeParent(
-		tools: Record<
-			string,
-			{
-				enabled?: boolean;
-				auto_approve?: boolean;
-				allowed_paths?: string[];
-				blocked_paths?: string[];
-				allowed_command_patterns?: string[];
-				blocked_command_patterns?: string[];
-			}
-		>,
+		tools: Record<string, Partial<ResolvedToolConfigEntry>>,
 	): EffectiveToolConfig {
 		const resolved: EffectiveToolConfig = { tools: {} };
 		for (const [name, entry] of Object.entries(tools)) {
@@ -445,6 +435,8 @@ describe("intersectToolConfig", () => {
 				blocked_paths: entry.blocked_paths ?? [],
 				allowed_command_patterns: entry.allowed_command_patterns ?? [],
 				blocked_command_patterns: entry.blocked_command_patterns ?? [],
+				auto_approve_paths: entry.auto_approve_paths ?? [],
+				never_auto_approve_paths: entry.never_auto_approve_paths ?? [],
 			};
 		}
 		return resolved;
@@ -719,6 +711,52 @@ describe("intersectToolConfig", () => {
 			// custom_tool not in TOOL_MODES → mode is undefined, not "read"
 			const result = intersectToolConfig(parent, subAgent, TOOL_MODES);
 			expect(result.tools.custom_tool!.auto_approve).toBe(false);
+		});
+	});
+
+	// A sub-agent must never widen what its parent silently approves. Note this
+	// deliberately differs from `allowed_command_patterns`, which replaces (and so
+	// does let a child widen) — that asymmetry is the command-pattern side's bug.
+	describe("approval-tier path lists: auto_approve_paths intersects, never_* unions", () => {
+		it("sub-agent cannot widen the parent's auto_approve_paths", () => {
+			const parent = makeParent({ write_note: { auto_approve_paths: ["ai/"] } });
+			const subAgent = makeSubAgentConfig({
+				write_note: { enabled: true, auto_approve_paths: ["ai/", "private/"] },
+			});
+
+			const result = intersectToolConfig(parent, subAgent, TOOL_MODES);
+			expect(result.tools.write_note!.auto_approve_paths).toEqual(["ai/"]);
+		});
+
+		it("sub-agent can narrow the parent's auto_approve_paths", () => {
+			const parent = makeParent({ write_note: { auto_approve_paths: ["ai/", "drafts/"] } });
+			const subAgent = makeSubAgentConfig({
+				write_note: { enabled: true, auto_approve_paths: ["ai/"] },
+			});
+
+			const result = intersectToolConfig(parent, subAgent, TOOL_MODES);
+			expect(result.tools.write_note!.auto_approve_paths).toEqual(["ai/"]);
+		});
+
+		it("an empty list means no restriction, so the other side wins", () => {
+			const parent = makeParent({ write_note: { auto_approve_paths: ["ai/"] } });
+			const subAgent = makeSubAgentConfig({ write_note: { enabled: true } });
+
+			const result = intersectToolConfig(parent, subAgent, TOOL_MODES);
+			expect(result.tools.write_note!.auto_approve_paths).toEqual(["ai/"]);
+		});
+
+		it("never_auto_approve_paths unions — either side's always-prompt rule applies", () => {
+			const parent = makeParent({ write_note: { never_auto_approve_paths: ["private/"] } });
+			const subAgent = makeSubAgentConfig({
+				write_note: { enabled: true, never_auto_approve_paths: ["secrets/"] },
+			});
+
+			const result = intersectToolConfig(parent, subAgent, TOOL_MODES);
+			expect(result.tools.write_note!.never_auto_approve_paths).toEqual([
+				"private/",
+				"secrets/",
+			]);
 		});
 	});
 

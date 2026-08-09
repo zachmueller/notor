@@ -1668,9 +1668,10 @@ export class NotorChatView extends ItemView {
 		toolCallEl: HTMLElement,
 		toolName: string,
 		parameters: Record<string, unknown>,
-		autoApproved = false
+		autoApproved = false,
+		autoApproveReason?: string
 	): Promise<"approved" | "rejected"> {
-		return this.messageRenderer.renderDiffApprovalPrompt(toolCallEl, toolName, parameters, autoApproved);
+		return this.messageRenderer.renderDiffApprovalPrompt(toolCallEl, toolName, parameters, autoApproved, autoApproveReason);
 	}
 
 	getLastToolCallEl(): HTMLElement | null {

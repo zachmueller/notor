@@ -88,6 +88,8 @@ export function buildSubAgentUtils(ctx: BuilderContext): Pick<ExtensionUtils, "r
 						blocked_paths: [],
 						allowed_command_patterns: [],
 						blocked_command_patterns: [],
+						auto_approve_paths: [],
+						never_auto_approve_paths: [],
 					};
 				}
 				return { tools };

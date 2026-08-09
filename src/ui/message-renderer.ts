@@ -745,7 +745,8 @@ export class MessageRenderer {
 		toolCallEl: HTMLElement,
 		toolName: string,
 		parameters: Record<string, unknown>,
-		autoApproved = false
+		autoApproved = false,
+		autoApproveReason?: string
 	): Promise<"approved" | "rejected"> {
 		const notePath = parameters["path"] as string | undefined;
 
@@ -775,7 +776,8 @@ export class MessageRenderer {
 				afterContent,
 				autoApproved,
 				renderCtx,
-				() => this.deps.scrollToBottom()
+				() => this.deps.scrollToBottom(),
+				autoApproveReason
 			);
 			this.deps.scrollToBottom();
 			const decision = await decisionPromise;
@@ -817,7 +819,8 @@ export class MessageRenderer {
 				changeBlocks,
 				autoApproved,
 				replaceRenderCtx,
-				() => this.deps.scrollToBottom()
+				() => this.deps.scrollToBottom(),
+				autoApproveReason
 			);
 			this.deps.scrollToBottom();
 			const decision = await decisionPromise;

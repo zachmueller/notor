@@ -12,6 +12,8 @@ function makeCtx(toolEntry: Partial<ResolvedToolConfigEntry> = {}): ToolPolicyCo
 		blocked_paths: [],
 		allowed_command_patterns: [],
 		blocked_command_patterns: [],
+		auto_approve_paths: [],
+		never_auto_approve_paths: [],
 		...toolEntry,
 	};
 	return {
@@ -61,6 +63,8 @@ describe("evaluateToolPolicy — command pattern auto-approve", () => {
 		const ctx = makeCtx({
 			auto_approve: true,
 			blocked_command_patterns: ["rm *"],
+			auto_approve_paths: [],
+			never_auto_approve_paths: [],
 		});
 		const result = evaluateToolPolicy(
 			"execute_command",
@@ -76,6 +80,8 @@ describe("evaluateToolPolicy — command pattern auto-approve", () => {
 		const ctx = makeCtx({
 			auto_approve: true,
 			blocked_command_patterns: ["rm *"],
+			auto_approve_paths: [],
+			never_auto_approve_paths: [],
 		});
 		const result = evaluateToolPolicy(
 			"execute_command",
@@ -92,6 +98,8 @@ describe("evaluateToolPolicy — command pattern auto-approve", () => {
 			auto_approve: false,
 			allowed_command_patterns: ["*"],
 			blocked_command_patterns: ["rm *"],
+			auto_approve_paths: [],
+			never_auto_approve_paths: [],
 		});
 		const result = evaluateToolPolicy(
 			"execute_command",
@@ -141,6 +149,8 @@ describe("evaluateToolPolicy — command pattern auto-approve", () => {
 						blocked_paths: [],
 						allowed_command_patterns: ["*"],
 						blocked_command_patterns: [],
+						auto_approve_paths: [],
+						never_auto_approve_paths: [],
 					},
 				},
 			},
@@ -172,6 +182,8 @@ describe("evaluateToolPolicy — read tool auto-approve flows through", () => {
 						blocked_paths: [],
 						allowed_command_patterns: [],
 						blocked_command_patterns: [],
+						auto_approve_paths: [],
+						never_auto_approve_paths: [],
 						...entry,
 					},
 				},
@@ -215,6 +227,8 @@ function makeToolCtx(
 		blocked_paths: [],
 		allowed_command_patterns: [],
 		blocked_command_patterns: [],
+		auto_approve_paths: [],
+		never_auto_approve_paths: [],
 		...entry,
 	};
 	return {
@@ -293,6 +307,180 @@ describe("evaluateToolPolicy — domain denylist (fetch_webpage)", () => {
 	});
 });
 
+// ---------------------------------------------------------------------------
+// Approval tier (step 4c): auto_approve_paths / never_auto_approve_paths.
+// Soft gate — flips whether a prompt is shown, never whether the call is
+// allowed. Mirrors the command-pattern override suite above.
+// ---------------------------------------------------------------------------
+
+describe("evaluateToolPolicy — path-based auto-approve (approval tier)", () => {
+	const WRITE_NOTE_TOOL: DispatchableTool = { name: "write_note", mode: "write" } as any;
+	const MOVE_NOTE_TOOL: DispatchableTool = { name: "move_note", mode: "write" } as any;
+
+	beforeAll(() => {
+		TOOL_PATH_PARAMS["write_note"] = [
+			{ paramName: "path", namespace: "vault", resolveAs: "note" },
+		];
+		TOOL_PATH_PARAMS["move_note"] = [
+			{ paramName: "path", namespace: "vault", resolveAs: "note" },
+			{ paramName: "new_path", namespace: "vault" },
+		];
+	});
+	afterAll(() => {
+		delete TOOL_PATH_PARAMS["write_note"];
+		delete TOOL_PATH_PARAMS["move_note"];
+	});
+
+	it("auto_approve false + matching auto_approve_paths → auto-approved with a reason", () => {
+		const ctx = makeToolCtx("write_note", { auto_approve: false, auto_approve_paths: ["ai/"] });
+		const result = evaluateToolPolicy("write_note", { path: "ai/notes.md" }, WRITE_NOTE_TOOL, ctx);
+		expect(result.allowed).toBe(true);
+		expect(result.autoApproved).toBe(true);
+		expect(result.autoApproveReason).toBe("matched ai/");
+	});
+
+	it("auto_approve false + non-matching path → still prompts, and is NOT blocked", () => {
+		const ctx = makeToolCtx("write_note", { auto_approve: false, auto_approve_paths: ["ai/"] });
+		const result = evaluateToolPolicy(
+			"write_note",
+			{ path: "journal/x.md" },
+			WRITE_NOTE_TOOL,
+			ctx,
+		);
+		// The whole point of the approval tier: proposable elsewhere, just not silent.
+		expect(result.allowed).toBe(true);
+		expect(result.autoApproved).toBe(false);
+		expect(result.autoApproveReason).toBeUndefined();
+	});
+
+	it("auto_approve true + matching never_auto_approve_paths → approval forced", () => {
+		const ctx = makeToolCtx("write_note", {
+			auto_approve: true,
+			never_auto_approve_paths: ["private/"],
+		});
+		const result = evaluateToolPolicy(
+			"write_note",
+			{ path: "private/secret.md" },
+			WRITE_NOTE_TOOL,
+			ctx,
+		);
+		expect(result.allowed).toBe(true);
+		expect(result.autoApproved).toBe(false);
+	});
+
+	it("never_auto_approve_paths beats auto_approve_paths on the same path", () => {
+		const ctx = makeToolCtx("write_note", {
+			auto_approve: false,
+			auto_approve_paths: ["ai/"],
+			never_auto_approve_paths: ["ai/private/"],
+		});
+		const result = evaluateToolPolicy(
+			"write_note",
+			{ path: "ai/private/x.md" },
+			WRITE_NOTE_TOOL,
+			ctx,
+		);
+		expect(result.autoApproved).toBe(false);
+	});
+
+	it("no path lists configured → decision untouched", () => {
+		const ctx = makeToolCtx("write_note", { auto_approve: true });
+		expect(
+			evaluateToolPolicy("write_note", { path: "anywhere/x.md" }, WRITE_NOTE_TOOL, ctx)
+				.autoApproved,
+		).toBe(true);
+	});
+
+	it("absent path argument falls through without matching", () => {
+		const ctx = makeToolCtx("write_note", { auto_approve: false, auto_approve_paths: ["ai/"] });
+		expect(
+			evaluateToolPolicy("write_note", {}, WRITE_NOTE_TOOL, ctx).autoApproved,
+		).toBe(false);
+	});
+
+	it("permissive list requires ALL path args to match — one stray arg still prompts", () => {
+		const ctx = makeToolCtx("move_note", { auto_approve: false, auto_approve_paths: ["ai/"] });
+		const result = evaluateToolPolicy(
+			"move_note",
+			{ path: "ai/x.md", new_path: "private/y.md" },
+			MOVE_NOTE_TOOL,
+			ctx,
+		);
+		expect(result.autoApproved).toBe(false);
+	});
+
+	it("permissive list auto-approves when every path arg matches", () => {
+		const ctx = makeToolCtx("move_note", { auto_approve: false, auto_approve_paths: ["ai/"] });
+		const result = evaluateToolPolicy(
+			"move_note",
+			{ path: "ai/x.md", new_path: "ai/sub/y.md" },
+			MOVE_NOTE_TOOL,
+			ctx,
+		);
+		expect(result.autoApproved).toBe(true);
+	});
+
+	it("restrictive list fires on ANY path arg", () => {
+		const ctx = makeToolCtx("move_note", {
+			auto_approve: true,
+			never_auto_approve_paths: ["private/"],
+		});
+		const result = evaluateToolPolicy(
+			"move_note",
+			{ path: "ai/x.md", new_path: "private/y.md" },
+			MOVE_NOTE_TOOL,
+			ctx,
+		);
+		expect(result.autoApproved).toBe(false);
+	});
+
+	it("resolves a bare note name before matching (model often passes bare names)", () => {
+		const ctx = makeToolCtx(
+			"write_note",
+			{ auto_approve: false, auto_approve_paths: ["ai/"] },
+			{ resolveVaultPath: (p) => (p === "Ideas" ? "ai/Ideas.md" : null) },
+		);
+		const result = evaluateToolPolicy("write_note", { path: "Ideas" }, WRITE_NOTE_TOOL, ctx);
+		expect(result.autoApproved).toBe(true);
+	});
+
+	it("new-file write (resolver returns null) matches on the raw path", () => {
+		// resolveNote() returns null for a note that doesn't exist yet — the normal
+		// create path. The raw value IS the intended destination, so it must match.
+		const ctx = makeToolCtx(
+			"write_note",
+			{ auto_approve: false, auto_approve_paths: ["ai/"] },
+			{ resolveVaultPath: () => null },
+		);
+		const result = evaluateToolPolicy(
+			"write_note",
+			{ path: "ai/brand-new.md" },
+			WRITE_NOTE_TOOL,
+			ctx,
+		);
+		expect(result.autoApproved).toBe(true);
+	});
+
+	it("is a soft gate — a path-based auto-approve never bypasses the hard gate", () => {
+		const ctx = makeToolCtx("write_note", {
+			auto_approve: false,
+			auto_approve_paths: ["ai/"],
+			blocked_paths: ["ai/"],
+		});
+		const result = evaluateToolPolicy("write_note", { path: "ai/x.md" }, WRITE_NOTE_TOOL, ctx);
+		expect(result.allowed).toBe(false);
+		expect(result.autoApproved).toBe(false);
+	});
+
+	it("reports no reason when auto-approval came from the plain auto_approve setting", () => {
+		const ctx = makeToolCtx("write_note", { auto_approve: true });
+		expect(
+			evaluateToolPolicy("write_note", { path: "ai/x.md" }, WRITE_NOTE_TOOL, ctx)
+				.autoApproveReason,
+		).toBeUndefined();
+	});
+});
+
 describe("evaluateToolPolicy — path allowlists (FR-84) + sessionAllowedPaths (INT-001)", () => {
 	const WRITE_FILE_TOOL: DispatchableTool = { name: "write_file", mode: "write" } as any;
 
@@ -368,6 +556,8 @@ describe("evaluateToolPolicy — command patterns in a headless (intersected-con
 		const ctx = makeToolCtx("execute_command", {
 			auto_approve: true,
 			blocked_command_patterns: ["rm *"],
+			auto_approve_paths: [],
+			never_auto_approve_paths: [],
 		});
 		const result = evaluateToolPolicy("execute_command", { command: "rm -rf /" }, EXEC_TOOL, ctx);
 		expect(result.allowed).toBe(true);

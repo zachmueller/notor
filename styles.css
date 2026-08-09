@@ -1958,6 +1958,13 @@
 	font-size: var(--font-ui-smaller);
 }
 
+/* Why a collapsed card skipped review (path-based auto-approve). */
+.notor-diff-auto-approve-reason {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-style: italic;
+}
+
 .notor-diff-toggle {
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);

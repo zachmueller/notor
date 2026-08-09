@@ -84,6 +84,9 @@ export interface DiffRenderContext {
  * @param afterContent  - The content the AI wants to write.
  * @param autoApproved  - If true, apply immediately and show collapsed diff.
  * @param renderCtx     - Optional context for rendered markdown preview toggle.
+ * @param onReady       - Called once the preview has been rendered.
+ * @param autoApproveReason - Why the call was auto-approved (e.g. `matched ai/`),
+ *   shown in the collapsed header so a skipped review is explicable.
  * @returns Promise resolving with the user's decision.
  */
 export function renderWriteNoteDiffPreview(
@@ -93,7 +96,8 @@ export function renderWriteNoteDiffPreview(
 	afterContent: string,
 	autoApproved: boolean,
 	renderCtx?: DiffRenderContext,
-	onReady?: () => void
+	onReady?: () => void,
+	autoApproveReason?: string
 ): Promise<DiffDecision> {
 	const diffResult = computeWriteNoteDiff(notePath, beforeContent, afterContent);
 
@@ -131,6 +135,8 @@ export function renderWriteNoteDiffPreview(
 		if (autoApproved) {
 			// Collapsed by default for auto-approved
 			bodyEl.addClass("notor-hidden");
+
+			renderAutoApproveReason(statsEl, autoApproveReason);
 
 			// View mode toggle (rendered only when renderCtx is available)
 			if (renderCtx) {
@@ -224,6 +230,9 @@ export function renderWriteNoteDiffPreview(
  * @param changeBlocks - The find/replace edits to apply.
  * @param autoApproved - If true, apply immediately and show collapsed diff.
  * @param renderCtx    - Optional context for rendered markdown preview toggle.
+ * @param onReady      - Called once the preview has been rendered.
+ * @param autoApproveReason - Why the call was auto-approved (e.g. `matched ai/`),
+ *   shown in the collapsed header so a skipped review is explicable.
  * @returns Promise resolving with the user's decision.
  */
 export function renderReplaceInNoteDiffPreview(
@@ -233,7 +242,8 @@ export function renderReplaceInNoteDiffPreview(
 	changeBlocks: ChangeBlock[],
 	autoApproved: boolean,
 	renderCtx?: DiffRenderContext,
-	onReady?: () => void
+	onReady?: () => void,
+	autoApproveReason?: string
 ): Promise<DiffDecision> {
 	const diffResult = computeReplaceInNoteDiff(notePath, noteContent, changeBlocks);
 
@@ -266,6 +276,8 @@ export function renderReplaceInNoteDiffPreview(
 		}
 
 		if (autoApproved) {
+			renderAutoApproveReason(statsEl, autoApproveReason);
+
 			// View mode toggle for auto-approved
 			if (renderCtx) {
 				renderViewModeToggle(headerEl, null, noteContent, applyBlocks(noteContent, changeBlocks), renderCtx);
@@ -471,6 +483,20 @@ export function renderReplaceInNoteDiffPreview(
 
 		// Apply: resolve with the current per-block acceptance state.
 		applyBtn?.addEventListener("click", resolveWithCurrentState);
+	});
+}
+
+/**
+ * Label why a collapsed card skipped review, beside the diff stats.
+ *
+ * Only path-rule auto-approvals supply a reason; plain `auto_approve` and
+ * command-pattern matches stay silent, so a missing reason renders nothing.
+ */
+function renderAutoApproveReason(statsEl: HTMLElement, reason: string | undefined): void {
+	if (!reason) return;
+	statsEl.createSpan({
+		cls: "notor-diff-auto-approve-reason",
+		text: `auto-approved: ${reason}`,
 	});
 }
 

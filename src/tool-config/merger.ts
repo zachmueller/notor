@@ -111,6 +111,8 @@ export function mergeToolConfigs(
 			blocked_paths: partial.blocked_paths ?? [],
 			allowed_command_patterns: partial.allowed_command_patterns ?? [],
 			blocked_command_patterns: partial.blocked_command_patterns ?? [],
+			auto_approve_paths: partial.auto_approve_paths ?? [],
+			never_auto_approve_paths: partial.never_auto_approve_paths ?? [],
 		};
 	}
 
@@ -160,6 +162,8 @@ export function intersectToolConfig(
 				blocked_paths: [],
 				allowed_command_patterns: [],
 				blocked_command_patterns: [],
+				auto_approve_paths: [],
+				never_auto_approve_paths: [],
 			};
 			continue;
 		}
@@ -192,6 +196,21 @@ export function intersectToolConfig(
 			subEntry.blocked_command_patterns ?? [],
 		);
 
+		// auto_approve_paths: intersection — a sub-agent can never widen the set of
+		// paths its parent silently approves. This deliberately differs from
+		// `allowed_command_patterns` above (a plain replace, which does let a child
+		// widen); that asymmetry is the command-pattern side's bug, not this one's.
+		const autoApprovePaths = intersectPaths(
+			parentEntry.auto_approve_paths,
+			subEntry.auto_approve_paths ?? [],
+		);
+
+		// never_auto_approve_paths: union (either "always prompt" rule applies)
+		const neverAutoApprovePaths = unionPaths(
+			parentEntry.never_auto_approve_paths,
+			subEntry.never_auto_approve_paths ?? [],
+		);
+
 		tools[toolName] = {
 			enabled,
 			auto_approve: autoApprove,
@@ -199,6 +218,8 @@ export function intersectToolConfig(
 			blocked_paths: blockedPaths,
 			allowed_command_patterns: allowedCommandPatterns,
 			blocked_command_patterns: blockedCommandPatterns,
+			auto_approve_paths: autoApprovePaths,
+			never_auto_approve_paths: neverAutoApprovePaths,
 		};
 	}
 
@@ -247,4 +268,6 @@ function applyEntry(
 	if (entry.blocked_paths !== undefined) acc.blocked_paths = entry.blocked_paths;
 	if (entry.allowed_command_patterns !== undefined) acc.allowed_command_patterns = entry.allowed_command_patterns;
 	if (entry.blocked_command_patterns !== undefined) acc.blocked_command_patterns = entry.blocked_command_patterns;
+	if (entry.auto_approve_paths !== undefined) acc.auto_approve_paths = entry.auto_approve_paths;
+	if (entry.never_auto_approve_paths !== undefined) acc.never_auto_approve_paths = entry.never_auto_approve_paths;
 }
