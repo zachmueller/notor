@@ -109,6 +109,10 @@ function getAllFolders(): any[] {
   return folders;
 }
 
+// Count of entries withheld by vault-read path restrictions, reported in the
+// result so the model never concludes the hidden entries simply don't exist.
+let hiddenByPathRestrictions = 0;
+
 function collectItems(targetPath: string, isRecursive: boolean): any[] {
   const items: any[] = [];
 
@@ -139,7 +143,10 @@ function collectItems(targetPath: string, isRecursive: boolean): any[] {
     }
   }
 
-  return items;
+  if (!utils.pathFilter) return items;
+  const visible = items.filter((item: any) => utils.pathFilter(item.path));
+  hiddenByPathRestrictions += items.length - visible.length;
+  return visible;
 }
 
 // Collect, filter, sort, paginate
@@ -172,5 +179,9 @@ const paginated = sorted.slice(offset, offset + limit);
 
 log.debug("List complete", { path: listPath, totalCount, returned: paginated.length });
 
-return { path: listPath || "/", total_count: totalCount, items: paginated };`,
+const result: any = { path: listPath || "/", total_count: totalCount, items: paginated };
+if (hiddenByPathRestrictions > 0) {
+  result.notice = hiddenByPathRestrictions + " entries hidden by path restrictions";
+}
+return result;`,
 );

@@ -107,12 +107,26 @@ if (backlinksMode !== "list" && backlinksMode !== "context") {
 // Reverse-lookup over resolvedLinks (same pattern as get_backlinks); self-links excluded.
 const targetPath = file.path;
 const sources = [];
+// Backlink sources are *other* notes, and in context mode their content is
+// quoted, so both modes are filtered against vault-read restrictions. The
+// target note itself was already gated by the hard gate at dispatch.
+let hiddenSources = 0;
 for (const [sourcePath, links] of Object.entries(app.metadataCache.resolvedLinks)) {
-  if (sourcePath !== targetPath && targetPath in links) sources.push(sourcePath);
+  if (sourcePath !== targetPath && targetPath in links) {
+    if (utils.pathFilter && !utils.pathFilter(sourcePath)) {
+      hiddenSources++;
+      continue;
+    }
+    sources.push(sourcePath);
+  }
 }
 
 if (sources.length === 0) {
-  return returnContent; // no backlinks -> no empty "## Backlinks" header
+  // Disclose that something was filtered — a model told nothing exists will
+  // assert that to the user, which is worse than knowing it cannot see it.
+  return hiddenSources > 0
+    ? returnContent + "\\n\\n## Backlinks\\n\\n(" + hiddenSources + " hidden by path restrictions)"
+    : returnContent; // no backlinks -> no empty "## Backlinks" header
 }
 
 sources.sort(); // deterministic order
@@ -183,5 +197,8 @@ if (sources.length > maxSources) {
 
 log.debug("Appended backlinks", { mode: backlinksMode, sourceCount: sources.length, shown: shown.length });
 
-return \`\${returnContent}\\n\\n## Backlinks\\n\\n\${body}\`;`,
+const hiddenNote = hiddenSources > 0
+  ? \`\\n\\n(\${hiddenSources} more hidden by path restrictions)\`
+  : "";
+return \`\${returnContent}\\n\\n## Backlinks\\n\\n\${body}\${hiddenNote}\`;`,
 );

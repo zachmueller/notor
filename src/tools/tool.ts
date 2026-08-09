@@ -90,6 +90,23 @@ export interface ToolExecuteOptions {
 	 * this only establishes the seam.
 	 */
 	orchestrationContext?: OrchestrationToolContext;
+	/**
+	 * Predicate for filtering vault paths out of a tool's *results*.
+	 *
+	 * The hard gate inspects a call's path arguments, so it cannot stop a
+	 * listing tool from returning paths from anywhere in the vault — an
+	 * unrestricted `search_vault` passes enforcement and still reports hits under
+	 * a blocked prefix. Tools that return other notes' paths or content call this
+	 * on each candidate and count the rejections.
+	 *
+	 * A predicate travels here rather than the resolved config entry because
+	 * `buildUtils()` is plugin-scoped and cannot reach per-session config, and
+	 * because scaffolds should stay ignorant of config shape.
+	 *
+	 * `undefined` when reads are unrestricted — the common case, where tools skip
+	 * filtering entirely.
+	 */
+	pathFilter?: (vaultPath: string) => boolean;
 }
 
 /**

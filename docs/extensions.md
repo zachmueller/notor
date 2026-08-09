@@ -406,8 +406,9 @@ All extension code executes with these variables in scope:
 | `utils.resolveAndValidatePath(path, allowedPaths?)` | Validate and resolve filesystem paths against allowed paths. Returns `{ valid: true, resolvedPath }` or `{ valid: false, error }` — check `.valid` first. |
 | `utils.executeShellCommand(cmd, opts?)` | Run a shell command. |
 | `utils.isDomainBlocked(url, denylist)` | Check whether a URL's domain matches any denylist pattern. Returns `{ blocked: true, pattern }` or `{ blocked: false }`. |
-| `utils.pathEnforcer.enforcePathConstraints(toolName, params, entry)` | Apply path enforcement rules. |
+| `utils.pathEnforcer.enforcePathConstraints(toolName, params, entry, sessionAllowedPaths?)` | Apply path enforcement rules. |
 | `utils.pathEnforcer.isPathWithin(target, base)` | Check if a path is within a base directory. |
+| `utils.pathFilter?(vaultPath)` | Present only when the session restricts vault reads. Tools that return *other* notes' paths or content should filter results through it and disclose the count withheld. See [path scoping](vault-tools.md#path-scoping). |
 | `utils.ensureDirectoryExists(filePath)` | Create intermediate vault directories for a file path. |
 | `utils.normalizedIndexOf(haystack, needle)` | Unicode-normalized `indexOf` for fuzzy find/replace matching. Returns `{ index, length }` or `null`. |
 | `utils.readNote(path)` | Read the raw Markdown content of a vault note by vault-relative path. Returns `string`. |

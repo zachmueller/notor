@@ -215,6 +215,7 @@ Return a string for success, or throw an Error for failure.
 - \`utils.normalizedIndexOf(haystack, needle)\` — Unicode-normalized \`indexOf\` for fuzzy find/replace matching (curly quotes, em/en-dashes, etc. treated as ASCII equivalents); returns \`{ index, length }\` or \`null\`
 - \`utils.resilientIndexOf(haystack, needle)\` — tiered, drift-tolerant matcher with uniqueness enforcement (exact → line-trimmed → intra-line-whitespace-flexible); returns \`{ ok: true, match: { index, length } }\` or \`{ ok: false, reason: "not_found" | "not_unique", count? }\`. Prefer over \`normalizedIndexOf\` for find/replace-style edits
 - \`utils.pathEnforcer\` — enforces path constraints automatically at dispatch; rarely needed in tool code
+- \`utils.pathFilter\` — optional \`(vaultPath) => boolean\`, present only when the session restricts vault reads. Tools that return *other* notes' paths or content should filter results through it and report the count they withheld
 
 **LLM & agents:**
 - \`utils.llmCall(presetName, messages)\` — make an LLM call using a named model preset; returns \`string | null\` (null if preset is unconfigured or call fails); max recursion depth 1

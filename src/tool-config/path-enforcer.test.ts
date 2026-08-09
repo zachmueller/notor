@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { enforcePathConstraints, matchesPathPrefixes, TOOL_PATH_PARAMS } from "./path-enforcer";
+import {
+	buildVaultReadFilter,
+	enforcePathConstraints,
+	matchesPathPrefixes,
+	TOOL_PATH_PARAMS,
+} from "./path-enforcer";
 import type { ResolvedToolConfigEntry } from "./types";
 
 // Mock os.homedir() for deterministic tilde expansion
@@ -86,6 +91,68 @@ describe("matchesPathPrefixes", () => {
 		expect(matchesPathPrefixes("sub/f.txt", "filesystem", [VAULT_ROOT], VAULT_ROOT)).toBe(
 			VAULT_ROOT,
 		);
+	});
+});
+
+// The hard gate only inspects a call's own arguments, so listing tools filter
+// their results through this predicate instead.
+describe("buildVaultReadFilter", () => {
+	it("is undefined when reads are unrestricted, so tools skip filtering", () => {
+		expect(buildVaultReadFilter(makeEntry())).toBeUndefined();
+		expect(buildVaultReadFilter(undefined)).toBeUndefined();
+	});
+
+	it("is undefined when only write groups are restricted", () => {
+		// "Read wide open, write narrowed" must leave read results untouched.
+		const entry = makeEntry({
+			path_scopes: {
+				"vault-write": {
+					allowed_paths: ["ai/"],
+					blocked_paths: [],
+					auto_approve_paths: [],
+					never_auto_approve_paths: [],
+				},
+			},
+		});
+		expect(buildVaultReadFilter(entry)).toBeUndefined();
+	});
+
+	it("rejects paths outside a flat allowed_paths", () => {
+		const filter = buildVaultReadFilter(makeEntry({ allowed_paths: ["ai/"] }))!;
+		expect(filter("ai/x.md")).toBe(true);
+		expect(filter("private/x.md")).toBe(false);
+	});
+
+	it("rejects paths under a blocked prefix", () => {
+		const filter = buildVaultReadFilter(makeEntry({ blocked_paths: ["private/"] }))!;
+		expect(filter("ai/x.md")).toBe(true);
+		expect(filter("private/x.md")).toBe(false);
+	});
+
+	it("uses the vault-read group scope", () => {
+		const entry = makeEntry({
+			path_scopes: {
+				"vault-read": {
+					allowed_paths: [],
+					blocked_paths: ["private/"],
+					auto_approve_paths: [],
+					never_auto_approve_paths: [],
+				},
+			},
+		});
+		const filter = buildVaultReadFilter(entry)!;
+		expect(filter("ai/x.md")).toBe(true);
+		expect(filter("private/x.md")).toBe(false);
+	});
+
+	it("honors session-allowed prefixes, but blocks still win", () => {
+		const allowed = buildVaultReadFilter(makeEntry({ allowed_paths: ["ai/"] }), ["scratch/"])!;
+		expect(allowed("scratch/plan.md")).toBe(true);
+
+		const blocked = buildVaultReadFilter(makeEntry({ blocked_paths: ["scratch/"] }), [
+			"scratch/",
+		])!;
+		expect(blocked("scratch/plan.md")).toBe(false);
 	});
 });
 

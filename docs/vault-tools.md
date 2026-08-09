@@ -475,7 +475,7 @@ Writes under `ai/` proceed silently; writes anywhere else render a normal approv
 - **Restrictive lists fire on any matching parameter; permissive lists require all of them to match.** This mirrors the hard gate's bias toward caution.
 - **Bare note names are resolved first**, so `Foo` matches the prefix `ai/` when the note lives at `ai/Foo.md`. A note that does not exist yet is checked against the raw path, so creating new notes under an allowed prefix works.
 - **Group names are Settings-only.** A `<notor_tool_config>` block keys on tool names, so narrow writes by listing the tools (`write_note`, `replace_in_note`, `move_note`, …).
-- **Restricting reads is not yet leak-proof.** The access tier gates direct operations, but `search_vault`, `list_vault`, `get_backlinks`, `get_outlinks`, and `read_note`'s backlink snippets can still surface paths from elsewhere in the vault. Restricting writes — the common case — is unaffected.
+- **Restricted reads also filter results.** Gating a call's own arguments would still let a listing tool report paths from anywhere, so `search_vault`, `list_vault`, `get_backlinks`, `get_outlinks`, and `read_note`'s backlink snippets filter their output against the `vault-read` lists. Withheld entries are **counted, not hidden** — the result says e.g. `3 notes hidden by path restrictions`, so the AI knows something exists that it cannot see rather than telling you it found nothing.
 - **Distinct from the *expansion* settings.** "Additional file-system paths" (Shared settings) and "Additional working directories" (execute_command) *grant* access outside the vault. The lists here *restrict*.
 
 ## Task tracking

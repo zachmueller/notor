@@ -105,9 +105,17 @@ function matchesGlob(filename: string, pattern: string): boolean {
   }
 }
 
+// Count of candidates withheld by vault-read path restrictions, reported in the
+// result so the model never concludes the hidden notes simply don't exist.
+let hiddenByPathRestrictions = 0;
+
 function getCandidateFiles(sp: string, fp: string): any[] {
   const allFiles = app.vault.getFiles();
   return allFiles.filter((file: any) => {
+    if (utils.pathFilter && !utils.pathFilter(file.path)) {
+      hiddenByPathRestrictions++;
+      return false;
+    }
     if (sp) {
       const normalizedPath = sp.endsWith("/") ? sp : sp + "/";
       if (!file.path.startsWith(normalizedPath) && file.path !== sp) return false;
@@ -218,9 +226,13 @@ log.debug("Search complete", {
   returned: paginatedResults.length,
 });
 
-return {
+const result: any = {
   total_matches: totalMatches,
   total_files: totalFiles,
   files: paginatedResults,
-};`,
+};
+if (hiddenByPathRestrictions > 0) {
+  result.notice = hiddenByPathRestrictions + " notes hidden by path restrictions";
+}
+return result;`,
 );

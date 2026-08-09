@@ -15,6 +15,7 @@ import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
 import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
 import { McpRegisteredTool } from "../mcp/mcp-tool-adapter";
 import { evaluateToolPolicy, type ToolPolicyContext } from "./tool-policy";
+import { buildVaultReadFilter } from "../tool-config/path-enforcer";
 import type { ParseStreamOpts } from "./stream-utils";
 import { logger } from "../utils/logger";
 
@@ -423,7 +424,14 @@ export class ToolDispatcher {
 				? (request: InteractionRequest, signal?: AbortSignal) =>
 					interactionCallback(request, signal ?? abortSignal, messageId)
 				: undefined;
-			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined, noteOpenerEnabled: this.openNotesOverride ?? undefined, interactionCallback: boundInteractionCallback, runContext, orchestrationContext };
+			// Tools that return *other* notes' paths or content filter their results
+			// against the effective vault-read access lists, since the hard gate only
+			// inspects a call's own arguments.
+			const pathFilter = buildVaultReadFilter(
+				policyCtx.effectiveConfig.tools[toolName],
+				policyCtx.sessionAllowedPaths,
+			);
+			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined, noteOpenerEnabled: this.openNotesOverride ?? undefined, interactionCallback: boundInteractionCallback, runContext, orchestrationContext, pathFilter };
 			const executePromise = tool.execute(parameters, executeOptions);
 
 			let result: ToolResult;

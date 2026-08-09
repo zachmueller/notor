@@ -143,9 +143,23 @@ export interface ExtensionUtils {
 			toolName: string,
 			params: Record<string, unknown>,
 			entry: ResolvedToolConfigEntry,
+			/**
+			 * Per-session prefixes auto-allowed in addition to the entry's
+			 * `allowed_paths` (INT-001) — e.g. an orchestration scratchpad. Omitting
+			 * these over-blocks any scaffold that relies on them.
+			 */
+			sessionAllowedPaths?: string[],
 		) => string | null;
 		isPathWithin: (target: string, base: string) => boolean;
 	};
+	/**
+	 * Predicate for filtering vault paths out of a tool's results, present only
+	 * when the session restricts vault reads. Tools that return *other* notes'
+	 * paths or content (search_vault, list_vault, get_backlinks, get_outlinks,
+	 * read_note backlinks) call this per candidate and report the count they
+	 * dropped. Absent means unrestricted — skip filtering.
+	 */
+	pathFilter?: (vaultPath: string) => boolean;
 	/** Check if a URL's domain matches any pattern in the denylist. */
 	isDomainBlocked: (url: string, denylist: string[]) => { blocked: true; pattern: string } | { blocked: false };
 	/** Create intermediate vault directories for a file path. */

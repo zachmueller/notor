@@ -29,11 +29,20 @@ export function buildFileUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 		tempOutputSpiller: plugin.getTempOutputSpiller(),
 
 		pathEnforcer: {
-			enforcePathConstraints: (toolName, params, entry) =>
-				enforcePathConstraints(toolName, params, entry, vaultRootPath, (path: string) => {
-					const file = resolveNote(path, plugin.app.vault, plugin.app.metadataCache);
-					return file?.path ?? null;
-				}),
+			// Forwards `sessionAllowedPaths` — dropping it silently over-blocked any
+			// scaffold relying on an orchestration scratchpad auto-allow.
+			enforcePathConstraints: (toolName, params, entry, sessionAllowedPaths) =>
+				enforcePathConstraints(
+					toolName,
+					params,
+					entry,
+					vaultRootPath,
+					(path: string) => {
+						const file = resolveNote(path, plugin.app.vault, plugin.app.metadataCache);
+						return file?.path ?? null;
+					},
+					sessionAllowedPaths,
+				),
 
 			isPathWithin: (target: string, base: string) =>
 				isPathWithin(target, base),

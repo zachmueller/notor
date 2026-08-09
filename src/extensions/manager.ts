@@ -118,6 +118,12 @@ export class UserToolAdapter implements Tool {
 				// capture its emission into `pendingEmission` (FEAT-009).
 				utils.orchestrationContext = options.orchestrationContext;
 			}
+			if (options?.pathFilter) {
+				// Result-filtering predicate for tools that return other notes'
+				// paths or content. Session-scoped, so it rides per-invocation
+				// rather than living on the plugin-scoped `utils`.
+				utils.pathFilter = options.pathFilter;
+			}
 
 			const libs = this.manager.getCachedLibs();
 			const obsidian = this.manager.getCachedObsidianExports();

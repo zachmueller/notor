@@ -24,17 +24,25 @@ if (!file) throw new Error(\`Note not found: \${params.path}\`);
 const resolvedMap = app.metadataCache.resolvedLinks[file.path] ?? {};
 const unresolvedMap = app.metadataCache.unresolvedLinks[file.path] ?? {};
 
-// Filter out self-links
-const resolvedPaths = Object.keys(resolvedMap).filter((p) => p !== file.path);
+// Filter out self-links, then apply vault-read path restrictions. Resolved
+// outlinks name *other* notes; unresolved ones are just link text with no
+// target, so there is nothing to restrict.
+const allResolved = Object.keys(resolvedMap).filter((p) => p !== file.path);
+const resolvedPaths = utils.pathFilter
+  ? allResolved.filter((p: string) => utils.pathFilter(p))
+  : allResolved;
+const hidden = allResolved.length - resolvedPaths.length;
 const unresolvedLinkNames = Object.keys(unresolvedMap);
 
 log.debug("Got outlinks", {
   path: file.path,
   resolved: resolvedPaths.length,
   unresolved: unresolvedLinkNames.length,
+  hidden,
 });
 
-const resolvedSection = resolvedPaths.length > 0 ? resolvedPaths.join("\\n") : "(none)";
+const hiddenNote = hidden > 0 ? "\\n(" + hidden + " hidden by path restrictions)" : "";
+const resolvedSection = (resolvedPaths.length > 0 ? resolvedPaths.join("\\n") : "(none)") + hiddenNote;
 const unresolvedSection = unresolvedLinkNames.length > 0 ? unresolvedLinkNames.join("\\n") : "(none)";
 return \`Resolved:\\n\${resolvedSection}\\n\\nUnresolved:\\n\${unresolvedSection}\`;`,
 );

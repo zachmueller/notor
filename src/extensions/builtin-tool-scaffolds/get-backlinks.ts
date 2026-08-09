@@ -25,13 +25,21 @@ if (!file) throw new Error(\`Note not found: \${params.path}\`);
 // Self-links are filtered out.
 const targetPath = file.path;
 const backlinks: string[] = [];
+// Backlinks name *other* notes, so they are filtered against vault-read
+// restrictions; the count is disclosed rather than silently dropped.
+let hidden = 0;
 for (const [sourcePath, links] of Object.entries(app.metadataCache.resolvedLinks)) {
   if (sourcePath !== targetPath && targetPath in links) {
+    if (utils.pathFilter && !utils.pathFilter(sourcePath)) {
+      hidden++;
+      continue;
+    }
     backlinks.push(sourcePath);
   }
 }
 
-log.debug("Got backlinks", { path: file.path, count: backlinks.length });
+log.debug("Got backlinks", { path: file.path, count: backlinks.length, hidden });
 
-return backlinks.length > 0 ? backlinks.join("\\n") : "(none)";`,
+const suffix = hidden > 0 ? "\\n(" + hidden + " hidden by path restrictions)" : "";
+return backlinks.length > 0 ? backlinks.join("\\n") + suffix : (hidden > 0 ? "(none visible)" + suffix : "(none)");`,
 );

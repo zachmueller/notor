@@ -141,6 +141,37 @@ export function effectiveLists(
 	};
 }
 
+/**
+ * Build a predicate for filtering vault paths out of a tool's **results**.
+ *
+ * The hard gate inspects a call's own path arguments, so it cannot stop
+ * `search_vault` or `get_backlinks` from reporting paths under a restricted
+ * prefix. This gives those tools the same access-tier verdict for an arbitrary
+ * vault path, using the `vault-read` group's lists.
+ *
+ * Returns `undefined` when reads are unrestricted, so the caller can skip
+ * filtering entirely — the inert path for the expected majority of users.
+ */
+export function buildVaultReadFilter(
+	entry: ResolvedToolConfigEntry | undefined,
+	sessionAllowedPaths?: string[],
+): ((vaultPath: string) => boolean) | undefined {
+	if (!entry) return undefined;
+
+	// Results are read output, so they answer to `vault-read` regardless of which
+	// group the tool's own parameters fall into.
+	const lists = effectiveLists(entry, {
+		paramName: "",
+		namespace: "vault",
+		access: "read",
+	});
+	if (lists.allowed_paths.length === 0 && lists.blocked_paths.length === 0) return undefined;
+
+	// vaultRootPath is unused in the vault namespace, hence "".
+	return (vaultPath: string) =>
+		checkVaultPath(vaultPath, lists, sessionAllowedPaths) === null;
+}
+
 /** True when neither the flat lists nor any group scope constrains anything. */
 function hasNoConstraints(entry: ResolvedToolConfigEntry): boolean {
 	if (entry.allowed_paths.length > 0 || entry.blocked_paths.length > 0) return false;
