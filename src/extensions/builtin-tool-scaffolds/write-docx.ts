@@ -8,6 +8,9 @@ export const WRITE_DOCX = scaffold(
   note_name:
     type: string
     description: "Path to an existing vault note to convert. Mutually exclusive with content."
+    path_namespace: vault
+    path_resolve_as: note
+    path_access: read
   content:
     type: string
     description: "Markdown content to convert. Mutually exclusive with note_name."
@@ -22,6 +25,7 @@ export const WRITE_DOCX = scaffold(
     type: string
     description: "Path to a .docx template."
     path_namespace: filesystem
+    path_access: read
 settings:
   write_docx_default_output_dir:
     name: "Default Output Directory"

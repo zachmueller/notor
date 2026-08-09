@@ -114,6 +114,18 @@ export interface ResolvedToolConfigEntry {
 	auto_approve_paths: string[];
 	/** Path prefixes that ALWAYS require approval, even when `auto_approve` is true. */
 	never_auto_approve_paths: string[];
+	/**
+	 * Global path lists scoped by `namespace × access` group, from Settings.
+	 *
+	 * The flat lists above are authored per-context and apply to every path
+	 * parameter of the tool; these apply only to parameters in the matching
+	 * group, which is what lets one tool's read and write parameters obey
+	 * different rules. Combination happens at enforcement time: access-tier
+	 * lists intersect/union with the flat lists (global is a floor), while
+	 * approval-tier lists are consulted only when the flat list is empty
+	 * (global is a default).
+	 */
+	path_scopes: Partial<Record<PathGroup, PathListSet>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +134,19 @@ export interface ResolvedToolConfigEntry {
 
 /** Namespace for path parameter resolution. */
 export type PathNamespace = "vault" | "filesystem";
+
+/** Whether a path parameter is read from or written to. */
+export type PathAccess = "read" | "write";
+
+/**
+ * Scope key for the global path-scoping settings: `namespace × access`.
+ *
+ * Grouping on both axes — rather than per tool — is what makes the common
+ * "read wide open, write narrowed" configuration expressible even for tools
+ * whose parameters straddle a namespace or direction boundary (`import_docx`
+ * reads a filesystem file and writes a vault note).
+ */
+export type PathGroup = "vault-read" | "vault-write" | "filesystem-read" | "filesystem-write";
 
 /**
  * Descriptor for a tool's path parameter(s), used by the path enforcer
@@ -134,6 +159,21 @@ export interface ToolPathParam {
 	namespace: PathNamespace;
 	/** If "note", resolve via resolveNote() before constraint checking. */
 	resolveAs?: "note";
+	/** Read vs write direction; defaults to the tool's declared `mode`. */
+	access: PathAccess;
+}
+
+/** The four path lists that make up one group's scope. */
+export interface PathListSet {
+	allowed_paths: string[];
+	blocked_paths: string[];
+	auto_approve_paths: string[];
+	never_auto_approve_paths: string[];
+}
+
+/** The global settings group a path parameter belongs to. */
+export function groupOf(param: ToolPathParam): PathGroup {
+	return `${param.namespace}-${param.access}`;
 }
 
 // ---------------------------------------------------------------------------

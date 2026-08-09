@@ -530,6 +530,7 @@ export class UseSubagentTool implements Tool {
 				blocked_command_patterns: [],
 				auto_approve_paths: [],
 				never_auto_approve_paths: [],
+				path_scopes: {},
 			};
 		}
 		return { tools };

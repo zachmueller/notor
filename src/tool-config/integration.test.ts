@@ -18,8 +18,9 @@ vi.mock("../mcp/mcp-tool-adapter", () => ({
 
 import { extractToolConfigs } from "./parser";
 import { mergeToolConfigs } from "./merger";
-import { enforcePathConstraints, TOOL_PATH_PARAMS } from "./path-enforcer";
-import type { ParsedToolConfig } from "./types";
+import { enforcePathConstraints, evaluatePathApproval, TOOL_PATH_PARAMS } from "./path-enforcer";
+import type { ParsedToolConfig, PathGroup, PathListSet } from "./types";
+import { buildGlobalPathScopes, pathScopeKey } from "../settings/path-scoping";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -29,7 +30,7 @@ const ALL_TOOLS = [
 	"read_note", "write_note", "replace_in_note",
 	"read_frontmatter", "update_frontmatter", "manage_tags", "move_note", "delete_note",
 	"search_vault", "list_vault",
-	"read_file", "read_docx", "write_docx",
+	"read_file", "read_docx", "write_docx", "import_docx",
 	"execute_command", "fetch_webpage",
 	"browser__screenshot", "browser__click", "browser__navigate", "browser__type",
 ];
@@ -48,7 +49,7 @@ describe("end-to-end tool config flow", () => {
 		// TOOL_PATH_PARAMS is dynamically populated post-migration (Phase 7.3).
 		// Seed entries needed by path enforcement tests.
 		for (const key of Object.keys(TOOL_PATH_PARAMS)) delete TOOL_PATH_PARAMS[key];
-		TOOL_PATH_PARAMS["read_note"] = [{ paramName: "path", namespace: "vault" }];
+		TOOL_PATH_PARAMS["read_note"] = [{ paramName: "path", namespace: "vault" , access: "write" as const }];
 	});
 
 	describe("persona disabling tools -> LLM tool list excludes disabled tools", () => {
@@ -349,6 +350,197 @@ Continue with your task.`;
 			expect(effective.tools.read_note!.allowed_paths).toEqual(["notes/", "drafts/"]);
 			// globalAutoApprove used for unmentioned tools
 			expect(effective.tools.read_note!.auto_approve).toBe(true); // from globalAutoApprove
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// Global group scopes: access tier is a FLOOR (a persona can only narrow it),
+	// approval tier is a DEFAULT (a persona replaces it outright).
+	// ---------------------------------------------------------------------------
+
+	describe("global path scopes vs per-context config", () => {
+		const VAULT_ROOT = "/vault";
+
+		/** Build global scopes the way Settings → config-resolver does. */
+		function scopes(
+			overrides: Partial<Record<PathGroup, Partial<PathListSet>>>,
+		): Partial<Record<PathGroup, PathListSet>> {
+			const shared: Record<string, string[]> = {};
+			for (const [group, lists] of Object.entries(overrides)) {
+				for (const [list, paths] of Object.entries(lists ?? {})) {
+					shared[pathScopeKey(group as PathGroup, list as keyof PathListSet)] = paths as string[];
+				}
+			}
+			return buildGlobalPathScopes(shared);
+		}
+
+		beforeEach(() => {
+			for (const key of Object.keys(TOOL_PATH_PARAMS)) delete TOOL_PATH_PARAMS[key];
+			TOOL_PATH_PARAMS["write_note"] = [
+				{ paramName: "path", namespace: "vault", resolveAs: "note", access: "write" },
+			];
+			TOOL_PATH_PARAMS["read_note"] = [
+				{ paramName: "path", namespace: "vault", resolveAs: "note", access: "read" },
+			];
+			// A mixed tool: reads a filesystem file, writes a vault note.
+			TOOL_PATH_PARAMS["import_docx"] = [
+				{ paramName: "path", namespace: "filesystem", access: "read" },
+				{ paramName: "note_path", namespace: "vault", access: "write" },
+			];
+		});
+
+		it("a global block applies with no per-context config at all", () => {
+			const effective = mergeToolConfigs(
+				[], {}, ALL_TOOLS, {}, scopes({ "vault-write": { blocked_paths: ["private/"] } }),
+			);
+			const error = enforcePathConstraints(
+				"write_note", { path: "private/x.md" }, effective.tools.write_note!, VAULT_ROOT,
+			);
+			expect(error).toContain("blocked by path constraint");
+		});
+
+		it("a persona cannot widen a global block (access tier is a floor)", () => {
+			// The persona allows all of private/ — the global block still wins.
+			const personaConfig: ParsedToolConfig = {
+				source: "persona", sourceFile: "p.md", documentPosition: 0,
+				tools: { write_note: { allowed_paths: ["private/"] } },
+			};
+			const effective = mergeToolConfigs(
+				[personaConfig], {}, ALL_TOOLS, {},
+				scopes({ "vault-write": { blocked_paths: ["private/"] } }),
+			);
+			expect(
+				enforcePathConstraints(
+					"write_note", { path: "private/x.md" }, effective.tools.write_note!, VAULT_ROOT,
+				),
+			).toContain("blocked by path constraint");
+		});
+
+		it("allow lists intersect — only paths both permit are allowed", () => {
+			const personaConfig: ParsedToolConfig = {
+				source: "persona", sourceFile: "p.md", documentPosition: 0,
+				tools: { write_note: { allowed_paths: ["ai/", "drafts/"] } },
+			};
+			const effective = mergeToolConfigs(
+				[personaConfig], {}, ALL_TOOLS, {},
+				scopes({ "vault-write": { allowed_paths: ["ai/", "notes/"] } }),
+			);
+			const entry = effective.tools.write_note!;
+
+			// ai/ is in both → allowed.
+			expect(enforcePathConstraints("write_note", { path: "ai/x.md" }, entry, VAULT_ROOT)).toBeNull();
+			// drafts/ only the persona allows → not allowed.
+			expect(
+				enforcePathConstraints("write_note", { path: "drafts/x.md" }, entry, VAULT_ROOT),
+			).toContain("not within any allowed path");
+			// notes/ only the global allows → not allowed.
+			expect(
+				enforcePathConstraints("write_note", { path: "notes/x.md" }, entry, VAULT_ROOT),
+			).toContain("not within any allowed path");
+		});
+
+		it("a session-allowed scratchpad still loses to a global group block", () => {
+			const effective = mergeToolConfigs(
+				[], {}, ALL_TOOLS, {},
+				scopes({ "vault-write": { blocked_paths: ["scratch/"] } }),
+			);
+			expect(
+				enforcePathConstraints(
+					"write_note", { path: "scratch/plan.md" }, effective.tools.write_note!,
+					VAULT_ROOT, undefined, ["scratch/"],
+				),
+			).toContain("blocked by path constraint");
+		});
+
+		it("global auto_approve_paths acts as a default when the tool sets none", () => {
+			const effective = mergeToolConfigs(
+				[], {}, ALL_TOOLS, {}, scopes({ "vault-write": { auto_approve_paths: ["ai/"] } }),
+			);
+			const entry = effective.tools.write_note!;
+
+			expect(evaluatePathApproval("write_note", { path: "ai/x.md" }, entry, VAULT_ROOT).verdict)
+				.toBe("allow");
+			expect(evaluatePathApproval("write_note", { path: "other/x.md" }, entry, VAULT_ROOT).verdict)
+				.toBe("none");
+		});
+
+		it("a persona replaces the global approval default outright", () => {
+			const personaConfig: ParsedToolConfig = {
+				source: "persona", sourceFile: "p.md", documentPosition: 0,
+				tools: { write_note: { auto_approve_paths: ["drafts/"] } },
+			};
+			const effective = mergeToolConfigs(
+				[personaConfig], {}, ALL_TOOLS, {},
+				scopes({ "vault-write": { auto_approve_paths: ["ai/"] } }),
+			);
+			const entry = effective.tools.write_note!;
+
+			// The persona's list replaces the global one rather than intersecting.
+			expect(evaluatePathApproval("write_note", { path: "drafts/x.md" }, entry, VAULT_ROOT).verdict)
+				.toBe("allow");
+			expect(evaluatePathApproval("write_note", { path: "ai/x.md" }, entry, VAULT_ROOT).verdict)
+				.toBe("none");
+		});
+
+		it("read and write groups restrict independently — the dominant configuration", () => {
+			// "Read wide open, write narrowed": the whole reason groups are keyed on
+			// namespace × access rather than per tool.
+			const effective = mergeToolConfigs(
+				[], {}, ALL_TOOLS, {}, scopes({ "vault-write": { allowed_paths: ["ai/"] } }),
+			);
+
+			expect(
+				enforcePathConstraints(
+					"read_note", { path: "anywhere/x.md" }, effective.tools.read_note!, VAULT_ROOT,
+				),
+			).toBeNull();
+			expect(
+				enforcePathConstraints(
+					"write_note", { path: "anywhere/x.md" }, effective.tools.write_note!, VAULT_ROOT,
+				),
+			).toContain("not within any allowed path");
+		});
+
+		it("a mixed tool obeys a different group per path parameter", () => {
+			// import_docx reads a filesystem file and writes a vault note, so its two
+			// params are governed by filesystem-read and vault-write respectively.
+			const effective = mergeToolConfigs(
+				[], {}, ALL_TOOLS, {},
+				scopes({
+					"filesystem-read": { allowed_paths: ["/inbox"] },
+					"vault-write": { allowed_paths: ["ai/"] },
+				}),
+			);
+			const entry = effective.tools.import_docx!;
+
+			// Both params in bounds → allowed.
+			expect(
+				enforcePathConstraints(
+					"import_docx", { path: "/inbox/a.docx", note_path: "ai/a.md" }, entry, VAULT_ROOT,
+				),
+			).toBeNull();
+			// Filesystem source out of bounds.
+			expect(
+				enforcePathConstraints(
+					"import_docx", { path: "/elsewhere/a.docx", note_path: "ai/a.md" }, entry, VAULT_ROOT,
+				),
+			).toContain("not within any allowed path");
+			// Vault destination out of bounds.
+			expect(
+				enforcePathConstraints(
+					"import_docx", { path: "/inbox/a.docx", note_path: "private/a.md" }, entry, VAULT_ROOT,
+				),
+			).toContain("not within any allowed path");
+		});
+
+		it("no global scopes configured → behaves exactly as before", () => {
+			const effective = mergeToolConfigs([], {}, ALL_TOOLS);
+			expect(effective.tools.write_note!.path_scopes).toEqual({});
+			expect(
+				enforcePathConstraints(
+					"write_note", { path: "anywhere/x.md" }, effective.tools.write_note!, VAULT_ROOT,
+				),
+			).toBeNull();
 		});
 	});
 });

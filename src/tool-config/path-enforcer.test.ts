@@ -21,6 +21,7 @@ function makeEntry(overrides: Partial<ResolvedToolConfigEntry> = {}): ResolvedTo
 		blocked_command_patterns: [],
 		auto_approve_paths: [],
 		never_auto_approve_paths: [],
+		path_scopes: {},
 		...overrides,
 	};
 }
@@ -33,20 +34,20 @@ const VAULT_ROOT = "/Users/test/vault";
  */
 function seedPathParams(): void {
 	Object.assign(TOOL_PATH_PARAMS, {
-		read_note: [{ paramName: "path", namespace: "vault" as const, resolveAs: "note" as const }],
-		write_note: [{ paramName: "path", namespace: "vault" as const, resolveAs: "note" as const }],
-		search_vault: [{ paramName: "path", namespace: "vault" as const }],
-		read_file: [{ paramName: "path", namespace: "filesystem" as const }],
+		read_note: [{ paramName: "path", namespace: "vault" as const, resolveAs: "note" as const , access: "write" as const }],
+		write_note: [{ paramName: "path", namespace: "vault" as const, resolveAs: "note" as const , access: "write" as const }],
+		search_vault: [{ paramName: "path", namespace: "vault" as const , access: "write" as const }],
+		read_file: [{ paramName: "path", namespace: "filesystem" as const , access: "write" as const }],
 		write_docx: [
-			{ paramName: "output_path", namespace: "filesystem" as const },
-			{ paramName: "template_path", namespace: "filesystem" as const },
+			{ paramName: "output_path", namespace: "filesystem" as const , access: "write" as const },
+			{ paramName: "template_path", namespace: "filesystem" as const , access: "write" as const },
 		],
-		read_xlsx: [{ paramName: "path", namespace: "filesystem" as const }],
-		write_xlsx: [{ paramName: "output_path", namespace: "filesystem" as const }],
-		list_xlsx_sheets: [{ paramName: "path", namespace: "filesystem" as const }],
+		read_xlsx: [{ paramName: "path", namespace: "filesystem" as const , access: "write" as const }],
+		write_xlsx: [{ paramName: "output_path", namespace: "filesystem" as const , access: "write" as const }],
+		list_xlsx_sheets: [{ paramName: "path", namespace: "filesystem" as const , access: "write" as const }],
 		import_xlsx: [
-			{ paramName: "path", namespace: "filesystem" as const },
-			{ paramName: "note_path", namespace: "vault" as const },
+			{ paramName: "path", namespace: "filesystem" as const , access: "write" as const },
+			{ paramName: "note_path", namespace: "vault" as const , access: "write" as const },
 		],
 		fetch_webpage: [],
 	});

@@ -155,9 +155,9 @@ function makeSettings(overrides: Partial<NotorSettings> = {}): NotorSettings {
 function makeParentConfig(): EffectiveToolConfig {
 	return {
 		tools: {
-			search_vault: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [] },
-			read_note: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [] },
-			write_note: { enabled: true, auto_approve: false, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [] },
+			search_vault: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [], path_scopes: {} },
+			read_note: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [], path_scopes: {} },
+			write_note: { enabled: true, auto_approve: false, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [], path_scopes: {} },
 		},
 	};
 }
@@ -409,8 +409,8 @@ describe("UseSubagentTool", () => {
 		it("emits Notice for tools enabled in profile but disabled by parent", async () => {
 			const parentConfig: EffectiveToolConfig = {
 				tools: {
-					search_vault: { enabled: false, auto_approve: false, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [] },
-					read_note: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [] },
+					search_vault: { enabled: false, auto_approve: false, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [], path_scopes: {} },
+					read_note: { enabled: true, auto_approve: true, allowed_paths: [], blocked_paths: [], allowed_command_patterns: [], blocked_command_patterns: [], auto_approve_paths: [], never_auto_approve_paths: [], path_scopes: {} },
 				},
 			};
 

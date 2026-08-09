@@ -15,6 +15,7 @@ import type { ToolDispatcher } from "./dispatcher";
 import type { NotorSettings } from "../settings";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
 import { mergeToolConfigs } from "../tool-config/merger";
+import { buildGlobalPathScopes } from "../settings/path-scoping";
 import { logger } from "../utils/logger";
 
 const log = logger("ConfigResolver");
@@ -107,8 +108,20 @@ export class ConfigResolver {
 		// Get all registered tool names for default fill
 		const allToolNames = this.dispatcher.getRegisteredToolNames();
 
+		// Global path scopes (Settings → Tools → Path scoping) travel as their own
+		// parameter rather than as a synthetic lowest-precedence config, because the
+		// access tier is a floor a persona must not be able to override — not a
+		// default it can replace.
+		const globalPathScopes = buildGlobalPathScopes(this.settings.user_shared_settings);
+
 		// Merge all configs
-		const effective = mergeToolConfigs(allConfigs, globalAutoApprove, allToolNames, globalEnabled);
+		const effective = mergeToolConfigs(
+			allConfigs,
+			globalAutoApprove,
+			allToolNames,
+			globalEnabled,
+			globalPathScopes,
+		);
 
 		// Compute filtered tool definitions
 		const toolDefinitions = this.getToolDefinitionsCallback?.(effective) ?? [];

@@ -8,7 +8,14 @@
  * @see specs/04b-tool-toggle/research/RT-1-path-argument-inspection.md
  */
 
-import type { PathNamespace, ResolvedToolConfigEntry, ToolPathParam } from "./types";
+import type {
+	PathListSet,
+	PathNamespace,
+	ResolvedToolConfigEntry,
+	ToolPathParam,
+} from "./types";
+import { groupOf } from "./types";
+import { intersectPaths, unionPaths } from "./merger";
 import { isPathWithin, expandTilde } from "../utils/path-validation";
 import { normalize, resolve, isAbsolute } from "path";
 
@@ -67,8 +74,8 @@ export function enforcePathConstraints(
 	// Tools with empty path params (e.g., fetch_webpage) → exempt
 	if (pathParams.length === 0) return null;
 
-	// No constraints configured → allow
-	if (entry.allowed_paths.length === 0 && entry.blocked_paths.length === 0) return null;
+	// No constraints configured anywhere (flat or grouped) → allow
+	if (hasNoConstraints(entry)) return null;
 
 	for (const param of pathParams) {
 		const rawValue = parameters[param.paramName];
@@ -82,7 +89,7 @@ export function enforcePathConstraints(
 		const error = checkPath(
 			effectivePath,
 			param.namespace,
-			entry,
+			effectiveLists(entry, param),
 			vaultRootPath,
 			sessionAllowedPaths,
 		);
@@ -92,6 +99,62 @@ export function enforcePathConstraints(
 	}
 
 	return null;
+}
+
+/**
+ * Combine a tool's flat (per-context) path lists with the global group scope for
+ * one path parameter.
+ *
+ * The two tiers combine differently, which is what encodes their different
+ * framing — and it falls out here mechanically, with no separate merge step:
+ *
+ * - **Access tier = floor.** A path is blocked if *either* source blocks it, and
+ *   allowed only if *both* permit it (intersect allows, union blocks). A persona
+ *   can narrow the global baseline but never widen it.
+ * - **Approval tier = default.** The group scope is consulted only when the
+ *   corresponding flat list is empty, so a persona that sets its own list
+ *   replaces the global default outright. Widening is harmless here — the worst
+ *   case is a prompt the user opted out of.
+ */
+export function effectiveLists(
+	entry: ResolvedToolConfigEntry,
+	param: ToolPathParam,
+): PathListSet {
+	const group = entry.path_scopes[groupOf(param)];
+	if (!group) {
+		return {
+			allowed_paths: entry.allowed_paths,
+			blocked_paths: entry.blocked_paths,
+			auto_approve_paths: entry.auto_approve_paths,
+			never_auto_approve_paths: entry.never_auto_approve_paths,
+		};
+	}
+	return {
+		allowed_paths: intersectPaths(entry.allowed_paths, group.allowed_paths),
+		blocked_paths: unionPaths(entry.blocked_paths, group.blocked_paths),
+		auto_approve_paths:
+			entry.auto_approve_paths.length > 0 ? entry.auto_approve_paths : group.auto_approve_paths,
+		never_auto_approve_paths:
+			entry.never_auto_approve_paths.length > 0
+				? entry.never_auto_approve_paths
+				: group.never_auto_approve_paths,
+	};
+}
+
+/** True when neither the flat lists nor any group scope constrains anything. */
+function hasNoConstraints(entry: ResolvedToolConfigEntry): boolean {
+	if (entry.allowed_paths.length > 0 || entry.blocked_paths.length > 0) return false;
+	return Object.values(entry.path_scopes).every(
+		(g) => g.allowed_paths.length === 0 && g.blocked_paths.length === 0,
+	);
+}
+
+/** True when no approval-tier list is configured, flat or grouped. */
+function hasNoApprovalLists(entry: ResolvedToolConfigEntry): boolean {
+	if (entry.auto_approve_paths.length > 0 || entry.never_auto_approve_paths.length > 0) return false;
+	return Object.values(entry.path_scopes).every(
+		(g) => g.auto_approve_paths.length === 0 && g.never_auto_approve_paths.length === 0,
+	);
 }
 
 /**
@@ -134,9 +197,7 @@ export function evaluatePathApproval(
 ): PathApprovalVerdict {
 	const pathParams = TOOL_PATH_PARAMS[toolName];
 	if (pathParams === undefined || pathParams.length === 0) return { verdict: "none" };
-	if (entry.auto_approve_paths.length === 0 && entry.never_auto_approve_paths.length === 0) {
-		return { verdict: "none" };
-	}
+	if (hasNoApprovalLists(entry)) return { verdict: "none" };
 
 	let sawPathArg = false;
 	let allMatchedAllow = true;
@@ -148,12 +209,13 @@ export function evaluatePathApproval(
 		sawPathArg = true;
 
 		const effectivePath = canonicalizePath(rawValue, param, resolveVaultPath);
+		const lists = effectiveLists(entry, param);
 
 		// Restrictive list wins outright, on ANY matching argument.
 		const never = matchesPathPrefixes(
 			effectivePath,
 			param.namespace,
-			entry.never_auto_approve_paths,
+			lists.never_auto_approve_paths,
 			vaultRootPath,
 		);
 		if (never !== null) return { verdict: "never", prefix: never };
@@ -161,7 +223,7 @@ export function evaluatePathApproval(
 		const allow = matchesPathPrefixes(
 			effectivePath,
 			param.namespace,
-			entry.auto_approve_paths,
+			lists.auto_approve_paths,
 			vaultRootPath,
 		);
 		if (allow === null) allMatchedAllow = false;
@@ -242,14 +304,14 @@ function canonicalizePath(
 function checkPath(
 	pathValue: string,
 	namespace: PathNamespace,
-	entry: ResolvedToolConfigEntry,
+	lists: PathListSet,
 	vaultRootPath: string,
 	sessionAllowedPaths?: string[],
 ): string | null {
 	if (namespace === "vault") {
-		return checkVaultPath(pathValue, entry, sessionAllowedPaths);
+		return checkVaultPath(pathValue, lists, sessionAllowedPaths);
 	} else {
-		return checkFilesystemPath(pathValue, entry, vaultRootPath, sessionAllowedPaths);
+		return checkFilesystemPath(pathValue, lists, vaultRootPath, sessionAllowedPaths);
 	}
 }
 
@@ -262,11 +324,11 @@ function checkPath(
  */
 function checkVaultPath(
 	vaultPath: string,
-	entry: ResolvedToolConfigEntry,
+	lists: PathListSet,
 	sessionAllowedPaths?: string[],
 ): string | null {
 	// blocked_paths takes precedence over allowed_paths (and over session-allow)
-	const blocked = matchesPathPrefixes(vaultPath, "vault", entry.blocked_paths, "");
+	const blocked = matchesPathPrefixes(vaultPath, "vault", lists.blocked_paths, "");
 	if (blocked !== null) {
 		return `Path "${vaultPath}" is blocked by path constraint "${blocked}".`;
 	}
@@ -279,10 +341,10 @@ function checkVaultPath(
 
 	// allowed_paths: empty means no restriction
 	if (
-		entry.allowed_paths.length > 0 &&
-		matchesPathPrefixes(vaultPath, "vault", entry.allowed_paths, "") === null
+		lists.allowed_paths.length > 0 &&
+		matchesPathPrefixes(vaultPath, "vault", lists.allowed_paths, "") === null
 	) {
-		return `Path "${vaultPath}" is not within any allowed path: [${entry.allowed_paths.join(", ")}].`;
+		return `Path "${vaultPath}" is not within any allowed path: [${lists.allowed_paths.join(", ")}].`;
 	}
 
 	return null;
@@ -297,12 +359,12 @@ function checkVaultPath(
  */
 function checkFilesystemPath(
 	rawPath: string,
-	entry: ResolvedToolConfigEntry,
+	lists: PathListSet,
 	vaultRootPath: string,
 	sessionAllowedPaths?: string[],
 ): string | null {
 	// blocked_paths takes precedence
-	const blocked = matchesPathPrefixes(rawPath, "filesystem", entry.blocked_paths, vaultRootPath);
+	const blocked = matchesPathPrefixes(rawPath, "filesystem", lists.blocked_paths, vaultRootPath);
 	if (blocked !== null) {
 		return `Path "${rawPath}" is blocked by path constraint "${blocked}".`;
 	}
@@ -316,10 +378,10 @@ function checkFilesystemPath(
 
 	// allowed_paths: empty means no restriction
 	if (
-		entry.allowed_paths.length > 0 &&
-		matchesPathPrefixes(rawPath, "filesystem", entry.allowed_paths, vaultRootPath) === null
+		lists.allowed_paths.length > 0 &&
+		matchesPathPrefixes(rawPath, "filesystem", lists.allowed_paths, vaultRootPath) === null
 	) {
-		return `Path "${rawPath}" is not within any allowed path: [${entry.allowed_paths.join(", ")}].`;
+		return `Path "${rawPath}" is not within any allowed path: [${lists.allowed_paths.join(", ")}].`;
 	}
 
 	return null;

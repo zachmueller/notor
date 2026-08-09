@@ -239,11 +239,51 @@ describe("extractPathParams", () => {
 			output: { type: "string", path_namespace: "filesystem" },
 			query: { type: "string" },
 		};
-		const result = extractPathParams("my_tool", params);
+		const result = extractPathParams("my_tool", params, "write");
 
 		expect(result).toHaveLength(2);
-		expect(result).toContainEqual({ paramName: "path", namespace: "vault" });
-		expect(result).toContainEqual({ paramName: "output", namespace: "filesystem" });
+		expect(result).toContainEqual({
+			paramName: "path",
+			namespace: "vault",
+			resolveAs: undefined,
+			access: "write",
+		});
+		expect(result).toContainEqual({
+			paramName: "output",
+			namespace: "filesystem",
+			resolveAs: undefined,
+			access: "write",
+		});
+	});
+
+	// The group a path param belongs to is `namespace × access`, so the direction
+	// has to be per-param: several tools read one path and write another.
+	describe("path_access direction", () => {
+		it("defaults each param to the tool's mode", () => {
+			const params: ParamSchema = { path: { type: "string", path_namespace: "vault" } };
+			expect(extractPathParams("reader", params, "read")[0]!.access).toBe("read");
+			expect(extractPathParams("writer", params, "write")[0]!.access).toBe("write");
+		});
+
+		it("honors an explicit path_access that differs from the tool mode", () => {
+			// e.g. write_docx.template_path — a read input on a write tool.
+			const params: ParamSchema = {
+				template_path: { type: "string", path_namespace: "filesystem", path_access: "read" },
+				output_path: { type: "string", path_namespace: "filesystem" },
+			};
+			const result = extractPathParams("write_docx", params, "write");
+
+			expect(result.find((p) => p.paramName === "template_path")!.access).toBe("read");
+			expect(result.find((p) => p.paramName === "output_path")!.access).toBe("write");
+		});
+
+		it("is not exposed to the LLM (runtime-only key)", () => {
+			const schema = paramSchemaToJsonSchema({
+				path: { type: "string", path_namespace: "vault", path_access: "read" },
+			});
+			expect(schema.properties["path"]).not.toHaveProperty("path_access");
+			expect(schema.properties["path"]).not.toHaveProperty("path_namespace");
+		});
 	});
 
 	it("returns empty array when no path params", () => {

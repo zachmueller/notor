@@ -437,6 +437,7 @@ describe("intersectToolConfig", () => {
 				blocked_command_patterns: entry.blocked_command_patterns ?? [],
 				auto_approve_paths: entry.auto_approve_paths ?? [],
 				never_auto_approve_paths: entry.never_auto_approve_paths ?? [],
+				path_scopes: entry.path_scopes ?? {},
 			};
 		}
 		return resolved;

@@ -9,6 +9,7 @@ export const EXTRACT_DOCX_COMMENTS = scaffold(
     type: string
     description: "Path to the .docx file."
     path_namespace: filesystem
+    path_access: read
   output_path:
     type: string
     description: "Vault-relative path for the output note."

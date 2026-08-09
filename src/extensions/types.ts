@@ -43,6 +43,13 @@ export interface ParamSchema {
 		path_namespace?: "vault" | "filesystem";
 		/** If "note", resolve via resolveNote() before constraint checking. */
 		path_resolve_as?: "note";
+		/**
+		 * Whether this parameter is read from or written to. Defaults to the tool's
+		 * declared `notor-mode`, so only tools whose params straddle the direction
+		 * boundary need it — e.g. `write_docx.template_path` is a read input on a
+		 * write tool. Consumed at runtime only; never sent to the LLM.
+		 */
+		path_access?: "read" | "write";
 	};
 }
 

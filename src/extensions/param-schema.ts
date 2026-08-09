@@ -6,8 +6,11 @@
  */
 
 import type { JSONSchema, JSONSchemaProperty } from "../tools/tool";
-import type { ToolPathParam } from "../tool-config/types";
+import type { PathAccess, ToolPathParam } from "../tool-config/types";
 import type { ParamSchema } from "./types";
+import { logger } from "../utils/logger";
+
+const log = logger("param-schema");
 
 /**
  * Convert a simplified YAML param schema to JSON Schema for LLM tool definitions.
@@ -98,8 +101,16 @@ export function paramSchemaToJsonSchema(params: ParamSchema): JSONSchema {
  *
  * Note: The YAML field `path_namespace` maps to `ToolPathParam.namespace`
  * (the `path_` prefix is dropped).
+ *
+ * @param toolMode - The tool's declared `notor-mode`, used as the default
+ *   direction for params that omit `path_access`. Only tools whose params
+ *   straddle the read/write boundary need to declare it explicitly.
  */
-export function extractPathParams(toolName: string, params: ParamSchema): ToolPathParam[] {
+export function extractPathParams(
+	toolName: string,
+	params: ParamSchema,
+	toolMode: PathAccess = "write",
+): ToolPathParam[] {
 	const pathParams: ToolPathParam[] = [];
 
 	for (const [key, param] of Object.entries(params)) {
@@ -108,8 +119,21 @@ export function extractPathParams(toolName: string, params: ParamSchema): ToolPa
 				paramName: key,
 				namespace: param.path_namespace,
 				resolveAs: param.path_resolve_as,
+				access: param.path_access ?? toolMode,
 			});
 		}
+	}
+
+	// A tool spanning both namespaces almost certainly spans both directions too
+	// (read a file, write a note). Without an explicit `path_access` its read
+	// params silently inherit write restrictions — the exact confusion the
+	// per-param grouping exists to prevent.
+	const namespaces = new Set(pathParams.map((p) => p.namespace));
+	if (namespaces.size > 1 && pathParams.some((p) => params[p.paramName]?.path_access === undefined)) {
+		log.debug(
+			`Tool "${toolName}" has path params in both namespaces but not all declare path_access; ` +
+				`those params default to the tool mode "${toolMode}".`,
+		);
 	}
 
 	return pathParams;

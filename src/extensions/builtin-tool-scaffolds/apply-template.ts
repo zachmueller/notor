@@ -10,10 +10,13 @@ export const APPLY_TEMPLATE = scaffold(
     description: "Path to the template file relative to vault root."
     path_namespace: vault
     path_resolve_as: note
+    path_access: read
   output_folder:
     type: string
     description: "Target folder for the new note. If omitted, uses vault root or Templater's configured location."
     default: ""
+    path_namespace: vault
+    path_access: write
   output_filename:
     type: string
     description: "Filename for the new note (without .md extension). If omitted, Templater decides or uses the template name."

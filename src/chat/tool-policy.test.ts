@@ -14,6 +14,7 @@ function makeCtx(toolEntry: Partial<ResolvedToolConfigEntry> = {}): ToolPolicyCo
 		blocked_command_patterns: [],
 		auto_approve_paths: [],
 		never_auto_approve_paths: [],
+		path_scopes: {},
 		...toolEntry,
 	};
 	return {
@@ -65,6 +66,7 @@ describe("evaluateToolPolicy — command pattern auto-approve", () => {
 			blocked_command_patterns: ["rm *"],
 			auto_approve_paths: [],
 			never_auto_approve_paths: [],
+			path_scopes: {},
 		});
 		const result = evaluateToolPolicy(
 			"execute_command",
@@ -82,6 +84,7 @@ describe("evaluateToolPolicy — command pattern auto-approve", () => {
 			blocked_command_patterns: ["rm *"],
 			auto_approve_paths: [],
 			never_auto_approve_paths: [],
+			path_scopes: {},
 		});
 		const result = evaluateToolPolicy(
 			"execute_command",
@@ -100,6 +103,7 @@ describe("evaluateToolPolicy — command pattern auto-approve", () => {
 			blocked_command_patterns: ["rm *"],
 			auto_approve_paths: [],
 			never_auto_approve_paths: [],
+			path_scopes: {},
 		});
 		const result = evaluateToolPolicy(
 			"execute_command",
@@ -151,6 +155,7 @@ describe("evaluateToolPolicy — command pattern auto-approve", () => {
 						blocked_command_patterns: [],
 						auto_approve_paths: [],
 						never_auto_approve_paths: [],
+						path_scopes: {},
 					},
 				},
 			},
@@ -184,6 +189,7 @@ describe("evaluateToolPolicy — read tool auto-approve flows through", () => {
 						blocked_command_patterns: [],
 						auto_approve_paths: [],
 						never_auto_approve_paths: [],
+						path_scopes: {},
 						...entry,
 					},
 				},
@@ -229,6 +235,7 @@ function makeToolCtx(
 		blocked_command_patterns: [],
 		auto_approve_paths: [],
 		never_auto_approve_paths: [],
+		path_scopes: {},
 		...entry,
 	};
 	return {
@@ -319,11 +326,11 @@ describe("evaluateToolPolicy — path-based auto-approve (approval tier)", () =>
 
 	beforeAll(() => {
 		TOOL_PATH_PARAMS["write_note"] = [
-			{ paramName: "path", namespace: "vault", resolveAs: "note" },
+			{ paramName: "path", namespace: "vault", resolveAs: "note" , access: "write" as const },
 		];
 		TOOL_PATH_PARAMS["move_note"] = [
-			{ paramName: "path", namespace: "vault", resolveAs: "note" },
-			{ paramName: "new_path", namespace: "vault" },
+			{ paramName: "path", namespace: "vault", resolveAs: "note" , access: "write" as const },
+			{ paramName: "new_path", namespace: "vault" , access: "write" as const },
 		];
 	});
 	afterAll(() => {
@@ -357,6 +364,7 @@ describe("evaluateToolPolicy — path-based auto-approve (approval tier)", () =>
 		const ctx = makeToolCtx("write_note", {
 			auto_approve: true,
 			never_auto_approve_paths: ["private/"],
+			path_scopes: {},
 		});
 		const result = evaluateToolPolicy(
 			"write_note",
@@ -373,6 +381,7 @@ describe("evaluateToolPolicy — path-based auto-approve (approval tier)", () =>
 			auto_approve: false,
 			auto_approve_paths: ["ai/"],
 			never_auto_approve_paths: ["ai/private/"],
+			path_scopes: {},
 		});
 		const result = evaluateToolPolicy(
 			"write_note",
@@ -424,6 +433,7 @@ describe("evaluateToolPolicy — path-based auto-approve (approval tier)", () =>
 		const ctx = makeToolCtx("move_note", {
 			auto_approve: true,
 			never_auto_approve_paths: ["private/"],
+			path_scopes: {},
 		});
 		const result = evaluateToolPolicy(
 			"move_note",
@@ -487,7 +497,7 @@ describe("evaluateToolPolicy — path allowlists (FR-84) + sessionAllowedPaths (
 	// write_file is a filesystem-namespace tool with a `path` param; register it so
 	// enforcePathConstraints applies (tools absent from the table are exempt).
 	beforeAll(() => {
-		TOOL_PATH_PARAMS["write_file"] = [{ paramName: "path", namespace: "filesystem" }];
+		TOOL_PATH_PARAMS["write_file"] = [{ paramName: "path", namespace: "filesystem" , access: "write" as const }];
 	});
 	afterAll(() => {
 		delete TOOL_PATH_PARAMS["write_file"];
@@ -558,6 +568,7 @@ describe("evaluateToolPolicy — command patterns in a headless (intersected-con
 			blocked_command_patterns: ["rm *"],
 			auto_approve_paths: [],
 			never_auto_approve_paths: [],
+			path_scopes: {},
 		});
 		const result = evaluateToolPolicy("execute_command", { command: "rm -rf /" }, EXEC_TOOL, ctx);
 		expect(result.allowed).toBe(true);

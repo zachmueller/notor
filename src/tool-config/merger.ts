@@ -11,6 +11,8 @@
 import type {
 	EffectiveToolConfig,
 	ParsedToolConfig,
+	PathGroup,
+	PathListSet,
 	ResolvedToolConfigEntry,
 	ToolConfigEntry,
 } from "./types";
@@ -53,12 +55,17 @@ const PRECEDENCE: Record<string, number> = {
  *                            `server__tool` format).
  * @param globalEnabled    - Per-tool enabled defaults from Settings.
  *                            Absent keys default to `true`.
+ * @param globalPathScopes - Global path lists keyed by `namespace × access`
+ *                            group, stamped onto every entry. A floor for the
+ *                            access tier and a default for the approval tier;
+ *                            combined per path parameter at enforcement time.
  */
 export function mergeToolConfigs(
 	configs: ParsedToolConfig[],
 	globalAutoApprove: Record<string, boolean>,
 	allToolNames: string[],
 	globalEnabled: Record<string, boolean> = {},
+	globalPathScopes: Partial<Record<PathGroup, PathListSet>> = {},
 ): EffectiveToolConfig {
 	// Sort by precedence level ascending, then by documentPosition ascending.
 	// This ensures higher-priority sources sort last → last non-undefined wins.
@@ -113,6 +120,9 @@ export function mergeToolConfigs(
 			blocked_command_patterns: partial.blocked_command_patterns ?? [],
 			auto_approve_paths: partial.auto_approve_paths ?? [],
 			never_auto_approve_paths: partial.never_auto_approve_paths ?? [],
+			// Group scopes are a global floor/default, not a per-context value, so
+			// every tool gets the same object rather than a merged one.
+			path_scopes: globalPathScopes,
 		};
 	}
 
@@ -164,6 +174,7 @@ export function intersectToolConfig(
 				blocked_command_patterns: [],
 				auto_approve_paths: [],
 				never_auto_approve_paths: [],
+				path_scopes: {},
 			};
 			continue;
 		}
@@ -220,6 +231,9 @@ export function intersectToolConfig(
 			blocked_command_patterns: blockedCommandPatterns,
 			auto_approve_paths: autoApprovePaths,
 			never_auto_approve_paths: neverAutoApprovePaths,
+			// A global floor, not a per-context value — inherited as-is so a
+			// sub-agent cannot escape it.
+			path_scopes: parentEntry.path_scopes,
 		};
 	}
 

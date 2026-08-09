@@ -189,7 +189,7 @@ function parseToolFile(
 	}
 
 	// Extract path params from params with path_namespace
-	const pathParams = extractPathParams(name, params);
+	const pathParams = extractPathParams(name, params, mode);
 
 	// Parse settings from YAML fence (optional)
 	let settingsSchema: SettingsFieldSchema[] | null = null;

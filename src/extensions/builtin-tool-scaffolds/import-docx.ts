@@ -9,6 +9,7 @@ export const IMPORT_DOCX = scaffold(
     type: string
     description: "Path to the .docx file. Vault-relative or absolute."
     path_namespace: filesystem
+    path_access: read
   note_path:
     type: string
     description: "Vault-relative path for the output note (e.g. \\"folder/My Doc\\"). The .md extension is added automatically if omitted."
