@@ -140,11 +140,11 @@ export function extractToolConfigs(
 
 			// Validate tool name (skip for wildcards — they don't match a specific tool)
 			if (!isWildcard && knownSet && !knownSet.has(toolName)) {
-				// Path-scoping group names are Settings-only vocabulary, so someone who
-				// read the Settings UI will reasonably try `vault-write:` here. Say what
-				// to do instead rather than just rejecting the key.
+				// Path-scoping group names are internal vocabulary someone may have read
+				// in the docs and reasonably tried as `vault-write:` here. Say what to do
+				// instead rather than just rejecting the key.
 				const hint = PATH_GROUP_NAMES.has(toolName)
-					? ` "${toolName}" is a Settings-only group name for global path scoping; in a tool config, list the individual tools instead (e.g. write_note, replace_in_note).`
+					? ` "${toolName}" is an internal path-scoping group name, not a tool; in a tool config, list the individual tools instead (e.g. write_note, replace_in_note).`
 					: "";
 				errors.push({
 					sourceFile,

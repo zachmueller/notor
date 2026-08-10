@@ -109,7 +109,7 @@ filesystem__read_file:
 - **Precedence** (highest first): workflow → persona → rule → global defaults.
 - **MCP tools** use `server__tool` naming (e.g., `filesystem__read_file`).
 - **Path fields** use replace semantics between config levels: the highest-priority config that sets the field completely replaces lower-level values. They apply to every path parameter of the tool — both vault note paths and filesystem paths.
-- **Global path scoping is a floor for the access tier.** `allowed_paths` / `blocked_paths` set in **Settings → Notor → Tools → Path scoping** cannot be widened here: allow lists intersect and block lists union. The approval-tier lists are a plain default, so setting `auto_approve_paths` here replaces the global value.
+- **Global path scoping is a floor for the access tier.** A path set to **Blocked** or **Allow only** in **Settings → Notor → Tools → Path scoping** cannot be widened here: allow lists intersect and block lists union. The approval-tier states (**Auto-approve**, **Always ask**) are a plain default, so setting `auto_approve_paths` here replaces the global value.
 - [`<include_note>`](include-note.md) tags are resolved before tool config blocks are extracted.
 
 Use the **Copy tool config YAML** button in **Settings → Notor → Tools** to generate a starting snippet with your current settings.
@@ -425,29 +425,48 @@ Command patterns can also be set via `<notor_tool_config>` blocks using `allowed
 
 ## Path scoping
 
-Two ways to limit which paths the AI may touch, configured globally in **Settings → Notor → Tools → Path scoping** or per-context in a [`<notor_tool_config>`](#per-context-tool-configuration) block.
+Limits on which paths the AI may touch, configured globally in **Settings → Notor → Tools → Path scoping** or per-context in a [`<notor_tool_config>`](#per-context-tool-configuration) block.
 
-Settings groups the lists by **what a tool parameter does**, not by tool: `vault-read`, `vault-write`, `filesystem-read`, and `filesystem-write`. Grouping this way is what makes "read anywhere, write only under `ai/`" expressible even for tools that straddle a boundary — `import_docx` reads a filesystem file (governed by `filesystem-read`) and writes a vault note (governed by `vault-write`), so one tool obeys two different rule sets.
+In Settings you write **one rule per path prefix**, choosing independently what the AI may do when *reading* that path and when *writing* it:
+
+| Path | Read | Write |
+|---|---|---|
+| `ai/` | Default | Auto-approve |
+| `private/` | Default | Blocked |
+| `~/Downloads/` | Auto-approve | Blocked |
+
+Splitting read from write is what makes "read anywhere, write only under `ai/`" expressible even for tools that straddle the boundary — `import_docx` reads a filesystem file and writes a vault note, so a single tool obeys both of a rule's directions.
+
+**The namespace is inferred from the path's shape.** A relative prefix like `ai/` governs vault notes *and* file tools that resolve it against the vault root. A `~`-prefixed, absolute, or drive-qualified path like `~/Downloads/` can only name a file outside the vault, so it governs the filesystem alone. Each row shows which namespaces it was read as.
+
+### The six states
+
+| State | What it does | Hard boundary? |
+|---|---|---|
+| **Default** | No rule. Calls are allowed and prompt for approval as usual. | — |
+| **Auto-approve** | Skip the approval prompt here. | No |
+| **Always ask** | Always prompt here, even for a tool set to auto-approve. | No |
+| **Allow only** | Restrict this direction to the paths marked Allow only; everything else is blocked. | Yes |
+| **Allow + auto-approve** | Allow only, and skip the prompt here. | Yes |
+| **Blocked** | Never allow this direction here. Takes precedence over Allow only. | Yes |
 
 ### Access tier — a hard boundary
 
-- **Allowed paths** — restrict a group to these prefixes. Empty means no restriction. An out-of-bounds call is blocked and the AI is told why.
-- **Blocked paths** — never allow these prefixes. Takes precedence over Allowed paths.
+**Allow only** and **Blocked** decide whether a call is *permitted*. An out-of-bounds call is blocked and the AI is told why. A persona or workflow can narrow the global rules further but never widen them: allow lists intersect and block lists union. A sub-agent inherits the same floor.
 
-A persona or workflow can narrow the global lists further but never widen them: allow lists intersect and block lists union. A sub-agent inherits the same floor.
+Because a single Allow-only row narrows that whole direction, Settings prints the consequence beneath the table — e.g. `Vault reads restricted to: ai/, notes/ — everything else is blocked.`
 
 ### Approval tier — convenience only
 
-- **Auto-approve paths** — skip the approval prompt for calls under these prefixes, even when the tool is not set to auto-approve.
-- **Never auto-approve paths** — always ask, even for a tool you have set to auto-approve.
-
-**This is not a security boundary.** It only decides whether a human sees a prompt; the call runs either way. If you mean to forbid access, use Blocked paths. Unlike the access tier, a per-context list replaces the global default outright — widening is harmless here, since the worst case is a prompt you opted out of.
+**Auto-approve** and **Always ask** decide only whether a human sees a prompt; the call runs either way. **This is not a security boundary** — if you mean to forbid access, use Blocked. Unlike the access tier, a per-context list replaces the global default outright; widening is harmless here, since the worst case is a prompt you opted out of.
 
 When a path rule skips review, the collapsed approval card says why (e.g. `auto-approved: matched ai/`).
 
 ### The motivating example
 
-Auto-approve writes under `ai/` while still being able to propose edits elsewhere for manual review:
+Auto-approve writes under `ai/` while still being able to propose edits elsewhere for manual review. In Settings, that is two rows: `ai/` with Write = **Auto-approve**, and `private/` with Write = **Always ask**.
+
+The per-context equivalent, in a persona or workflow note:
 
 ```xml
 <notor_tool_config>
@@ -461,7 +480,7 @@ replace_in_note:
 </notor_tool_config>
 ```
 
-Writes under `ai/` proceed silently; writes anywhere else render a normal approval diff; nothing is hard-blocked. Using `allowed_paths: ["ai/"]` instead would make every write outside `ai/` an error.
+Writes under `ai/` proceed silently; writes anywhere else render a normal approval diff; nothing is hard-blocked. Choosing **Allow only** for `ai/` instead would make every write outside `ai/` an error.
 
 ### Precedence, end to end
 
@@ -474,7 +493,9 @@ Writes under `ai/` proceed silently; writes anywhere else render a normal approv
 
 - **Restrictive lists fire on any matching parameter; permissive lists require all of them to match.** This mirrors the hard gate's bias toward caution.
 - **Bare note names are resolved first**, so `Foo` matches the prefix `ai/` when the note lives at `ai/Foo.md`. A note that does not exist yet is checked against the raw path, so creating new notes under an allowed prefix works.
-- **Group names are Settings-only.** A `<notor_tool_config>` block keys on tool names, so narrow writes by listing the tools (`write_note`, `replace_in_note`, `move_note`, …).
+- **A relative rule covers both namespaces.** A rule on `private/` also governs `read_file private/x.md`, since file tools resolve relative paths against the vault root. Use an absolute path if you mean the filesystem alone.
+- **Prefixes match on segment boundaries**, so `ai` and `ai/` behave identically, and neither matches `airplane.md`.
+- **Group names are internal.** `vault-write` and friends name the four `namespace × access` buckets rules are projected into; a `<notor_tool_config>` block keys on tool names, so narrow writes by listing the tools (`write_note`, `replace_in_note`, `move_note`, …).
 - **Restricted reads also filter results.** Gating a call's own arguments would still let a listing tool report paths from anywhere, so `search_vault`, `list_vault`, `get_backlinks`, `get_outlinks`, and `read_note`'s backlink snippets filter their output against the `vault-read` lists. Withheld entries are **counted, not hidden** — the result says e.g. `3 notes hidden by path restrictions`, so the AI knows something exists that it cannot see rather than telling you it found nothing.
 - **Distinct from the *expansion* settings.** "Additional file-system paths" (Shared settings) and "Additional working directories" (execute_command) *grant* access outside the vault. The lists here *restrict*.
 
@@ -496,7 +517,7 @@ All three tools validate the resolved path against the vault root plus the **Add
 
 Vault-relative paths (e.g. `reports/Q1.docx`) are resolved from the vault root. Absolute paths are used as-is.
 
-To *restrict* these tools rather than expand them, use [path scoping](#path-scoping) — the `filesystem-read` and `filesystem-write` groups.
+To *restrict* these tools rather than expand them, use [path scoping](#path-scoping) with an absolute or `~` path, which applies to the filesystem only.
 
 ### `read_file`
 

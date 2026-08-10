@@ -440,15 +440,15 @@ placeholder
 		});
 
 		it("hints at per-tool expansion when a path-scoping group name is used as a key", () => {
-			// Group names exist only in Settings; someone who read that UI will
-			// reasonably try one here, so the error should say what to do instead.
+			// Group names are internal vocabulary someone may have read in the docs
+			// and tried here, so the error should say what to do instead.
 			const mockParser = () => ({ "vault-write": { auto_approve_paths: ["ai/"] } });
 			const text = `<notor_tool_config>
 placeholder
 </notor_tool_config>`;
 			const result = extractToolConfigs(text, "persona", "test.md", knownTools, mockParser);
 			expect(result.errors).toHaveLength(1);
-			expect(result.errors[0]!.detail).toContain("Settings-only group name");
+			expect(result.errors[0]!.detail).toContain("internal path-scoping group name");
 			expect(result.errors[0]!.detail).toContain("list the individual tools");
 		});
 
