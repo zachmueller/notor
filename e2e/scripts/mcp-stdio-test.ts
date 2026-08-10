@@ -28,7 +28,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { buildDefaultSettings, waitForSelector } from "../lib/test-helpers";
+import {
+	buildDefaultSettings,
+	closeSettings,
+	openPluginSettings,
+	waitForSelector,
+} from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Local constants
@@ -64,34 +69,6 @@ async function pollUntil(
 		await new Promise((r) => setTimeout(r, intervalMs));
 	}
 	return false;
-}
-
-/**
- * Open Obsidian Settings and navigate to the Notor tab.
- * Returns true if the Notor tab was successfully selected.
- */
-async function openNotorSettings(page: Page): Promise<boolean> {
-	await page.keyboard.press("Meta+,");
-	await page.waitForTimeout(1_500);
-
-	return page.evaluate(() => {
-		const items = Array.from(document.querySelectorAll(".vertical-tab-nav-item"));
-		for (const item of items) {
-			if (item.textContent?.trim() === "Notor") {
-				(item as HTMLElement).click();
-				return true;
-			}
-		}
-		return false;
-	});
-}
-
-/**
- * Close the settings modal.
- */
-async function closeSettings(page: Page): Promise<void> {
-	await page.keyboard.press("Escape");
-	await page.waitForTimeout(600);
 }
 
 /**
@@ -243,7 +220,7 @@ async function testPluginLoadsWithNoMcpServers(ctx: TestContext): Promise<void> 
 async function testMcpSettingsSectionVisible(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
 	console.log("\nTest 2: MCP servers section visible in Settings → Notor");
-	const opened = await openNotorSettings(page);
+	const opened = await openPluginSettings(page);
 	if (!opened) {
 		ctx.fail("Open Notor settings", "Could not find Notor tab in settings sidebar");
 		await closeSettings(page);

@@ -32,15 +32,28 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { buildDefaultSettings, waitForSelector, VAULT_PATH } from "../lib/test-helpers";
+import {
+	buildDefaultSettings,
+	closeSettings,
+	openPluginSettings,
+	waitForSelector,
+	VAULT_PATH,
+} from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Local constants
 // ---------------------------------------------------------------------------
 
-/** Expected settings groups in order. */
+/**
+ * Expected settings groups in order.
+ *
+ * "Provider setup" was later split into "Providers" + "Models" — see the
+ * persisted-state rename in `src/settings/settings-tab.ts`.
+ */
 const EXPECTED_GROUPS = [
-	"Provider setup",
+	"General",
+	"Providers",
+	"Models",
 	"Conversation",
 	"Personas",
 	"Sub-agents",
@@ -53,7 +66,7 @@ const EXPECTED_GROUPS = [
 ];
 
 /** Groups that should NOT exist after reorganization. */
-const REMOVED_GROUPS = ["Tool configuration", "Extensions"];
+const REMOVED_GROUPS = ["Tool configuration", "Extensions", "Provider setup"];
 
 // ---------------------------------------------------------------------------
 // Fixture content — user tool + automation + shared settings
@@ -176,16 +189,11 @@ function setupTestVault(vaultPath: string): void {
  * Returns true if the settings panel was opened successfully.
  */
 async function openNotorSettings(page: Page): Promise<boolean> {
-	return page.evaluate(() => {
-		const app = (window as any).app;
-		if (!app?.setting) return false;
-		app.setting.open();
-		// Navigate to the Notor settings tab
-		const plugin = app.plugins?.plugins?.["notor"];
-		if (!plugin?._settingTab) return false;
-		app.setting.openTabById(plugin._settingTab.id ?? "notor");
-		return true;
+	const tabId = await page.evaluate(() => {
+		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
+		return (plugin?._settingTab?.id as string | undefined) ?? "notor";
 	});
+	return openPluginSettings(page, tabId);
 }
 
 /**
@@ -268,7 +276,7 @@ async function countToolRowIcons(page: Page): Promise<{
 			totalToolRows++;
 
 			// Count extra buttons with specific icons
-			const extraBtns = item.querySelectorAll(".setting-editor-extra-setting-button");
+			const extraBtns = item.querySelectorAll(".extra-setting-button");
 			for (const btn of Array.from(extraBtns)) {
 				const svg = btn.querySelector("svg");
 				if (!svg) continue;
@@ -300,7 +308,7 @@ async function clickGearIcon(page: Page, toolDisplayName: string): Promise<boole
 		for (const item of Array.from(items)) {
 			const nameEl = item.querySelector(".setting-item-name");
 			if (nameEl?.textContent?.trim() === name) {
-				const gearBtn = Array.from(item.querySelectorAll(".setting-editor-extra-setting-button"))
+				const gearBtn = Array.from(item.querySelectorAll(".extra-setting-button"))
 					.find((btn) => btn.getAttribute("aria-label")?.includes("Configure tool settings"));
 				if (gearBtn) {
 					(gearBtn as HTMLElement).click();
@@ -324,7 +332,10 @@ async function getModalInfo(page: Page): Promise<{
 	hasDoneButton: boolean;
 } | null> {
 	return page.evaluate(() => {
-		const modal = document.querySelector(".modal-container .modal");
+		// Exclude `.mod-settings`: the settings modal now renders inline in the same
+		// `.modal-container`, so a bare `.modal` match would return it, not the
+		// tool-settings modal the gear icon opened.
+		const modal = document.querySelector(".modal-container .modal:not(.mod-settings)");
 		if (!modal) return { isOpen: false, title: "", headings: [], settingNames: [], hasSharedSettingsNote: false, hasDoneButton: false };
 
 		const content = modal.querySelector(".modal-content");
@@ -349,7 +360,10 @@ async function getModalInfo(page: Page): Promise<{
  */
 async function closeModalViaDone(page: Page): Promise<boolean> {
 	return page.evaluate(() => {
-		const modal = document.querySelector(".modal-container .modal");
+		// Exclude `.mod-settings`: the settings modal now renders inline in the same
+		// `.modal-container`, so a bare `.modal` match would return it, not the
+		// tool-settings modal the gear icon opened.
+		const modal = document.querySelector(".modal-container .modal:not(.mod-settings)");
 		if (!modal) return false;
 		const buttons = modal.querySelectorAll("button");
 		for (const btn of Array.from(buttons)) {
@@ -360,17 +374,6 @@ async function closeModalViaDone(page: Page): Promise<boolean> {
 		}
 		return false;
 	});
-}
-
-/**
- * Close the Obsidian settings panel.
- */
-async function closeSettings(page: Page): Promise<void> {
-	await page.evaluate(() => {
-		const app = (window as any).app;
-		if (app?.setting) app.setting.close();
-	});
-	await page.waitForTimeout(500);
 }
 
 // ---------------------------------------------------------------------------
@@ -703,7 +706,7 @@ async function testUserToolIcons(ctx: TestContext): Promise<void> {
 			const name = nameEl?.textContent?.trim() ?? "";
 
 			if (name === "e2e_settings_test_tool" || name === "e2e_plain_tool") {
-				const extraBtns = item.querySelectorAll(".setting-editor-extra-setting-button");
+				const extraBtns = item.querySelectorAll(".extra-setting-button");
 				let hasOpenFile = false;
 				let hasGear = false;
 
@@ -790,7 +793,7 @@ async function testMcpToolsNoIcons(ctx: TestContext): Promise<void> {
 				if (!hasDropdown) continue;
 				total++;
 
-				const extraBtns = item.querySelectorAll(".setting-editor-extra-setting-button");
+				const extraBtns = item.querySelectorAll(".extra-setting-button");
 				for (const btn of Array.from(extraBtns)) {
 					const tooltip = btn.getAttribute("aria-label") ?? "";
 					if (tooltip.includes("Open tool definition")) withOpenFile++;

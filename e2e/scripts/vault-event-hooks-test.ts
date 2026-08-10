@@ -30,7 +30,10 @@ import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	buildDefaultSettings,
+	expandSettingsGroup,
+	openPluginSettings,
 	waitForSelector,
+	SETTINGS_CONTENT_SELECTOR,
 	VAULT_PATH,
 	PLUGIN_DATA_PATH,
 } from "../lib/test-helpers";
@@ -137,43 +140,15 @@ function buildVaultEventSettings(overrides: Record<string, unknown> = {}): Recor
 
 /** Open Notor settings tab reliably and return whether the panel opened. */
 async function openNotorSettings(page: Page): Promise<boolean> {
-	await page.evaluate(() => {
-		const app = (window as unknown as { app?: { setting?: { open?: () => void; openTabById?: (id: string) => void } } }).app;
-		if (app?.setting?.open) {
-			app.setting.open();
-		}
-	});
-	await page.waitForTimeout(800);
-	await page.evaluate(() => {
-		const app = (window as unknown as { app?: { setting?: { openTabById?: (id: string) => void } } }).app;
-		app?.setting?.openTabById?.("notor");
-	});
-	await page.waitForTimeout(2_500);
-
-	const isOpen = await page.evaluate(() => {
-		const modal = document.querySelector(".modal-container, .vertical-tab-content-container, .community-plugin-tab");
-		const body = (document.body.textContent ?? "").toLowerCase();
-		return modal !== null || body.includes("vault event hooks") || body.includes("notor settings");
-	});
-
-	if (!isOpen) {
-		await page.evaluate(() => {
-			const app = (window as unknown as { app?: { commands?: { executeCommandById?: (id: string) => void } } }).app;
-			app?.commands?.executeCommandById?.("app:open-settings");
-		});
-		await page.waitForTimeout(1_500);
-		await page.evaluate(() => {
-			const tabs = Array.from(document.querySelectorAll(".vertical-tab-nav-item, .community-plugin-tab"));
-			const notorTab = tabs.find((el) => (el.textContent ?? "").includes("Notor"));
-			if (notorTab) (notorTab as HTMLElement).click();
-		});
-		await page.waitForTimeout(1_000);
-	}
-
-	return await page.evaluate(() => {
-		const body = (document.body.textContent ?? "").toLowerCase();
-		return body.includes("vault event hooks") || body.includes("on note open") || body.includes("on schedule");
-	});
+	if (!(await openPluginSettings(page))) return false;
+	// The vault-event-hook rows live inside the collapsed Automation group.
+	await expandSettingsGroup(page, "Automation");
+	return page.evaluate((scopeSelector: string) => {
+		const scope = document.querySelector(scopeSelector);
+		if (!scope) return false;
+		const text = (scope.textContent ?? "").toLowerCase();
+		return text.includes("vault event hooks") || text.includes("on note open");
+	}, SETTINGS_CONTENT_SELECTOR);
 }
 
 // ---------------------------------------------------------------------------

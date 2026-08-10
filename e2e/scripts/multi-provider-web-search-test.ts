@@ -10,10 +10,17 @@
  * Scenarios:
  *   1. Plugin loads without web-search-related console errors
  *   2. WebSearchQueue and SearchProviderRegistry are initialized
- *   3. Extension settings UI renders all new provider fields
+ *   3. The built-in web_search tool settings modal renders its scaffold fields,
+ *      and does NOT expose the multi-provider fields
  *   4. Basic DDG-only search returns results correctly
  *   5. All providers disabled → descriptive error returned
  *   6. Domain denylist filtering works with new provider infrastructure
+ *
+ * NOT COVERED: the multi-provider settings (round-robin, provider priority,
+ * Tavily/Brave/SerpApi keys) moved out of the built-in scaffold into a separate
+ * user-authored `multi_engine_web_search` extension — see
+ * `migrateWebSearchMultiProvider()` in src/settings/migrations.ts. Exercising
+ * those fields needs a test that installs that extension as a vault fixture.
  *
  * @see specs/ZZ-misc/multi-provider-web-search-tasks.md — Phase 7.3
  */
@@ -30,6 +37,10 @@ import {
 	getLastToolCallNames,
 	getLastAssistantMessage,
 	ensureCleanState,
+	openPluginSettings,
+	closeSettings,
+	expandSettingsGroup,
+	SETTINGS_CONTENT_SELECTOR,
 	BUILD_DIR,
 	PLUGIN_DATA_PATH,
 	VAULT_PATH,
@@ -40,46 +51,6 @@ const HISTORY_DIR = path.join(BUILD_DIR, "history");
 // ---------------------------------------------------------------------------
 // Local helpers
 // ---------------------------------------------------------------------------
-
-/** Open Obsidian settings and navigate to the Notor plugin tab. */
-async function openNotorSettings(page: Page): Promise<boolean> {
-	await page.keyboard.press("Meta+,");
-	await page.waitForTimeout(1_500);
-
-	return page.evaluate(() => {
-		const items = Array.from(document.querySelectorAll(".vertical-tab-nav-item"));
-		for (const item of items) {
-			if (item.textContent?.trim() === "Notor") {
-				(item as HTMLElement).click();
-				return true;
-			}
-		}
-		return false;
-	});
-}
-
-/** Close settings dialog. */
-async function closeSettings(page: Page): Promise<void> {
-	await page.keyboard.press("Escape");
-	await page.waitForTimeout(600);
-}
-
-/** Expand a settings group by its summary title. */
-async function expandSettingsGroup(page: Page, groupTitle: string): Promise<boolean> {
-	return page.evaluate((title) => {
-		const summaries = document.querySelectorAll(".notor-settings-group-summary");
-		for (const summary of summaries) {
-			if (summary.textContent?.trim() === title) {
-				const details = summary.closest("details");
-				if (details && !details.open) {
-					details.setAttribute("open", "");
-				}
-				return true;
-			}
-		}
-		return false;
-	}, groupTitle);
-}
 
 /**
  * Returns the tool_result record for the most recent web_search call
@@ -225,67 +196,66 @@ async function testSettingsUIRender(ctx: TestContext): Promise<void> {
 	console.log("\n── Test 3: Extension settings UI renders provider fields ──");
 	const { page } = ctx;
 
-	const opened = await openNotorSettings(page);
+	const opened = await openPluginSettings(page);
 	if (!opened) {
-		ctx.fail("Settings UI", "Could not open Notor settings");
+		ctx.fail("Settings UI", "app.setting API unavailable or 'notor' tab not registered");
 		return;
 	}
-	await page.waitForTimeout(1_000);
 
-	// Expand the Extensions group
-	const expanded = await expandSettingsGroup(page, "Extensions");
-	if (!expanded) {
-		// Try alternate group name
-		await expandSettingsGroup(page, "Tool extensions");
-	}
-	await page.waitForTimeout(1_000);
+	// Multi-provider web-search settings live on the tool's own config modal,
+	// reached via the gear icon on the tool's row in the Tools group.
+	await expandSettingsGroup(page, "Tools");
 
-	// Look for the web_search extension section and expand it
-	const webSearchExpanded = await page.evaluate(() => {
-		// Find the web_search details section within the settings
-		const allDetails = document.querySelectorAll("details");
-		for (const details of allDetails) {
-			const summary = details.querySelector("summary");
-			if (summary && summary.textContent?.includes("web_search")) {
-				if (!details.open) details.setAttribute("open", "");
-				return true;
-			}
-		}
-		return false;
-	});
+	const modalOpened = await page.evaluate((scopeSelector: string) => {
+		const scope = document.querySelector(scopeSelector) ?? document.body;
+		const rows = Array.from(scope.querySelectorAll(".setting-item"));
+		const row = rows.find((r) => {
+			const name = r.querySelector(".setting-item-name")?.textContent?.trim() ?? "";
+			return name === "Web search" || name === "Multi engine web search";
+		});
+		if (!row) return { clicked: false, reason: "no web-search tool row found" };
+		const gear = Array.from(row.querySelectorAll(".extra-setting-button")).find(
+			(b) => b.getAttribute("aria-label") === "Configure tool settings",
+		);
+		if (!gear) return { clicked: false, reason: "row has no 'Configure tool settings' gear" };
+		(gear as HTMLElement).click();
+		return { clicked: true, reason: "" };
+	}, SETTINGS_CONTENT_SELECTOR);
+	await page.waitForTimeout(1_200);
 
-	if (!webSearchExpanded) {
+	if (!modalOpened.clicked) {
 		const shot = await ctx.screenshot("03-settings-no-web-search");
-		ctx.fail("Settings UI — web_search section", "Could not find web_search extension section", shot);
+		ctx.fail(
+			"Settings UI — web_search section",
+			`Could not open the web-search tool settings modal: ${modalOpened.reason}`,
+			shot,
+		);
 		await closeSettings(page);
 		return;
 	}
-	await page.waitForTimeout(500);
 
-	// Check for expected setting field labels
+	// Fields the built-in `web_search` scaffold declares today.
+	//
+	// The multi-provider fields this test originally asserted on (Round-robin,
+	// Provider priority order, Tavily/Brave/SerpApi enabled+key+delay) were moved
+	// out of the built-in scaffold into a separate user-authored
+	// `multi_engine_web_search` extension — see `migrateWebSearchMultiProvider()`
+	// in src/settings/migrations.ts. They are therefore NOT covered here; that
+	// extension needs its own test fixture to exercise them.
 	const expectedFields = [
-		"Round-robin across providers",
-		"Provider priority order",
-		"Max providers to try",
-		"DuckDuckGo — Enabled",
-		"DuckDuckGo — Delay (ms)",
-		"Tavily — Enabled",
-		"Tavily — API Key",
-		"Tavily — Delay (ms)",
-		"Brave Search — Enabled",
-		"Brave Search — API Key",
-		"Brave Search — Delay (ms)",
-		"SerpApi — Enabled",
-		"SerpApi — API Key",
-		"SerpApi — Delay (ms)",
+		"Request Timeout",
+		"Default Number of Results",
+		"Throttle Delay (ms)",
 	];
 
-	const foundFields = await page.evaluate((fields) => {
+	// Scope to the tool-settings modal that the gear opened — the settings tab
+	// underneath contributes ~190 `.setting-item-name` nodes of its own.
+	const foundFields = await page.evaluate((fields: string[]) => {
+		const modal = document.querySelector(".modal:not(.mod-settings)") ?? document.body;
+		const allText = Array.from(modal.querySelectorAll(".setting-item-name")).map(
+			(el) => el.textContent?.trim() ?? "",
+		);
 		const results: Record<string, boolean> = {};
-		// Get all setting item names in the settings modal
-		const settingNames = Array.from(document.querySelectorAll(".setting-item-name"));
-		const allText = settingNames.map((el) => el.textContent?.trim() ?? "");
-
 		for (const field of fields) {
 			results[field] = allText.some((t) => t.includes(field));
 		}
@@ -300,40 +270,46 @@ async function testSettingsUIRender(ctx: TestContext): Promise<void> {
 
 	if (missing.length === 0) {
 		ctx.pass(
-			"Settings UI — all provider fields",
-			`All ${expectedFields.length} provider settings fields rendered correctly`,
+			"Settings UI — web_search scaffold fields",
+			`All ${expectedFields.length} built-in web_search settings fields rendered: ${expectedFields.join(", ")}`,
 			shot,
 		);
 	} else {
 		ctx.fail(
-			"Settings UI — all provider fields",
+			"Settings UI — web_search scaffold fields",
 			`Missing ${missing.length} field(s): ${missing.join(", ")}`,
 			shot,
 		);
 	}
 
-	// Verify provider priority is rendered as a list with reorder controls
-	const hasPriorityList = await page.evaluate(() => {
-		const settingNames = Array.from(document.querySelectorAll(".setting-item-name"));
-		// Look for individual provider entries in the string[] list
-		// Each entry in the list renders as its own setting item
-		const providerEntries = settingNames.filter((el) => {
-			const text = el.textContent?.trim() ?? "";
-			return text === "duckduckgo" || text === "tavily" || text === "brave" || text === "serpapi";
-		});
-		return providerEntries.length;
+	// The multi-provider fields must NOT be in the built-in scaffold — they belong
+	// to the `multi_engine_web_search` user extension. Assert the split held so a
+	// regression that re-adds them here is caught rather than silently passing.
+	const leakedFields = await page.evaluate(() => {
+		const modal = document.querySelector(".modal:not(.mod-settings)") ?? document.body;
+		const names = Array.from(modal.querySelectorAll(".setting-item-name")).map(
+			(el) => el.textContent?.trim() ?? "",
+		);
+		return names.filter(
+			(n) =>
+				n.startsWith("Tavily") ||
+				n.startsWith("Brave") ||
+				n.startsWith("SerpApi") ||
+				n === "Round-robin across providers" ||
+				n === "Provider priority order",
+		);
 	});
 
-	if (hasPriorityList >= 4) {
+	if (leakedFields.length === 0) {
 		ctx.pass(
-			"Settings UI — priority list entries",
-			`Provider priority list shows ${hasPriorityList} entries with individual controls`,
+			"Settings UI — multi-provider fields live in the user extension",
+			"Built-in web_search scaffold exposes no Tavily/Brave/SerpApi/priority fields, as expected after the multi_engine_web_search split",
 			shot,
 		);
 	} else {
 		ctx.fail(
-			"Settings UI — priority list entries",
-			`Expected 4 provider priority entries, found ${hasPriorityList}`,
+			"Settings UI — multi-provider fields live in the user extension",
+			`Built-in scaffold unexpectedly exposes: ${leakedFields.join(", ")}`,
 			shot,
 		);
 	}

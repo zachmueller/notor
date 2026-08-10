@@ -26,6 +26,8 @@ import {
 	LOGS_DIR,
 	CDP_PORT,
 	findVaultPage,
+	disableSettingsPopout,
+	writeCleanWorkspace,
 } from "./test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -144,6 +146,19 @@ export interface TestConfig {
 	/** Vault-relative paths to delete during teardown. */
 	cleanupFiles?: string[];
 
+	/**
+	 * Skip the automatic `writeCleanWorkspace()` call.
+	 *
+	 * By default `runTest()` resets `workspace.json` to a single chat panel before
+	 * launch. Obsidian defers view rendering, so a stale layout that leaves the
+	 * chat leaf inactive means `.notor-chat-container` never mounts and
+	 * `findVaultPage()` times out (the run then reports a bare `0/0`).
+	 *
+	 * Set this only for tests that deliberately assert on a multi-panel or
+	 * restored layout and write their own `workspace.json` in `setupVault`.
+	 */
+	skipCleanWorkspace?: boolean;
+
 	/** Options for the vault reset step. */
 	vaultResetOptions?: VaultResetOptions;
 
@@ -226,11 +241,28 @@ export async function runTest(
 	fs.mkdirSync(screenshotsDir, { recursive: true });
 	fs.mkdirSync(LOGS_DIR, { recursive: true });
 
-	// 5. Custom vault setup
+	// 5. Reset the workspace layout so the chat view actually mounts.
+	//
+	// Runs BEFORE setupVault so a test that writes its own workspace.json still wins.
+	if (!config.skipCleanWorkspace) {
+		writeCleanWorkspace(VAULT_PATH);
+		console.log("[setup] Reset workspace.json to a single chat panel");
+	}
+
+	// 5a. Custom vault setup
 	if (config.setupVault) {
 		config.setupVault(VAULT_PATH);
 		console.log("[setup] Custom vault fixtures created");
 	}
+
+	// 5b. Keep the settings modal inside the main vault window.
+	//
+	// Runs AFTER setupVault so a fixture that rewrites app.json wholesale cannot
+	// clobber the flag. Without it, Obsidian 1.12+ mounts settings into a detached
+	// popout window with no `window.app`, breaking every `document`-scoped settings
+	// query, `page.click()` on a settings selector, and `ctx.screenshot()`.
+	disableSettingsPopout(VAULT_PATH);
+	console.log("[setup] Settings render inline (popout window disabled)");
 
 	let obsidian: ObsidianProcess | undefined;
 	let browser: Browser | undefined;

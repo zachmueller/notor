@@ -22,40 +22,17 @@
 
 import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { buildDefaultSettings, waitForSelector, writeCleanWorkspace } from "../lib/test-helpers";
+import {
+	buildDefaultSettings,
+	expandSettingsGroup,
+	openPluginSettings,
+	waitForSelector,
+	writeCleanWorkspace,
+} from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
-// Settings navigation helpers (mirror tool-config-settings-ui-test.ts)
+// Local helpers (test-specific only)
 // ---------------------------------------------------------------------------
-
-async function openNotorSettings(page: Page): Promise<boolean> {
-	await page.keyboard.press("Meta+,");
-	await page.waitForTimeout(1_500);
-	return page.evaluate(() => {
-		const items = Array.from(document.querySelectorAll(".vertical-tab-nav-item"));
-		for (const item of items) {
-			if (item.textContent?.trim() === "Notor") {
-				(item as HTMLElement).click();
-				return true;
-			}
-		}
-		return false;
-	});
-}
-
-async function expandSettingsGroup(page: Page, groupTitle: string): Promise<boolean> {
-	return page.evaluate((title) => {
-		const summaries = document.querySelectorAll(".notor-settings-group-summary");
-		for (const summary of summaries) {
-			if (summary.textContent?.trim() === title) {
-				const details = summary.closest("details");
-				if (details && !details.open) details.setAttribute("open", "");
-				return true;
-			}
-		}
-		return false;
-	}, groupTitle);
-}
 
 /** Set the search input value and dispatch the `input` event the handler listens for. */
 async function typeSearch(page: Page, query: string): Promise<void> {
@@ -85,19 +62,17 @@ async function rowState(page: Page, displayName: string): Promise<{ found: boole
 async function testSearch(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
 
-	const opened = await openNotorSettings(page);
+	const opened = await openPluginSettings(page);
 	if (!opened) {
-		ctx.fail("Open Notor settings", "Could not find/click the 'Notor' settings tab");
+		ctx.fail("Open Notor settings", "app.setting API unavailable or 'notor' tab not registered");
 		return;
 	}
-	await page.waitForTimeout(800);
 
 	const expanded = await expandSettingsGroup(page, "Tools");
 	if (!expanded) {
 		ctx.fail("Expand Tools group", "Could not find the 'Tools' settings group");
 		return;
 	}
-	await page.waitForTimeout(500);
 
 	const input = await waitForSelector(page, ".notor-tools-section .notor-tool-search-input", 6_000);
 	if (!input) {

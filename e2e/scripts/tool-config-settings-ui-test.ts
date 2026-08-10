@@ -13,50 +13,14 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { waitForSelector, VAULT_PATH } from "../lib/test-helpers";
-
-// ---------------------------------------------------------------------------
-// Settings helpers (specific to this test)
-// ---------------------------------------------------------------------------
-
-async function openNotorSettings(page: Page): Promise<boolean> {
-	await page.keyboard.press("Meta+,");
-	await page.waitForTimeout(1_500);
-
-	return page.evaluate(() => {
-		const items = Array.from(document.querySelectorAll(".vertical-tab-nav-item"));
-		for (const item of items) {
-			if (item.textContent?.trim() === "Notor") {
-				(item as HTMLElement).click();
-				return true;
-			}
-		}
-		return false;
-	});
-}
-
-async function closeSettings(page: Page): Promise<void> {
-	await page.keyboard.press("Escape");
-	await page.waitForTimeout(600);
-}
-
-async function expandSettingsGroup(page: Page, groupTitle: string): Promise<boolean> {
-	return page.evaluate((title) => {
-		const summaries = document.querySelectorAll(".notor-settings-group-summary");
-		for (const summary of summaries) {
-			if (summary.textContent?.trim() === title) {
-				const details = summary.closest("details");
-				if (details && !details.open) {
-					details.setAttribute("open", "");
-				}
-				return true;
-			}
-		}
-		return false;
-	}, groupTitle);
-}
+import {
+	closeSettings,
+	expandSettingsGroup,
+	openPluginSettings,
+	waitForSelector,
+	VAULT_PATH,
+} from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Fixture setup
@@ -163,7 +127,7 @@ async function tests(ctx: TestContext) {
 	// ── Test 2: Open plugin settings ────────────────────────────────────
 	console.log("\n── Test 2: Open plugin settings ──");
 	{
-		const opened = await openNotorSettings(page);
+		const opened = await openPluginSettings(page);
 		await page.waitForTimeout(1000);
 		const shot = await ctx.screenshot("02-settings-opened");
 		if (opened) {
@@ -353,14 +317,16 @@ async function tests(ctx: TestContext) {
 	// ── Test 9: Open system prompt button ───────────────────────────────
 	console.log("\n── Test 9: Open system prompt button ──");
 	{
+		// The button is icon-only — `setTooltip()` surfaces the label as
+		// `aria-label`, so match on that rather than on button text.
 		const hasButton = await page.evaluate(() => {
 			const list = document.querySelector(".notor-personas-list");
 			if (!list) return false;
-			const buttons = list.querySelectorAll("button");
-			for (const btn of buttons) {
-				if (btn.textContent?.trim() === "Open system prompt") return true;
-			}
-			return false;
+			return Array.from(list.querySelectorAll("button")).some(
+				(btn) =>
+					btn.getAttribute("aria-label")?.trim() === "Open system prompt" ||
+					btn.textContent?.trim() === "Open system prompt",
+			);
 		});
 		const shot = await ctx.screenshot("09-open-prompt-button");
 
@@ -374,18 +340,21 @@ async function tests(ctx: TestContext) {
 	// ── Test 10: Click open system prompt ───────────────────────────────
 	console.log("\n── Test 10: Click open system prompt ──");
 	{
+		// Target the open button by its aria-label — the row carries several
+		// buttons, so `querySelector("button")` would click an arbitrary one.
 		const clicked = await page.evaluate(() => {
 			const list = document.querySelector(".notor-personas-list");
 			if (!list) return false;
-			const items = list.querySelectorAll(".setting-item");
-			for (const item of items) {
-				const name = item.querySelector(".setting-item-name");
-				if (name?.textContent?.trim() === "restrictive") {
-					const btn = item.querySelector("button");
-					if (btn) { btn.click(); return true; }
-				}
-			}
-			return false;
+			const row = Array.from(list.querySelectorAll(".setting-item")).find(
+				(item) => item.querySelector(".setting-item-name")?.textContent?.trim() === "restrictive",
+			);
+			if (!row) return false;
+			const btn = Array.from(row.querySelectorAll("button")).find(
+				(b) => b.getAttribute("aria-label")?.trim() === "Open system prompt",
+			);
+			if (!btn) return false;
+			btn.click();
+			return true;
 		});
 		await page.waitForTimeout(2000);
 
@@ -408,7 +377,7 @@ async function tests(ctx: TestContext) {
 
 		await closeSettings(page);
 		await page.waitForTimeout(500);
-		await openNotorSettings(page);
+		await openPluginSettings(page);
 		await page.waitForTimeout(1000);
 		await expandSettingsGroup(page, "Personas");
 		await page.waitForTimeout(1500);

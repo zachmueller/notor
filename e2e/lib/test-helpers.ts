@@ -80,6 +80,150 @@ export async function waitForSelector(
 }
 
 // ---------------------------------------------------------------------------
+// Obsidian settings helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * CSS scope for the active settings tab's content.
+ *
+ * Prefer this over a bare `.setting-item` query: Obsidian's left-sidebar search
+ * pane renders three `.setting-item` rows of its own ("Collapse results",
+ * "Show more context", "Explain search terms") that would otherwise pollute
+ * counts and name lookups.
+ *
+ * Usable both as a Playwright selector (`page.click(...)`) and inside
+ * `page.evaluate` (`document.querySelector(SETTINGS_CONTENT_SELECTOR)`).
+ */
+export const SETTINGS_CONTENT_SELECTOR = ".modal.mod-settings .vertical-tab-content";
+
+/**
+ * Force Obsidian to render the settings modal inside the main vault window.
+ *
+ * Obsidian 1.12 moved settings into a separate OS window by default. When the
+ * `settingsPopoutWindow` vault config flag is on, `app.setting.open()` mounts
+ * the modal into a detached `about:blank` popout that has NO `window.app` of
+ * its own — the vault page owns the app object while the popout owns the DOM.
+ * Consequences for e2e tests:
+ *   - `document.querySelector(".setting-item")` on the vault page finds nothing
+ *   - `ctx.screenshot()` only ever captures the chat view
+ *   - `page.click()` against settings selectors times out
+ *
+ * Writing the flag to `false` before launch restores the pre-1.12 layout: the
+ * modal renders into the vault page's own document, so plain `document` queries,
+ * Playwright clicks, and `ctx.screenshot()` all work again.
+ *
+ * `runTest()` calls this for every test, so test scripts normally need not.
+ * Obsidian preserves the flag when it rewrites `app.json`.
+ */
+export function disableSettingsPopout(vaultPath: string): void {
+	const appJsonPath = path.join(vaultPath, ".obsidian", "app.json");
+	let config: Record<string, unknown> = {};
+	if (fs.existsSync(appJsonPath)) {
+		try {
+			config = JSON.parse(fs.readFileSync(appJsonPath, "utf8")) as Record<string, unknown>;
+		} catch {
+			config = {};
+		}
+	}
+	if (config.settingsPopoutWindow === false) return;
+	config.settingsPopoutWindow = false;
+	fs.mkdirSync(path.dirname(appJsonPath), { recursive: true });
+	fs.writeFileSync(appJsonPath, JSON.stringify(config, null, 2));
+}
+
+/**
+ * Open Obsidian's settings modal on a plugin's tab.
+ *
+ * Drives `app.setting` directly instead of pressing `Meta+,` then clicking a
+ * `.vertical-tab-nav-item` by label — the hotkey depends on which element has
+ * focus and the nav label is user-facing text, so both are needlessly brittle.
+ *
+ * Returns false if the `app.setting` API is unavailable or the tab id is not
+ * registered, which lets callers `ctx.fail()` with a clear reason.
+ */
+export async function openPluginSettings(page: Page, tabId = "notor"): Promise<boolean> {
+	const opened = await page.evaluate((id: string) => {
+		const setting = (window as any).app?.setting;
+		if (!setting?.open || !setting.openTabById) return false;
+		// Belt-and-braces: if the harness-level app.json flag was overwritten by a
+		// custom setupVault, force inline rendering at runtime too.
+		try {
+			if ((window as any).app?.vault?.setConfig) {
+				(window as any).app.vault.setConfig("settingsPopoutWindow", false);
+			}
+		} catch { /* older builds lack setConfig */ }
+		setting.open();
+		setting.openTabById(id);
+		return setting.activeTab != null;
+	}, tabId);
+
+	if (!opened) return false;
+	// The tab body renders synchronously, but plugin sections that await disk
+	// reads (personas, workflows) settle a beat later.
+	await waitForSelector(page, SETTINGS_CONTENT_SELECTOR, 8_000);
+	await page.waitForTimeout(1_200);
+	return true;
+}
+
+/** Close the settings modal via the `app.setting` API. */
+export async function closeSettings(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		(window as any).app?.setting?.close?.();
+	});
+	await page.waitForTimeout(600);
+}
+
+/**
+ * Force one of Notor's settings groups open. Returns false if no group carries
+ * that title.
+ *
+ * Matches on the `data-notor-group` attribute that `createSettingsGroup()`
+ * stamps, falling back to the summary's visible text. Sets the `open` attribute
+ * rather than clicking the summary — a click *toggles*, so it would collapse a
+ * group that is already expanded.
+ */
+export async function expandSettingsGroup(page: Page, groupTitle: string): Promise<boolean> {
+	const expanded = await page.evaluate(
+		({ title, scopeSelector }: { title: string; scopeSelector: string }) => {
+			const scope = document.querySelector(scopeSelector) ?? document.body;
+			const byAttr = scope.querySelector(`details[data-notor-group="${CSS.escape(title)}"]`);
+			const groups = byAttr
+				? [byAttr]
+				: Array.from(scope.querySelectorAll("details.notor-settings-group")).filter(
+						(d) => d.querySelector("summary")?.textContent?.trim() === title,
+					);
+			const details = groups[0] as HTMLDetailsElement | undefined;
+			if (!details) return false;
+			if (!details.open) details.setAttribute("open", "");
+			return true;
+		},
+		{ title: groupTitle, scopeSelector: SETTINGS_CONTENT_SELECTOR },
+	);
+	if (expanded) await page.waitForTimeout(700);
+	return expanded;
+}
+
+/**
+ * Scroll a Notor settings subsection heading into view so screenshots include
+ * it. Subsection headings carry `data-notor-subsection="<name>"` (they double as
+ * the `notor-settings://` deep-link targets).
+ */
+export async function scrollToSettingsSubsection(page: Page, subsection: string): Promise<boolean> {
+	const found = await page.evaluate(
+		({ name, scopeSelector }: { name: string; scopeSelector: string }) => {
+			const scope = document.querySelector(scopeSelector) ?? document.body;
+			const heading = scope.querySelector(`[data-notor-subsection="${CSS.escape(name)}"]`);
+			if (!heading) return false;
+			heading.scrollIntoView({ block: "start" });
+			return true;
+		},
+		{ name: subsection, scopeSelector: SETTINGS_CONTENT_SELECTOR },
+	);
+	if (found) await page.waitForTimeout(400);
+	return found;
+}
+
+// ---------------------------------------------------------------------------
 // LLM interaction helpers
 // ---------------------------------------------------------------------------
 

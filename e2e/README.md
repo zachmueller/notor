@@ -204,7 +204,109 @@ e2e/
     └── Test Note.md
 ```
 
+## Interacting with Obsidian settings
+
+Obsidian 1.12 reworked the settings modal. `runTest()` and `e2e/lib/test-helpers.ts`
+absorb the differences, so tests should use the shared helpers rather than driving
+`app.setting` by hand.
+
+### The settings popout window
+
+By default Obsidian 1.12+ mounts the settings modal into a **separate OS window**
+(`about:blank`) that has **no `window.app` of its own** — the vault page owns the app
+object while the popout owns the DOM. In that state:
+
+- `document.querySelector(".setting-item")` on the vault page finds nothing
+- `page.click()` against a settings selector times out
+- `ctx.screenshot()` only ever captures the chat view
+
+The popout is gated on a vault config flag:
+
+```js
+shouldUsePopout() { return canPopoutWindow && this.app.vault.getConfig("settingsPopoutWindow") }
+```
+
+`runTest()` calls `disableSettingsPopout(vaultPath)`, which writes
+`settingsPopoutWindow: false` into the vault's `.obsidian/app.json` **before launch**
+(and **after** `setupVault`, so a fixture that rewrites `app.json` can't clobber it).
+That restores the pre-1.12 layout: the modal renders into the vault page's own
+document, so plain `document` queries, `page.click()`, and `ctx.screenshot()` all work.
+
+`openPluginSettings()` also calls `app.vault.setConfig("settingsPopoutWindow", false)`
+at runtime as a belt-and-braces fallback.
+
+### Helpers
+
+| Helper | Purpose |
+|--------|---------|
+| `openPluginSettings(page, tabId = "notor")` | Open settings on a plugin tab via `app.setting.openTabById`; returns `false` if the API or tab is unavailable |
+| `closeSettings(page)` | Close the modal via `app.setting.close()` |
+| `expandSettingsGroup(page, title)` | Force a `<details data-notor-group>` group open (sets `open`; a click would *toggle*) |
+| `scrollToSettingsSubsection(page, name)` | Scroll a `[data-notor-subsection]` heading into view |
+| `SETTINGS_CONTENT_SELECTOR` | `.modal.mod-settings .vertical-tab-content` — scope for all settings queries |
+| `disableSettingsPopout(vaultPath)` | Write the `settingsPopoutWindow: false` flag (called by `runTest`) |
+
+### Rules
+
+- **Open via the API, not `Meta+,`.** The hotkey *does* work over CDP, but it lands on
+  the **About** tab — and matching a `.vertical-tab-nav-item` by its visible label
+  ("Notor") is brittle.
+- **Scope every query to `SETTINGS_CONTENT_SELECTOR`.** Obsidian's left-sidebar search
+  pane renders three `.setting-item` rows of its own ("Collapse results", "Show more
+  context", "Explain search terms"), so a bare `.setting-item` query over-counts.
+- **Per-tool settings live in their own modal.** Click a tool row's
+  `"Configure tool settings"` gear, then scope to `.modal:not(.mod-settings)` so the
+  ~190 rows in the tab underneath don't leak into assertions.
+
+### Current settings DOM
+
+- Modal root: `.modal.mod-settings.mod-sidebar-layout` inside `.modal-container`
+- Active tab content: `.vertical-tab-content` in `.vertical-tab-content-container`
+- Extra row buttons: **`.extra-setting-button`** (plus `.clickable-icon`). The pre-1.12
+  `.setting-editor-extra-setting-button` matches **nothing** today.
+- Tool row buttons by `aria-label`: `"Open tool definition"`, `"Configure tool settings"`;
+  toggles by `"Enabled"` / `"Auto-approve"`
+- Non-configurable tools render `.extra-setting-button.notor-tool-icon-placeholder`
+- Toggles are `.checkbox-container` labels — `.click()` them, don't set `.checked`
+- Both `Escape` and `app.setting.close()` close the modal
+
+### The `__name` trap in `page.evaluate`
+
+tsx compiles e2e scripts with esbuild, which rewrites **nested function declarations
+inside a typed callback** to reference an esbuild `__name` helper that doesn't exist in
+the page. The call throws `ReferenceError: __name is not defined` **at runtime** — a
+passing typecheck won't catch it.
+
+```ts
+// ✗ throws — nested arrow declaration
+await page.evaluate((sel: string) => {
+    const norm = (el: Element | null) => el?.textContent?.trim() ?? "";
+    return norm(document.querySelector(sel));
+}, sel);
+
+// ✓ fine — inline .map/.filter/.find callbacks are not affected
+await page.evaluate((sel: string) =>
+    Array.from(document.querySelectorAll(sel)).map((n) => n.textContent?.trim() ?? ""), sel);
+
+// ✓ fine — template-string form is immune; nested fns allowed
+await page.evaluate(`(() => {
+    const norm = (el) => (el && el.textContent ? el.textContent : "").trim();
+    return norm(document.querySelector(${JSON.stringify(sel)}));
+})()`);
+```
+
 ## Troubleshooting
+
+### A test reports `Passed: 0/0`
+The run hit a fatal error before any assertion ran — look for `Fatal error:` in the
+output. The most common cause is
+`Could not find vault page with .notor-chat-container within timeout`: Obsidian defers
+view rendering, so a stale `workspace.json` that leaves the chat leaf inactive means the
+view never mounts.
+
+`runTest()` now calls `writeCleanWorkspace()` before every run (before `setupVault`, so
+a test can still write its own layout), which prevents this. Tests that deliberately
+assert on a restored multi-panel layout can opt out with `skipCleanWorkspace: true`.
 
 ### Obsidian doesn't launch
 - Verify Obsidian is installed at the expected path

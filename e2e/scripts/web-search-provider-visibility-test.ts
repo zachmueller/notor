@@ -2,15 +2,27 @@
 /**
  * Web Search Provider Visibility E2E Test
  *
- * Diagnoses the bug where paid search providers (Tavily, Brave, SerpApi) do not
- * re-appear in the web_search tool settings UI after an API key is entered.
+ * ⚠️ CURRENTLY OBSOLETE — needs a fixture before it tests anything.
  *
- * The fix we shipped filters `currentList` against `field.options` (built from
- * `optionsSource: "web_search_configured_providers"`) at render time — stripping
- * unconfigured providers. But the reported symptom is that entering a key does
- * not restore the provider to the Add dropdown or unlock its enabled/delay rows.
+ * This test was written against a built-in `web_search` scaffold that declared
+ * per-provider settings (Tavily/Brave/SerpApi enabled + API key + delay, plus
+ * round-robin and provider priority). Those fields have since been moved out of
+ * the built-in scaffold into a separate **user-authored `multi_engine_web_search`
+ * extension** — see `migrateWebSearchMultiProvider()` in
+ * src/settings/migrations.ts.
  *
- * Scenarios:
+ * The built-in scaffold now declares only Request Timeout, Default Number of
+ * Results, and Throttle Delay (ms). So every "row is hidden" / "provider absent
+ * from the Add dropdown" assertion below now passes **vacuously** — the fields do
+ * not exist at all, rather than being correctly hidden — and the two
+ * "should appear once a key is set" assertions fail for the same reason.
+ *
+ * TO REVIVE: add a `setupVault` fixture that installs a `multi_engine_web_search`
+ * user extension into the vault, then point the modal lookup at that tool's row
+ * instead of "Web search". Until then, treat this file as a placeholder rather
+ * than as coverage.
+ *
+ * Scenarios (as originally intended):
  *   1. No API keys — modal shows only DuckDuckGo rows; paid provider rows hidden;
  *      priority list contains only DuckDuckGo; Add dropdown absent or DuckDuckGo-only
  *   2. Tavily key written to SecretStorage — after modal re-open, Tavily enabled +
@@ -25,12 +37,17 @@
  *      then never auto-repopulates)
  *
  * @see src/settings/sections/field-renderer.ts
- * @see src/extensions/builtin-tool-scaffolds.ts — web_search settings YAML
+ * @see src/settings/migrations.ts — migrateWebSearchMultiProvider
+ * @see src/extensions/builtin-tool-scaffolds/web-search.ts — current settings YAML
  */
 
 import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { buildDefaultSettings } from "../lib/test-helpers";
+import {
+	buildDefaultSettings,
+	expandSettingsGroup,
+	openPluginSettings,
+} from "../lib/test-helpers";
 import { slugifySecretId } from "../../src/extensions/settings-schema";
 
 // ---------------------------------------------------------------------------
@@ -55,29 +72,14 @@ const TAVILY_ROWS = ["Tavily — Enabled", "Tavily — Delay (ms)"];
 // Local helpers
 // ---------------------------------------------------------------------------
 
-/** Open Obsidian settings and navigate to the Notor tab. */
-async function openNotorSettings(page: Page): Promise<boolean> {
-	return page.evaluate(() => {
-		const app = (window as any).app;
-		if (!app?.setting) return false;
-		app.setting.open();
-		app.setting.openTabById("notor");
-		return true;
-	});
-}
-
 /** Expand the Tools settings group so its rows are visible. */
 async function expandToolsGroup(page: Page): Promise<void> {
-	await page.evaluate(() => {
-		const group = document.querySelector('details[data-notor-group="Tools"]') as HTMLDetailsElement | null;
-		if (group) group.open = true;
-	});
-	await page.waitForTimeout(500);
+	await expandSettingsGroup(page, "Tools");
 }
 
 /**
  * Click the gear icon for the web_search tool row.
- * Must be called after openNotorSettings + expandToolsGroup.
+ * Must be called after openPluginSettings + expandToolsGroup.
  */
 async function openWebSearchModal(page: Page): Promise<boolean> {
 	return page.evaluate(() => {
@@ -214,7 +216,7 @@ async function testNoKeysState(ctx: TestContext): Promise<void> {
 	console.log("\nTest 1: No API keys — paid provider rows hidden, priority list DuckDuckGo-only");
 	const { page } = ctx;
 
-	const opened = await openNotorSettings(page);
+	const opened = await openPluginSettings(page);
 	if (!opened) {
 		ctx.fail("No-keys: open settings", "Could not open Notor settings");
 		return;
@@ -250,6 +252,24 @@ async function testNoKeysState(ctx: TestContext): Promise<void> {
 	}
 
 	ctx.pass("No-keys: modal open", `Modal open; found ${snap.settingNames.length} setting rows`, shot);
+
+	// Tripwire: without the multi-provider fields in this modal, every
+	// "row hidden" / "provider absent" assertion below passes vacuously. Fail
+	// loudly rather than reporting green on a test that checks nothing.
+	const hasMultiProviderSchema = snap.settingNames.some(
+		(n) => n === "Provider priority order" || n === "Round-robin across providers",
+	);
+	if (!hasMultiProviderSchema) {
+		ctx.fail(
+			"Multi-provider schema present in the modal under test",
+			"The tool settings modal declares no multi-provider fields (no 'Provider priority order' / " +
+				"'Round-robin across providers'), so the visibility assertions in this test are vacuous. " +
+				"These settings moved to the user-authored `multi_engine_web_search` extension — this test " +
+				`needs a vault fixture that installs it. Rows found: [${snap.settingNames.filter(Boolean).join(", ")}]`,
+			shot,
+		);
+		return;
+	}
 
 	// Paid provider rows must NOT be visible
 	const visiblePaidRows = PAID_PROVIDER_ROWS.filter((r) => snap.settingNames.includes(r));
@@ -369,7 +389,7 @@ async function testWithTavilyKey(ctx: TestContext): Promise<void> {
 	}
 
 	// Re-open settings (closing modal may have closed settings too) and re-expand Tools
-	await openNotorSettings(page);
+	await openPluginSettings(page);
 	await page.waitForTimeout(1_500);
 	await expandToolsGroup(page);
 	await page.waitForTimeout(500);
@@ -549,7 +569,7 @@ async function testKeyRemovedRestoresHiddenState(ctx: TestContext): Promise<void
 	}
 
 	// Re-open settings and expand Tools group
-	await openNotorSettings(page);
+	await openPluginSettings(page);
 	await page.waitForTimeout(1_500);
 	await expandToolsGroup(page);
 	await page.waitForTimeout(500);
@@ -611,6 +631,18 @@ async function tests(ctx: TestContext): Promise<void> {
 	await page.waitForTimeout(5_000); // Wait for plugin full init
 
 	await testNoKeysState(ctx);
+
+	// The remaining scenarios all assert on multi-provider fields. If test 1's
+	// tripwire found none in the modal, they would report vacuous passes — so stop
+	// here and leave the single explanatory failure as the whole result.
+	if (ctx.results.some((r) => !r.passed && r.name.startsWith("Multi-provider schema"))) {
+		console.log(
+			"\n  Skipping tests 2–5: the multi-provider schema is absent, so their assertions" +
+				"\n  cannot distinguish 'correctly hidden' from 'does not exist'. See the test header.",
+		);
+		return;
+	}
+
 	await testSecretIdConsistency(ctx);
 	await testWithTavilyKey(ctx);
 	await testPersistedListAfterFilter(ctx);

@@ -12,68 +12,42 @@
  *
  * LLM Required: No
  *
- * Obsidian 1.13 notes:
- *  - The settings modal renders into `app.setting.tabContentContainer`, which is
- *    NOT reachable from `document.querySelector`. Every DOM query below is scoped
- *    to that element via the SCOPE snippet.
- *  - `Meta+,` is not delivered reliably over CDP; drive `app.setting` directly.
- *  - Do not declare nested functions inside `page.evaluate` — tsx compiles them
- *    with an esbuild `__name` helper that does not exist in the page.
+ * Settings-interaction notes (see e2e/README.md → "Interacting with Obsidian settings"):
+ *  - `runTest()` disables Obsidian's settings popout window, so the modal renders
+ *    into the vault page's own document and plain `document.querySelector`,
+ *    `ctx.screenshot()`, and `page.click()` all work.
+ *  - Queries are still scoped to `SETTINGS_CONTENT_SELECTOR` because Obsidian's
+ *    search sidebar contributes three `.setting-item` rows of its own.
+ *  - `Meta+,` opens settings on the *About* tab, so use `openPluginSettings()`,
+ *    which drives `app.setting.openTabById("notor")` directly.
+ *  - Do not declare nested functions inside a typed `page.evaluate((arg) => …)`
+ *    callback — tsx compiles them with an esbuild `__name` helper that does not
+ *    exist in the page, so the call throws `ReferenceError: __name is not
+ *    defined`. Nested functions are fine inside a template-string evaluate.
  */
 
 import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { buildDefaultSettings, waitForSelector, writeCleanWorkspace } from "../lib/test-helpers";
+import {
+	buildDefaultSettings,
+	expandSettingsGroup,
+	openPluginSettings,
+	scrollToSettingsSubsection,
+	waitForSelector,
+	writeCleanWorkspace,
+	SETTINGS_CONTENT_SELECTOR,
+} from "../lib/test-helpers";
 
-/** Resolve the settings content root (Obsidian 1.13 renders outside `document`). */
-const SCOPE = `(() => {
-	const s = window.app && window.app.setting;
-	return (s && (s.tabContentContainer || s.containerEl)) || document.body;
-})()`;
+/** Settings-tab content root, as a JS expression for template-string evaluates. */
+const SCOPE = `(document.querySelector(${JSON.stringify(SETTINGS_CONTENT_SELECTOR)}) || document.body)`;
 
 // ---------------------------------------------------------------------------
-// Settings helpers
+// Local helpers (test-specific only)
 // ---------------------------------------------------------------------------
-
-async function openNotorSettings(page: Page): Promise<boolean> {
-	const opened = await page.evaluate(() => {
-		const setting = (window as unknown as { app?: { setting?: Record<string, unknown> } }).app
-			?.setting as { open?: () => void; openTabById?: (id: string) => void } | undefined;
-		if (!setting?.open || !setting.openTabById) return false;
-		setting.open();
-		setting.openTabById("notor");
-		return true;
-	});
-	await page.waitForTimeout(2_000);
-	return opened;
-}
-
-/** Force a `<details>` settings group open by its summary text. */
-async function expandSettingsGroup(page: Page, groupTitle: string): Promise<boolean> {
-	return page.evaluate(
-		`((title) => {
-			const scope = ${SCOPE};
-			const groups = scope.querySelectorAll("details.notor-settings-group");
-			for (const d of groups) {
-				const summary = d.querySelector("summary");
-				if (summary && summary.textContent.trim() === title) {
-					if (!d.open) d.setAttribute("open", "");
-					return true;
-				}
-			}
-			return false;
-		})(${JSON.stringify(groupTitle)})`,
-	) as Promise<boolean>;
-}
 
 /** Scroll the Path scoping heading into view so screenshots show the table. */
 async function scrollToSection(page: Page): Promise<void> {
-	await page.evaluate(`(() => {
-		const scope = ${SCOPE};
-		const heading = scope.querySelector('[data-notor-subsection="Path scoping"]');
-		if (heading) heading.scrollIntoView({ block: "start" });
-	})()`);
-	await page.waitForTimeout(400);
+	await scrollToSettingsSubsection(page, "Path scoping");
 }
 
 /** Type a path into the "Add path rule" row and click Add. */
@@ -174,36 +148,6 @@ async function readRestrictHints(page: Page): Promise<string[]> {
 	})()`) as Promise<string[]>;
 }
 
-/**
- * Screenshot the window that actually shows the settings.
- *
- * Obsidian 1.13 renders settings into a separate `about:blank` popout window that
- * has NO `window.app` of its own — the vault page owns the app object while the
- * popout owns the DOM. So detect the settings window by its DOM alone, and note
- * that `ctx.screenshot()` would only ever capture the chat view.
- */
-async function findSettingsPage(ctx: TestContext): Promise<Page | null> {
-	for (const context of ctx.browser.contexts()) {
-		for (const candidate of context.pages()) {
-			const isSettings = await candidate
-				.evaluate(
-					`!!document.querySelector('[data-notor-subsection="Path scoping"]')`,
-				)
-				.catch(() => false);
-			if (isSettings) return candidate;
-		}
-	}
-	return null;
-}
-
-async function screenshotSettings(ctx: TestContext, name: string): Promise<string> {
-	const settingsPage = await findSettingsPage(ctx);
-	if (!settingsPage) return ctx.screenshot(name);
-	const file = `${ctx.screenshotsDir}/${name}.png`;
-	await settingsPage.screenshot({ path: file }).catch(() => undefined);
-	return file;
-}
-
 /** Read the persisted rules straight out of the plugin's settings object. */
 async function readPersistedRules(page: Page): Promise<unknown> {
 	return page.evaluate(`(() => {
@@ -225,13 +169,12 @@ async function tests(ctx: TestContext) {
 	// ── Test 1: Section renders ─────────────────────────────────────────
 	console.log("── Test 1: Path scoping section renders ──");
 	{
-		const opened = await openNotorSettings(page);
+		const opened = await openPluginSettings(page);
 		if (!opened) {
-			ctx.fail("Open settings", "app.setting API unavailable", await screenshotSettings(ctx, "01-fail"));
+			ctx.fail("Open settings", "app.setting API unavailable", await ctx.screenshot("01-fail"));
 			return;
 		}
 		await expandSettingsGroup(page, "Tools");
-		await page.waitForTimeout(700);
 		await scrollToSection(page);
 
 		const present = await page.evaluate(`(() => {
@@ -243,7 +186,7 @@ async function tests(ctx: TestContext) {
 			}
 			return { heading: heading !== null, addRow: addRow };
 		})()`) as { heading: boolean; addRow: boolean };
-		const shot = await screenshotSettings(ctx, "01-section-empty");
+		const shot = await ctx.screenshot("01-section-empty");
 
 		if (present.heading && present.addRow) {
 			ctx.pass(
@@ -268,7 +211,7 @@ async function tests(ctx: TestContext) {
 		await scrollToSection(page);
 		const rows = await readRows(page);
 		const row = rows.find((r) => r.path === "ai/");
-		const shot = await screenshotSettings(ctx, "02-relative-rule");
+		const shot = await ctx.screenshot("02-relative-rule");
 
 		if (added && row && row.desc === "vault + filesystem") {
 			ctx.pass(
@@ -298,7 +241,7 @@ async function tests(ctx: TestContext) {
 			"Blocked",
 		];
 		const options = rows[0]?.options ?? [];
-		const shot = await screenshotSettings(ctx, "03-dropdown-states");
+		const shot = await ctx.screenshot("03-dropdown-states");
 
 		if (JSON.stringify(options) === JSON.stringify(expected)) {
 			ctx.pass("Dropdown offers the six states", options.join(" / "), shot);
@@ -320,7 +263,7 @@ async function tests(ctx: TestContext) {
 		const rows = await readRows(page);
 		const row = rows.find((r) => r.path === "ai/");
 		const persisted = await readPersistedRules(page);
-		const shot = await screenshotSettings(ctx, "04-write-auto-approve");
+		const shot = await ctx.screenshot("04-write-auto-approve");
 
 		if (set && row?.states[1] === "auto_approve") {
 			ctx.pass(
@@ -347,7 +290,7 @@ async function tests(ctx: TestContext) {
 		await scrollToSection(page);
 		const rows = await readRows(page);
 		const row = rows.find((r) => r.path === "~/Downloads/");
-		const shot = await screenshotSettings(ctx, "05-tilde-rule");
+		const shot = await ctx.screenshot("05-tilde-rule");
 
 		if (row && row.desc === "filesystem" && row.states[1] === "blocked") {
 			ctx.pass(
@@ -371,7 +314,7 @@ async function tests(ctx: TestContext) {
 		await page.waitForTimeout(1_000);
 		await scrollToSection(page);
 		const hints = await readRestrictHints(page);
-		const shot = await screenshotSettings(ctx, "06-restrict-hint");
+		const shot = await ctx.screenshot("06-restrict-hint");
 
 		const vaultHint = hints.find((h) => h.startsWith("Vault reads restricted to:"));
 		const fsHint = hints.find((h) => h.startsWith("Filesystem reads restricted to:"));
@@ -394,7 +337,7 @@ async function tests(ctx: TestContext) {
 	console.log("\n── Test 7: Rules persisted under path_scope_rules ──");
 	{
 		const persisted = (await readPersistedRules(page)) as Array<Record<string, string>> | null;
-		const shot = await screenshotSettings(ctx, "07-final-table");
+		const shot = await ctx.screenshot("07-final-table");
 		const ai = persisted?.find((r) => r.path === "ai/");
 		const dl = persisted?.find((r) => r.path === "~/Downloads/");
 

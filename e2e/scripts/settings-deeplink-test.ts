@@ -104,12 +104,19 @@ async function testDomInspection(ctx: TestContext): Promise<void> {
 	console.log("\nTest 1: DOM inspection — rendered anchor elements");
 	const { page } = ctx;
 
-	// Switch to the pre-populated conversation
+	// Switch to the pre-populated conversation.
+	//
+	// Orchestrators are per-leaf now (`plugin._orchestrators`, keyed by leaf id);
+	// the old singleton `plugin.getOrchestrator()` is gone. Prefer the public
+	// `getActiveOrchestrator()` and fall back to the first entry in the map.
 	const switched = await page.evaluate(async (filename: string) => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { ok: false, error: "plugin not found" };
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator =
+				plugin.getActiveOrchestrator?.() ??
+				(plugin._orchestrators ? Array.from(plugin._orchestrators.values())[0] : null);
+			if (!orchestrator) return { ok: false, error: "no orchestrator available" };
 			await orchestrator.switchConversation(filename);
 			return { ok: true };
 		} catch (e: any) {
@@ -288,8 +295,10 @@ async function testStructuredLogs(ctx: TestContext): Promise<void> {
 	console.log("\nTest 3: Structured logs — check activateSettingsLinks diagnostics");
 
 	const logs = ctx.collector.getStructuredLogs();
+	// `activateSettingsLinks` moved from ChatView into MessageRenderer, which logs
+	// under its own source name.
 	const settingsLinkLogs = logs.filter(
-		(l) => l.source === "ChatView" && l.message.includes("activateSettingsLinks"),
+		(l) => l.source === "MessageRenderer" && l.message.includes("activateSettingsLinks"),
 	);
 
 	console.log(`  Found ${settingsLinkLogs.length} activateSettingsLinks log entries:`);
