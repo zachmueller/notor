@@ -11,6 +11,7 @@
 import type { ConversationMode, LLMProviderConfig, ModelPreset, VaultEventHookConfig } from "../types";
 import type { McpServerConfig } from "../mcp/mcp-types";
 import type { LogLevel } from "../utils/logger";
+import type { PathScopeRule } from "./path-scoping";
 
 // ---------------------------------------------------------------------------
 // Settings interface
@@ -339,6 +340,16 @@ export interface NotorSettings {
 	 * Vault root is always implicitly allowed.
 	 */
 	read_file_allowed_paths: string[];
+
+	/**
+	 * Global path-scoping rules (Settings → Tools → Path scoping): one per path
+	 * prefix, each choosing what the AI may do when reading and when writing it.
+	 * Projected into per-group path lists by `buildGlobalPathScopes()`.
+	 *
+	 * These **restrict** what the AI may touch; `read_file_allowed_paths` above
+	 * **expands** it.
+	 */
+	path_scope_rules: PathScopeRule[];
 
 	/** Default output directory for `write_docx`. Vault-relative or absolute. */
 	write_docx_default_output_dir: string;

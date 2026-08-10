@@ -20,7 +20,6 @@ import { extractToolConfigs } from "./parser";
 import { mergeToolConfigs } from "./merger";
 import { enforcePathConstraints, evaluatePathApproval, TOOL_PATH_PARAMS } from "./path-enforcer";
 import type { ParsedToolConfig, PathGroup, PathListSet } from "./types";
-import { buildGlobalPathScopes, pathScopeKey } from "../settings/path-scoping";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -361,17 +360,27 @@ Continue with your task.`;
 	describe("global path scopes vs per-context config", () => {
 		const VAULT_ROOT = "/vault";
 
-		/** Build global scopes the way Settings → config-resolver does. */
+		/**
+		 * Build the resolved group scopes config-resolver hands to the merger.
+		 *
+		 * Written as a literal rather than projected from settings rules: these
+		 * tests pin merger and enforcer semantics, and the projection has its own
+		 * tests in `settings/path-scoping.test.ts`.
+		 */
 		function scopes(
 			overrides: Partial<Record<PathGroup, Partial<PathListSet>>>,
 		): Partial<Record<PathGroup, PathListSet>> {
-			const shared: Record<string, string[]> = {};
+			const resolved: Partial<Record<PathGroup, PathListSet>> = {};
 			for (const [group, lists] of Object.entries(overrides)) {
-				for (const [list, paths] of Object.entries(lists ?? {})) {
-					shared[pathScopeKey(group as PathGroup, list as keyof PathListSet)] = paths as string[];
-				}
+				resolved[group as PathGroup] = {
+					allowed_paths: [],
+					blocked_paths: [],
+					auto_approve_paths: [],
+					never_auto_approve_paths: [],
+					...lists,
+				};
 			}
-			return buildGlobalPathScopes(shared);
+			return resolved;
 		}
 
 		beforeEach(() => {

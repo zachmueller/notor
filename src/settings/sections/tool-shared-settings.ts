@@ -37,9 +37,9 @@ export function renderSharedSettingsSection(
 			.setWarning()
 			.onClick(async () => {
 				// Clear only the fields this section renders. `user_shared_settings`
-				// also backs the Path scoping section above, whose lists are a
-				// security boundary and must not be wiped by a button labelled for
-				// shared settings.
+				// is a shared bag with
+				// other consumers, and none of them should be wiped by a button
+				// labelled for this section.
 				for (const field of sharedDef.settingsSchema) {
 					delete ctx.settings.user_shared_settings[field.key];
 				}

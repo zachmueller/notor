@@ -112,7 +112,7 @@ export class ConfigResolver {
 		// parameter rather than as a synthetic lowest-precedence config, because the
 		// access tier is a floor a persona must not be able to override — not a
 		// default it can replace.
-		const globalPathScopes = buildGlobalPathScopes(this.settings.user_shared_settings);
+		const globalPathScopes = buildGlobalPathScopes(this.settings.path_scope_rules);
 
 		// Merge all configs
 		const effective = mergeToolConfigs(

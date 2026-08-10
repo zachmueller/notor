@@ -258,6 +258,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 
 	// Phase 4c: docx & file tools
 	read_file_allowed_paths: [],
+	path_scope_rules: [],
 	write_docx_default_output_dir: "",
 	write_docx_default_template_path: "",
 	};
