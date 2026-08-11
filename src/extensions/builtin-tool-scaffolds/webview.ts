@@ -21,9 +21,11 @@ export const WEBVIEW = scaffold(
     default: "conversation"
   text:
     type: string
+    optional: true
     description: "For 'click' action: the visible text of the link to click (case-insensitive partial match)."
   url:
     type: string
+    optional: true
     description: "For 'navigate' action: the URL to load."
 settings:
   webview_max_output_chars:

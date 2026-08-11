@@ -21,6 +21,7 @@ Every proposed write shows a before/after diff before being applied. For edits t
 - **Read-only tools** default to auto-approved.
 - Per-tool **Enabled** and **Auto-approve** settings are configurable in the unified **Settings → Notor → Tools** section — you can enable/disable any tool or promote it to auto-approve. See [Enabling and disabling tools](vault-tools.md#enabling-and-disabling-tools) for details.
 - [Per-persona auto-approve overrides](personas.md) let you configure different approval behavior per persona.
+- **Malformed calls never reach you.** If the AI omits a parameter a tool requires, the call fails immediately with the missing parameter names reported back to the AI, which re-issues a corrected call. You are not interrupted for a call that could not have succeeded — which matters most with [path-scoped auto-approve](vault-tools.md#path-scoping), where a missing `path` would otherwise leave the path rules unable to classify the call and fall back to prompting you.
 
 ## Cancellation
 

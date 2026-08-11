@@ -193,6 +193,49 @@ describe("paramSchemaToJsonSchema", () => {
 		expect(schema.required).toEqual(["path", "depth"]);
 		expect(Object.keys(schema.properties!)).toHaveLength(3);
 	});
+
+	// `optional: true` is the escape hatch for conditionally-required params that
+	// have no meaningful default (webview.url, write_docx.note_name). Without it,
+	// dispatch-time validation would auto-fail every legitimate call that omits one.
+	it("params with optional: true are NOT in required[], even without a default", () => {
+		const params: ParamSchema = {
+			action: { type: "string" },
+			url: { type: "string", optional: true },
+		};
+		const schema = paramSchemaToJsonSchema(params);
+
+		expect(schema.required).toEqual(["action"]);
+	});
+
+	it("optional: true on every param omits required[] entirely", () => {
+		const params: ParamSchema = {
+			content: { type: "string", optional: true },
+			note_name: { type: "string", optional: true },
+		};
+		expect(paramSchemaToJsonSchema(params).required).toBeUndefined();
+	});
+
+	it("optional: false is treated as required (only an explicit true opts out)", () => {
+		const params: ParamSchema = { path: { type: "string", optional: false } };
+		expect(paramSchemaToJsonSchema(params).required).toEqual(["path"]);
+	});
+
+	it("optional alongside a default is still excluded — no conflict", () => {
+		const params: ParamSchema = { scope: { type: "string", optional: true, default: "conversation" } };
+		const schema = paramSchemaToJsonSchema(params);
+
+		expect(schema.required).toBeUndefined();
+		expect(schema.properties?.scope?.default).toBe("conversation");
+	});
+
+	it("strips optional from JSON Schema output", () => {
+		const params: ParamSchema = {
+			url: { type: "string", optional: true, description: "URL to load" },
+		};
+		const schema = paramSchemaToJsonSchema(params);
+
+		expect(schema.properties?.url).toEqual({ type: "string", description: "URL to load" });
+	});
 });
 
 // ---------------------------------------------------------------------------

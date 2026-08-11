@@ -16,6 +16,7 @@ import { isDomainBlocked } from "../utils/domain-denylist";
 import { enforcePathConstraints, evaluatePathApproval } from "../tool-config/path-enforcer";
 import { isMcpTool } from "../mcp/mcp-tool-adapter";
 import { matchCommandPattern } from "../utils/command-pattern-matcher";
+import { validateRequiredParams } from "./param-validation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,6 +96,7 @@ export function getWriteToolDescription(toolName: string): string {
  * - Enabled check (FR-83)
  * - Plan/Act mode check (FR-14)
  * - Domain denylist check (fetch_webpage only)
+ * - Required-parameter presence check
  * - Auto-approve resolution (DISP-004)
  * - Path enforcement (FR-84)
  *
@@ -110,6 +112,9 @@ export function evaluateToolPolicy(
 	tool: DispatchableTool,
 	ctx: ToolPolicyContext,
 ): PolicyDecision {
+	// Internal tools bypass every check below, including argument validation —
+	// only `update_tasks` is internal, it guards its own arguments, and it owns no
+	// path params, so there is no approval prompt to spare it from.
 	if (tool.internal) {
 		return { allowed: true, autoApproved: true };
 	}
@@ -157,6 +162,23 @@ export function evaluateToolPolicy(
 				};
 			}
 		}
+	}
+
+	// 3.5. Required-parameter presence check.
+	// Placed after the enabled and Plan-mode gates so the most actionable error
+	// wins — a disabled tool still reports "disabled" whatever its arguments look
+	// like — but *before* auto-approve and path resolution, which is the point:
+	// with no path argument, `evaluatePathApproval()` cannot classify the call and
+	// a write tool degrades to a user prompt for a call that can never run.
+	// Blocking here is a free correction — see param-validation.ts.
+	const { missing } = validateRequiredParams(tool.input_schema, parameters);
+	if (missing.length > 0) {
+		const plural = missing.length > 1;
+		return {
+			allowed: false,
+			autoApproved: false,
+			error: `Tool '${toolName}' call is missing required parameter${plural ? "s" : ""}: ${missing.join(", ")}. Re-issue the call with ${plural ? "these parameters" : "this parameter"} included.`,
+		};
 	}
 
 	// 4. Auto-approve resolution (DISP-004)

@@ -56,11 +56,33 @@ Each parameter supports:
 |---|---|---|
 | `type` | string | `"string"`, `"number"`, `"boolean"`, `"string[]"`, or `"object[]"` |
 | `description` | string | Sent to the AI to explain the parameter. |
-| `default` | matches type | Makes the parameter optional. Params without a default are required. |
+| `default` | matches type | Makes the parameter optional and supplies a fallback value. |
+| `optional` | boolean | Makes the parameter optional *without* a fallback value. Use it for conditionally-required parameters where no single default makes sense — e.g. a `url` that only applies when `action: navigate`. |
 | `enum` | string[] | Constrains to listed values (string type only). |
 | `path_namespace` | string | `"vault"` or `"filesystem"` — enables automatic [path enforcement](vault-tools.md#path-scoping). |
 | `path_resolve_as` | string | `"note"` — resolve a bare note name to its true vault path before checking constraints. |
 | `path_access` | string | `"read"` or `"write"` — which [path scoping](vault-tools.md#path-scoping) group this parameter belongs to. Defaults to the tool's `notor-mode`; set it only when a parameter's direction differs (e.g. a template a write tool reads). |
+
+#### Required parameters
+
+A parameter with neither a `default` nor `optional: true` is **required**. If the AI calls the tool without one, Notor fails the call immediately and reports the missing parameter names back to the AI, which then re-issues a corrected call — your tool code never runs, and you are never shown an approval prompt for a call that could not have succeeded.
+
+Only presence is checked, never types: a required parameter counts as supplied as long as it is not absent, `null`, or `undefined` (an empty string counts as supplied). Validate types and value ranges in your tool code as usual.
+
+Declare conditionally-required parameters with `optional: true` so a legitimate call is not rejected:
+
+```yaml
+params:
+  action:
+    type: string          # required
+    enum: [read, navigate]
+  url:
+    type: string
+    optional: true        # only meaningful when action is "navigate"
+    description: "For 'navigate': the URL to load."
+```
+
+> If you have a **customized copy** of a built-in tool in your vault (`{notor_dir}/tools/`), its parameter schema is the one that applies — not the current built-in one. The declarations for `webview`, `write_docx`, `write_xlsx`, `read_file`, and `orchestration_task_list` were corrected when required-parameter checking was added; if you overrode one of those beforehand, either add `optional: true` to the affected parameters or reset the tool to its default in **Settings → Notor → Extensions**.
 
 ### Return value
 

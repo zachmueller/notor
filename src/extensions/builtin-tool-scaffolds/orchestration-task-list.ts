@@ -18,12 +18,12 @@ export const ORCHESTRATION_TASK_LIST = scaffold(
 	`params:
   filter:
     type: object
+    optional: true
     properties:
       status:
         type: string
         enum: [open, running, closed]
-    description: "Optional status filter."
-required: []`,
+    description: "Optional status filter."`,
 	`const ctx = utils.orchestrationContext;
 if (!ctx) {
   return { __toolError: true, error: "orchestration_task_list can only be called from within an orchestration step turn." };

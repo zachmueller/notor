@@ -81,6 +81,110 @@ describe("ToolDispatcher pure branch — C.1 internal-tool render suppression", 
 	});
 });
 
+describe("ToolDispatcher — a call missing a required param never reaches approval", () => {
+	/** replace_in_note as registered for real: path + changes are required. */
+	function makeReplaceInNote(): DispatchableTool {
+		return {
+			name: "replace_in_note",
+			mode: "write",
+			input_schema: {
+				type: "object",
+				properties: { path: { type: "string" }, changes: { type: "array" } },
+				required: ["path", "changes"],
+			},
+			execute: vi.fn(async () => ({ tool_name: "replace_in_note", success: true, result: "ok" })),
+		} as unknown as DispatchableTool;
+	}
+
+	function writeCtx(entry: Record<string, unknown> = {}): ToolPolicyContext {
+		return makeCtx({
+			effectiveConfig: {
+				tools: {
+					replace_in_note: {
+						enabled: true,
+						auto_approve: false,
+						allowed_paths: [],
+						blocked_paths: [],
+						allowed_command_patterns: [],
+						blocked_command_patterns: [],
+						auto_approve_paths: [],
+						never_auto_approve_paths: [],
+						path_scopes: {},
+						...entry,
+					} as any,
+				},
+			},
+		});
+	}
+
+	it("does not prompt, does not execute, and returns a corrective error", async () => {
+		// The reported bug: the model omitted `path`, so the path rules could not
+		// classify the call and the run loop blocked on a human prompt for a call
+		// that was always going to fail inside the tool.
+		const d = new ToolDispatcher();
+		const tool = makeReplaceInNote();
+		registerTool(d, tool);
+
+		const approvalCb: ApprovalCallback = vi.fn(async () => "approved" as const);
+		const result = await d.dispatch(
+			"replace_in_note",
+			{ changes: [{ old_text: "a", new_text: "b" }] },
+			"act",
+			"m1",
+			undefined,
+			undefined,
+			writeCtx({ auto_approve_paths: ["ai/"] }),
+			approvalCb,
+		);
+
+		expect(approvalCb).not.toHaveBeenCalled();
+		expect(tool.execute).not.toHaveBeenCalled();
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/missing required parameter: path/);
+	});
+
+	it("emits the failed call to the transcript as an error, not a silent drop", async () => {
+		const d = new ToolDispatcher();
+		registerTool(d, makeReplaceInNote());
+
+		const onToolCallStarted = vi.fn();
+		const onToolCallStatusChanged = vi.fn();
+		const onToolCallResult = vi.fn();
+		d.setEvents({ onToolCallStarted, onToolCallStatusChanged, onToolCallResult });
+
+		await d.dispatch("replace_in_note", {}, "act", "m1", undefined, undefined, writeCtx());
+
+		expect(onToolCallStarted).toHaveBeenCalledOnce();
+		expect(onToolCallStatusChanged).toHaveBeenCalledWith(
+			expect.objectContaining({ status: "error" }),
+			"m1",
+		);
+		expect(onToolCallResult).toHaveBeenCalledOnce();
+	});
+
+	it("a complete call still reaches approval and executes", async () => {
+		const d = new ToolDispatcher();
+		const tool = makeReplaceInNote();
+		registerTool(d, tool);
+
+		const approvalCb: ApprovalCallback = vi.fn(async () => "approved" as const);
+		const result = await d.dispatch(
+			"replace_in_note",
+			{ path: "notes/x.md", changes: [{ old_text: "a", new_text: "b" }] },
+			"act",
+			"m1",
+			undefined,
+			undefined,
+			writeCtx(),
+			approvalCb,
+		);
+
+		expect(approvalCb).toHaveBeenCalledOnce();
+		expect(tool.execute).toHaveBeenCalledOnce();
+		expect(result.success).toBe(true);
+	});
+});
+
 describe("ToolDispatcher pure branch — C.2 instance-callback approval fallback", () => {
 	it("uses the instance callback (setApprovalCallback) when no per-call callback is supplied", async () => {
 		const d = new ToolDispatcher();

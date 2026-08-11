@@ -27,6 +27,19 @@ export interface ParamSchema {
 		description?: string;
 		default?: unknown;
 		enum?: string[];
+		/**
+		 * Declares the param optional *without* giving it a `default`. Needed by
+		 * conditionally-required params — `webview.url` (navigate only),
+		 * `write_docx.note_name` (mutually exclusive with `content`) — where no
+		 * single fallback value is meaningful. Excluded from JSON Schema
+		 * `required[]` by `paramSchemaToJsonSchema()`; stripped before the schema
+		 * reaches the LLM, like `path_namespace`.
+		 *
+		 * Params with neither a `default` nor `optional: true` are required, and a
+		 * call that omits one is auto-failed at dispatch (see
+		 * `src/chat/param-validation.ts`).
+		 */
+		optional?: boolean;
 		items?: { type: string };
 		/**
 		 * For `object[]` type: property definitions for each object in the array.

@@ -164,7 +164,11 @@ params:
     path_namespace: vault  # enables path enforcement
   include_metadata:
     type: boolean
-    default: false
+    default: false          # optional, with a fallback value
+  section:
+    type: string
+    optional: true          # optional, with NO fallback value
+    description: "Only meaningful for sectioned notes"
 settings:
   api_key:
     name: "API Key"
@@ -174,6 +178,8 @@ settings:
 \`\`\`
 
 Supported param types: \`string\`, \`number\`, \`boolean\`, \`string[]\`, \`object[]\`
+
+A param with neither \`default\` nor \`optional: true\` is **required**, and Notor auto-fails any call that omits it — the tool code never runs. So mark every conditionally-required param \`optional: true\` (e.g. a \`url\` that only applies when \`action: navigate\`, or two mutually exclusive inputs where exactly one must be supplied) and enforce the real rule in code with a clear error message. Only presence is checked, never types.
 
 ### 3. TypeScript code fence (required)
 

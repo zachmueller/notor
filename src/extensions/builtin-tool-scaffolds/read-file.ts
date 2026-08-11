@@ -15,7 +15,8 @@ export const READ_FILE = scaffold(
     default: "utf-8"
   pages:
     type: string
-    description: "Page range for PDF files (e.g. '1-5')."
+    optional: true
+    description: "Page range for PDF files (e.g. '1-5'). Omit for non-PDF files."
 settings:
   image_max_dimension:
     name: "Image Max Dimension"

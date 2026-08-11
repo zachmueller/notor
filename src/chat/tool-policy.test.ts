@@ -550,6 +550,179 @@ describe("evaluateToolPolicy — path allowlists (FR-84) + sessionAllowedPaths (
 });
 
 // ---------------------------------------------------------------------------
+// Step 3.5 — required-parameter presence check. A call that omits a required
+// param can never succeed, so it is blocked with a corrective error instead of
+// being routed to the human. Presence only, never types.
+// ---------------------------------------------------------------------------
+
+describe("evaluateToolPolicy — required-parameter validation", () => {
+	/** A dispatchable stub that carries an input_schema (unlike the stubs above). */
+	function toolWithSchema(
+		name: string,
+		required: string[] | undefined,
+		mode: "read" | "write" = "write",
+	): DispatchableTool {
+		return {
+			name,
+			mode,
+			input_schema: { type: "object", properties: {}, ...(required ? { required } : {}) },
+		} as unknown as DispatchableTool;
+	}
+
+	const REPLACE_IN_NOTE = toolWithSchema("replace_in_note", ["path", "changes"]);
+	const WRITE_NOTE = toolWithSchema("write_note", ["path", "content"]);
+
+	beforeAll(() => {
+		TOOL_PATH_PARAMS["replace_in_note"] = [
+			{ paramName: "path", namespace: "vault", resolveAs: "note", access: "write" as const },
+		];
+	});
+	afterAll(() => {
+		delete TOOL_PATH_PARAMS["replace_in_note"];
+	});
+
+	it("the reported regression: replace_in_note without `path` is blocked, not prompted", () => {
+		// Before this check, a missing path meant evaluatePathApproval() saw no path
+		// argument → verdict "none" → the write tool's base auto_approve (false) stood
+		// → the run loop blocked on a human prompt for a call that always fails.
+		const ctx = makeToolCtx("replace_in_note", {
+			auto_approve: false,
+			auto_approve_paths: ["ai/"],
+		});
+		const result = evaluateToolPolicy(
+			"replace_in_note",
+			{ changes: [{ old_text: "a", new_text: "b" }] },
+			REPLACE_IN_NOTE,
+			ctx,
+		);
+		expect(result.allowed).toBe(false);
+		expect(result.autoApproved).toBe(false);
+		expect(result.error).toBe(
+			"Tool 'replace_in_note' call is missing required parameter: path. Re-issue the call with this parameter included.",
+		);
+	});
+
+	it("pluralizes when several params are missing", () => {
+		const result = evaluateToolPolicy("replace_in_note", {}, REPLACE_IN_NOTE, makeToolCtx("replace_in_note"));
+		expect(result.error).toBe(
+			"Tool 'replace_in_note' call is missing required parameters: path, changes. Re-issue the call with these parameters included.",
+		);
+	});
+
+	it("a complete call passes through to the normal decision", () => {
+		const ctx = makeToolCtx("replace_in_note", {
+			auto_approve: false,
+			auto_approve_paths: ["ai/"],
+		});
+		const result = evaluateToolPolicy(
+			"replace_in_note",
+			{ path: "ai/x.md", changes: [{ old_text: "a", new_text: "b" }] },
+			REPLACE_IN_NOTE,
+			ctx,
+		);
+		expect(result.allowed).toBe(true);
+		expect(result.autoApproved).toBe(true);
+		expect(result.autoApproveReason).toBe("matched ai/");
+	});
+
+	it("blocks write_note missing `content`", () => {
+		const result = evaluateToolPolicy("write_note", { path: "a.md" }, WRITE_NOTE, makeToolCtx("write_note"));
+		expect(result.allowed).toBe(false);
+		expect(result.error).toMatch(/missing required parameter: content/);
+	});
+
+	it("allows write_note with an empty-string `content` (create an empty note)", () => {
+		const result = evaluateToolPolicy(
+			"write_note",
+			{ path: "a.md", content: "" },
+			WRITE_NOTE,
+			makeToolCtx("write_note"),
+		);
+		expect(result.allowed).toBe(true);
+	});
+
+	it("a tool with no input_schema is not validated", () => {
+		const bare: DispatchableTool = { name: "write_note", mode: "write" } as any;
+		expect(evaluateToolPolicy("write_note", {}, bare, makeToolCtx("write_note")).allowed).toBe(true);
+	});
+
+	it("a tool with no config entry is still validated", () => {
+		// MCP tools and freshly-registered tools may have no effectiveConfig entry;
+		// the check reads the schema off the tool, not the config.
+		const ctx: ToolPolicyContext = { effectiveConfig: { tools: {} }, mode: "act", vaultRootPath: "/vault" };
+		expect(evaluateToolPolicy("write_note", {}, WRITE_NOTE, ctx).allowed).toBe(false);
+	});
+
+	it("validates MCP tools against the server-declared required list", () => {
+		const mcpTool = toolWithSchema("server__query", ["sql"]);
+		const result = evaluateToolPolicy("server__query", {}, mcpTool, makeToolCtx("server__query"));
+		expect(result.allowed).toBe(false);
+		expect(result.error).toMatch(/missing required parameter: sql/);
+	});
+
+	it("an MCP tool with the `{ type: 'object' }` fallback schema is never blocked", () => {
+		const mcpTool = toolWithSchema("server__ping", undefined, "read");
+		expect(evaluateToolPolicy("server__ping", {}, mcpTool, makeToolCtx("server__ping")).allowed).toBe(true);
+	});
+
+	it("internal tools are exempt (update_tasks guards its own arguments)", () => {
+		const internal: DispatchableTool = {
+			name: "update_tasks",
+			mode: "read",
+			internal: true,
+			input_schema: { type: "object", required: ["tasks"] },
+		} as unknown as DispatchableTool;
+		expect(evaluateToolPolicy("update_tasks", {}, internal, makeToolCtx("update_tasks")))
+			.toEqual({ allowed: true, autoApproved: true });
+	});
+
+	it("does not type-check — a wrong-typed but present argument is allowed through", () => {
+		const result = evaluateToolPolicy(
+			"replace_in_note",
+			{ path: "ai/x.md", changes: "not an array" },
+			REPLACE_IN_NOTE,
+			makeToolCtx("replace_in_note"),
+		);
+		expect(result.allowed).toBe(true);
+	});
+});
+
+describe("evaluateToolPolicy — validation precedence", () => {
+	const WRITE_NOTE = {
+		name: "write_note",
+		mode: "write",
+		input_schema: { type: "object", required: ["path", "content"] },
+	} as unknown as DispatchableTool;
+
+	it("a disabled tool reports 'disabled', not the missing parameter", () => {
+		const result = evaluateToolPolicy("write_note", {}, WRITE_NOTE, makeToolCtx("write_note", { enabled: false }));
+		expect(result.error).toMatch(/disabled/);
+	});
+
+	it("a Plan-mode write reports Plan mode, not the missing parameter", () => {
+		const result = evaluateToolPolicy("write_note", {}, WRITE_NOTE, makeToolCtx("write_note", {}, { mode: "plan" }));
+		expect(result.error).toMatch(/not available in Plan mode/);
+	});
+
+	it("a blocked domain reports the denylist, not the missing parameter", () => {
+		const fetchTool = {
+			name: "fetch_webpage",
+			mode: "read",
+			input_schema: { type: "object", required: ["url", "selector"] },
+		} as unknown as DispatchableTool;
+		const ctx = makeToolCtx("fetch_webpage", {}, { domainDenylist: ["evil.com"] });
+		const result = evaluateToolPolicy("fetch_webpage", { url: "https://evil.com/x" }, fetchTool, ctx);
+		expect(result.error).toMatch(/evil\.com is blocked/);
+	});
+
+	it("validation precedes path enforcement — a missing path cannot report a path violation", () => {
+		const ctx = makeToolCtx("write_note", { allowed_paths: ["ai"] });
+		const result = evaluateToolPolicy("write_note", { content: "x" }, WRITE_NOTE, ctx);
+		expect(result.error).toMatch(/missing required parameter: path/);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // F2 §2 / C.5 — command patterns now participate in headless contexts.
 // Before F2, headless dispatch (sub-agents / orchestration steps) ran the legacy
 // branch, which never consulted command patterns. With ctx now threaded, the

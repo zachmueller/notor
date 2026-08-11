@@ -17,11 +17,13 @@ export const WRITE_XLSX = scaffold(
     default: "markdown"
   output_path:
     type: string
-    description: "Full output path including .xlsx extension."
+    optional: true
+    description: "Full output path including .xlsx extension. Provide this or filename."
     path_namespace: filesystem
   filename:
     type: string
-    description: "Output filename without .xlsx extension. Combined with the default output directory setting."
+    optional: true
+    description: "Output filename without .xlsx extension. Combined with the default output directory setting. Provide this or output_path."
 settings:
   write_xlsx_default_output_dir:
     name: "Default Output Directory"

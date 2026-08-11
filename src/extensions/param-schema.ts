@@ -17,7 +17,9 @@ const log = logger("param-schema");
  *
  * Conversion rules:
  * - Each param key becomes a `properties` entry
- * - Params without `default` are added to `required[]`
+ * - Params without `default` are added to `required[]`, unless they declare
+ *   `optional: true` (for conditionally-required params that have no meaningful
+ *   fallback value, e.g. `webview.url`)
  * - `type: "string[]"` maps to `{ type: "array", items: { type: "string" } }`
  * - `type: "object[]"` maps to `{ type: "array", items: { type: "object", properties, required } }`
  *   using `properties` and `required_items` from the param definition
@@ -71,12 +73,16 @@ export function paramSchemaToJsonSchema(params: ParamSchema): JSONSchema {
 			prop.enum = param.enum;
 		}
 
-		// path_namespace is intentionally NOT included — consumed by runtime only
+		// path_namespace / optional are intentionally NOT included — consumed by
+		// the runtime and this converter respectively, never sent to the LLM
 
 		properties[key] = prop;
 
-		// Params without default are required
-		if (param.default === undefined) {
+		// Params without a default are required, unless explicitly opted out.
+		// `optional: true` exists for conditionally-required params where no single
+		// default is meaningful — without it, dispatch-time validation would
+		// auto-fail legitimate calls that omit them.
+		if (param.default === undefined && param.optional !== true) {
 			required.push(key);
 		}
 	}

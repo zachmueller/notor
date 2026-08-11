@@ -10,7 +10,7 @@
 
 import type { ConversationMode, ToolCall, ToolResult } from "../types";
 import type { NotorSettings } from "../settings";
-import type { ToolExecuteOptions, ToolSessionContext } from "../tools/tool";
+import type { JSONSchema, ToolExecuteOptions, ToolSessionContext } from "../tools/tool";
 import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
 import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
 import { McpRegisteredTool } from "../mcp/mcp-tool-adapter";
@@ -26,6 +26,14 @@ export interface DispatchableTool {
 	name: string;
 	mode: "read" | "write";
 	internal?: boolean;
+	/**
+	 * The LLM-facing input schema, read by `evaluateToolPolicy()` to auto-fail a
+	 * call that omits a required parameter. Optional so the dispatcher stays
+	 * usable with minimal tool stubs; `Tool`, `UserToolAdapter` and
+	 * `McpRegisteredTool` all supply it structurally. A tool without one is
+	 * simply not argument-validated.
+	 */
+	input_schema?: JSONSchema;
 	execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult>;
 }
 
