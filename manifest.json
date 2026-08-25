@@ -1,7 +1,7 @@
 {
 	"id": "notor",
 	"name": "Notor",
-	"version": "0.10.4",
+	"version": "0.11.0",
 	"minAppVersion": "1.11.4",
 	"description": "A transparent, extensible, autonomous-capable AI assistant for note taking and knowledge management.",
 	"author": "Zach Mueller",
