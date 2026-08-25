@@ -36,6 +36,33 @@ export const SECRET_IDS = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// Secret ID slugification
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize parts into a lowercase-alphanumeric-with-dashes string suitable
+ * for SecretStorage IDs.
+ *
+ * Joins parts with `-`, converts to lowercase, replaces non-alphanumeric-dash
+ * chars with `-`, and collapses consecutive dashes. Obsidian rejects anything
+ * else: "Secret ID is invalid. Use only lowercase letters, numbers and dashes.
+ * 64 characters max."
+ *
+ * @example slugifySecretId("notor-ext", "Custom Search", "api_key") → "notor-ext-custom-search-api-key"
+ */
+export function slugifySecretId(...parts: string[]): string {
+	return parts
+		.join("-")
+		.toLowerCase()
+		.replace(/[^a-z0-9-]/g, "-")
+		.replace(/-{2,}/g, "-")
+		.replace(/^-|-$/g, "");
+}
+
+/** Maximum length Obsidian accepts for a SecretStorage ID. */
+export const SECRET_ID_MAX_LENGTH = 64;
+
+// ---------------------------------------------------------------------------
 // Dynamic secret ID builders (multi-instance support)
 // ---------------------------------------------------------------------------
 
@@ -114,14 +141,28 @@ export function setSecret(app: App, id: string, value: string): void {
 }
 
 /**
- * Clear a secret from Obsidian's SecretStorage.
+ * Remove a secret from Obsidian's SecretStorage.
  *
- * There is no delete API — this uses the recommended workaround of
- * setting the value to an empty string.
+ * Prefers the runtime `deleteSecret()` (present since Obsidian 1.12 and used by
+ * Obsidian's own Keychain settings UI) so the ID disappears from
+ * `listSecrets()` instead of lingering as an empty entry. Falls back to the
+ * documented empty-string workaround on builds without it.
  *
  * @param app - The Obsidian App instance.
  * @param id  - The secret ID to clear.
  */
 export function clearSecret(app: App, id: string): void {
+	if (!app.secretStorage) {
+		log.error("SecretStorage not available — update Obsidian to 1.11.4+");
+		return;
+	}
+	try {
+		if (typeof app.secretStorage.deleteSecret === "function") {
+			app.secretStorage.deleteSecret(id);
+			return;
+		}
+	} catch (e) {
+		log.warn("deleteSecret failed — falling back to empty-string clear", { id, error: String(e) });
+	}
 	setSecret(app, id, "");
 }

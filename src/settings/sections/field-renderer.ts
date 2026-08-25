@@ -12,7 +12,7 @@
 import { Notice, SecretComponent, Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 import type { SettingsFieldSchema } from "../../extensions/types";
-import { slugifySecretId } from "../../extensions/settings-schema";
+import { slugifySecretId } from "../../utils/secrets";
 import { getSecret } from "../../utils/secrets";
 
 // ---------------------------------------------------------------------------

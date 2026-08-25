@@ -29,8 +29,10 @@ export interface McpEnvVar {
 	 */
 	value: string;
 	/**
-	 * If true, the value is stored via Obsidian's SecretStorage API.
+	 * If true, the value lives in Obsidian's SecretStorage (OS-encrypted
+	 * keychain) instead of plugin settings.
 	 * @default false
+	 * @see src/mcp/mcp-secrets.ts
 	 */
 	sensitive: boolean;
 }
@@ -49,8 +51,10 @@ export interface McpHeader {
 	 */
 	value: string;
 	/**
-	 * If true, the value is stored via Obsidian's SecretStorage API.
+	 * If true, the value lives in Obsidian's SecretStorage (OS-encrypted
+	 * keychain) instead of plugin settings.
 	 * @default false
+	 * @see src/mcp/mcp-secrets.ts
 	 */
 	sensitive: boolean;
 }
@@ -226,20 +230,21 @@ export interface McpToolCallResult {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Secrets manager key for an MCP server environment variable.
- * Format: `mcp_env_{serverName}_{key}`
- */
-export function mcpEnvSecretKey(serverName: string, key: string): string {
-	return `mcp_env_${serverName}_${key}`;
-}
+/** Which kind of MCP credential a secret holds. */
+export type McpSecretKind = "env" | "header";
 
 /**
- * Secrets manager key for an MCP server HTTP header.
- * Format: `mcp_header_{serverName}_{key}`
+ * Read access to credentials marked sensitive.
+ *
+ * Deliberately keyed by (kind, server, name) rather than by storage key: the
+ * ID scheme is an implementation detail of the store, which also has to handle
+ * migrating values out of the old unencrypted location.
+ *
+ * @see src/mcp/mcp-secrets.ts — the SecretStorage-backed implementation
  */
-export function mcpHeaderSecretKey(serverName: string, key: string): string {
-	return `mcp_header_${serverName}_${key}`;
+export interface McpSecretResolver {
+	/** Resolve a credential, or null when nothing is stored. */
+	get(kind: McpSecretKind, serverName: string, key: string): string | null;
 }
 
 /**

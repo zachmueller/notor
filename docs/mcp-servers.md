@@ -65,7 +65,11 @@ MCP tool calls go through the same pipeline as built-in tools:
 
 ## Sensitive credential storage
 
-stdio environment variables and HTTP headers (e.g., `Authorization`) can be individually marked "sensitive" via a toggle in Settings — both when adding a server and when editing one later. Sensitive values are stored in Obsidian's secrets manager (OS-level encrypted storage); non-sensitive values are stored in plain-text settings.
+stdio environment variables and HTTP headers (e.g., `Authorization`) can be individually marked "sensitive" via a toggle in Settings — both when adding a server and when editing one later.
+
+Sensitive values are written to Obsidian's secret storage, the same OS-level encrypted store (macOS Keychain / Windows DPAPI / Linux libsecret) used for provider API keys. You can see the stored entries under **Settings → Keychain**, listed as `notor-mcp-env-…` and `notor-mcp-header-…`. Plugin settings keep only an empty placeholder for the value, so the credential never lands in `data.json` — a sensitive row whose value is already stored shows "Stored in keychain" in place of the masked field. Non-sensitive values are stored as plain text in plugin settings.
+
+Removing a server also removes its stored credentials. Values saved by earlier versions of Notor (which kept them unencrypted in the vault's local storage) are migrated into the encrypted store the first time the server connects, and the plaintext copy is deleted.
 
 ## Connection lifecycle
 

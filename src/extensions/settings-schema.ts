@@ -8,35 +8,13 @@
 
 import type { App } from "obsidian";
 import type { SettingsFieldSchema } from "./types";
-import { getSecret } from "../utils/secrets";
+import { getSecret, slugifySecretId } from "../utils/secrets";
 
 // ---------------------------------------------------------------------------
 // Valid setting types
 // ---------------------------------------------------------------------------
 
 const VALID_SETTING_TYPES = new Set<string>(["string", "number", "boolean", "string[]"]);
-
-// ---------------------------------------------------------------------------
-// Secret ID slugification
-// ---------------------------------------------------------------------------
-
-/**
- * Normalize parts into a lowercase-alphanumeric-with-dashes string suitable
- * for SecretStorage IDs.
- *
- * Joins parts with `-`, converts to lowercase, replaces non-alphanumeric-dash
- * chars with `-`, and collapses consecutive dashes.
- *
- * @example slugifySecretId("notor-ext", "Custom Search", "api_key") → "notor-ext-custom-search-api-key"
- */
-export function slugifySecretId(...parts: string[]): string {
-	return parts
-		.join("-")
-		.toLowerCase()
-		.replace(/[^a-z0-9-]/g, "-")
-		.replace(/-{2,}/g, "-")
-		.replace(/^-|-$/g, "");
-}
 
 // ---------------------------------------------------------------------------
 // Schema parsing

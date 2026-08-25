@@ -15,13 +15,13 @@
 import { Notice, Platform, setIcon, Setting, ToggleComponent } from "obsidian";
 import { ConfirmModal } from "../../ui/confirm-modal";
 import type { SettingsContext } from "./context";
-import type { McpServerConfig, McpEnvVar, McpHeader } from "../../mcp/mcp-types";
+import type { McpServerConfig, McpEnvVar, McpHeader, McpSecretKind } from "../../mcp/mcp-types";
 import {
 	MCP_SERVER_NAME_REGEX,
 	MCP_SERVER_NAME_MAX_LENGTH,
-	mcpEnvSecretKey,
-	mcpHeaderSecretKey,
 } from "../../mcp/mcp-types";
+import type { McpSecretStore } from "../../mcp/mcp-secrets";
+import { createMcpSecretStore } from "../../mcp/mcp-secrets";
 import { parseShellArgs, serializeShellArgs } from "../../utils/shell-args";
 import type { McpHub } from "../../mcp/mcp-hub";
 import type { McpConnection, McpConnectionStatus } from "../../mcp/mcp-types";
@@ -73,33 +73,17 @@ function transportLabel(type: McpServerConfig["type"]): string {
 }
 
 /**
- * Resolve the SecretStorage accessor from the plugin's Obsidian app instance.
- * Uses the same approach as main.ts `pluginSecretStorage`.
+ * Description shown under the sensitive-value lists, spelling out where a
+ * value marked sensitive actually goes.
  */
-function makeSecretStorage(ctx: SettingsContext) {
-	return {
-		get: (key: string): Promise<string | undefined> => {
-			try {
-				const app = ctx.app as unknown as { loadLocalStorage?: (k: string) => string | null };
-				const val = app.loadLocalStorage?.(`notor-secret-${key}`);
-				return Promise.resolve(val ?? undefined);
-			} catch { return Promise.resolve(undefined); }
-		},
-		set: (key: string, value: string): Promise<void> => {
-			try {
-				const app = ctx.app as unknown as { saveLocalStorage?: (k: string, v: string) => void };
-				app.saveLocalStorage?.(`notor-secret-${key}`, value);
-			} catch { /* silent */ }
-			return Promise.resolve();
-		},
-		delete: (key: string): Promise<void> => {
-			try {
-				const app = ctx.app as unknown as { saveLocalStorage?: (k: string, v: string | null) => void };
-				app.saveLocalStorage?.(`notor-secret-${key}`, null as unknown as string);
-			} catch { /* silent */ }
-			return Promise.resolve();
-		},
-	};
+function secretStorageDesc(store: McpSecretStore, subject: string): string {
+	if (!store.isAvailable()) {
+		return `${subject} Sensitive values cannot be stored — Obsidian's secret storage is unavailable on this version.`;
+	}
+	if (!store.isEncrypted()) {
+		return `${subject} Values marked sensitive are kept in Obsidian's secret storage (Settings → Keychain) rather than plugin settings, but OS-level encryption is unavailable on this system.`;
+	}
+	return `${subject} Values marked sensitive are stored in Obsidian's encrypted secret storage (Settings → Keychain) instead of plugin settings.`;
 }
 
 /** Get the McpHub instance from the plugin (cast through unknown). */
@@ -370,17 +354,14 @@ function renderServerDetail(
 							// Disconnect first
 							await mcpHub?.disconnectServer(serverName).catch(() => {});
 
-							// Clean up secrets for env vars and headers
-							const secrets = makeSecretStorage(ctx);
+							// Remove this server's credentials from secret storage so
+							// they don't linger in the user's keychain.
+							const secrets = createMcpSecretStore(ctx.app);
 							for (const envVar of config.env ?? []) {
-								if (envVar.sensitive) {
-									await secrets.delete(mcpEnvSecretKey(serverName, envVar.key));
-								}
+								if (envVar.sensitive) secrets.clear("env", serverName, envVar.key);
 							}
 							for (const header of config.headers ?? []) {
-								if (header.sensitive) {
-									await secrets.delete(mcpHeaderSecretKey(serverName, header.key));
-								}
+								if (header.sensitive) secrets.clear("header", serverName, header.key);
 							}
 
 							delete ctx.settings.mcp_servers[serverName];
@@ -453,64 +434,15 @@ function renderStdioFields(
 		);
 
 	// Environment variables with sensitive toggle (INT-003)
-	new Setting(containerEl).setHeading().setName("Environment variables");
-	containerEl.createEl("p", {
-		text: "Additional environment variables for the spawned process. Mark sensitive values to store them securely.",
-		cls: "setting-item-description",
+	renderSecretKeyValueSection(containerEl, ctx, {
+		kind: "env",
+		serverName,
+		heading: "Environment variables",
+		subject: "Additional environment variables for the spawned process.",
+		addLabel: "+ add variable",
+		read: () => config.env,
+		ensure: () => (config.env ??= []),
 	});
-
-	const envListEl = containerEl.createDiv({ cls: "notor-mcp-kv-list" });
-	const secrets = makeSecretStorage(ctx);
-
-	const renderEnvList = () => {
-		envListEl.empty();
-		(config.env ?? []).forEach((envVar, i) => {
-			renderKeyValueRow(
-				envListEl, envVar, i,
-				async (updated) => {
-					const oldKey = config.env![i]!.key;
-					const wasSensitive = config.env![i]!.sensitive;
-					config.env![i] = updated;
-					// If sensitive toggled off, move value out of secrets
-					if (wasSensitive && !updated.sensitive) {
-						const stored = await secrets.get(mcpEnvSecretKey(serverName, oldKey));
-						if (stored) config.env![i].value = stored;
-						await secrets.delete(mcpEnvSecretKey(serverName, oldKey));
-					}
-					// If sensitive toggled on, store value in secrets
-					if (!wasSensitive && updated.sensitive && updated.value) {
-						await secrets.set(mcpEnvSecretKey(serverName, updated.key), updated.value);
-						config.env![i].value = "";
-					}
-					// Handle key rename for sensitive entries
-					if (wasSensitive && updated.sensitive && oldKey !== updated.key) {
-						const stored = await secrets.get(mcpEnvSecretKey(serverName, oldKey));
-						if (stored) await secrets.set(mcpEnvSecretKey(serverName, updated.key), stored);
-						await secrets.delete(mcpEnvSecretKey(serverName, oldKey));
-					}
-					await ctx.saveSettings();
-				},
-				async () => {
-					const envVar2 = config.env![i]!;
-					if (envVar2.sensitive) await secrets.delete(mcpEnvSecretKey(serverName, envVar2.key));
-					config.env!.splice(i, 1);
-					await ctx.saveSettings();
-					renderEnvList();
-				}
-			);
-		});
-	};
-
-	renderEnvList();
-
-	new Setting(containerEl)
-		.addButton((btn) =>
-			btn.setButtonText("+ add variable").onClick(() => {
-				if (!config.env) config.env = [];
-				config.env.push({ key: "", value: "", sensitive: false });
-				renderEnvList();
-			})
-		);
 }
 
 // ---------------------------------------------------------------------------
@@ -537,59 +469,121 @@ function renderHttpFields(
 		);
 
 	// Headers with sensitive toggle (INT-003)
-	new Setting(containerEl).setHeading().setName("Headers");
+	renderSecretKeyValueSection(containerEl, ctx, {
+		kind: "header",
+		serverName,
+		heading: "Headers",
+		subject: "Custom HTTP headers (e.g., for API key authentication).",
+		addLabel: "+ add header",
+		read: () => config.headers,
+		ensure: () => (config.headers ??= []),
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Persisted key/value list with secret-backed sensitive values (INT-003)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render the editable key/value list for a saved server's env vars or headers.
+ *
+ * Shared by both transports — the only differences are which secret namespace
+ * sensitive values belong to and the surrounding wording. Sensitive values are
+ * written to Obsidian's SecretStorage and replaced in settings by an empty
+ * placeholder, so a credential is never persisted to `data.json`.
+ */
+function renderSecretKeyValueSection(
+	containerEl: HTMLElement,
+	ctx: SettingsContext,
+	opts: {
+		kind: McpSecretKind;
+		serverName: string;
+		heading: string;
+		/** Leading sentence; the secret-storage explanation is appended. */
+		subject: string;
+		addLabel: string;
+		/** Current rows, or undefined when the config field is unset. */
+		read: () => Array<McpEnvVar | McpHeader> | undefined;
+		/** Current rows, creating the config field when needed. */
+		ensure: () => Array<McpEnvVar | McpHeader>;
+	}
+): void {
+	const { kind, serverName } = opts;
+	const secrets = createMcpSecretStore(ctx.app);
+
+	new Setting(containerEl).setHeading().setName(opts.heading);
 	containerEl.createEl("p", {
-		text: "Custom HTTP headers (e.g., for API key authentication). Mark sensitive values to store them securely.",
+		text: secretStorageDesc(secrets, opts.subject),
 		cls: "setting-item-description",
 	});
 
-	const headerListEl = containerEl.createDiv({ cls: "notor-mcp-kv-list" });
-	const secrets = makeSecretStorage(ctx);
+	const listEl = containerEl.createDiv({ cls: "notor-mcp-kv-list" });
 
-	const renderHeaderList = () => {
-		headerListEl.empty();
-		(config.headers ?? []).forEach((header, i) => {
+	const renderRows = () => {
+		listEl.empty();
+		(opts.read() ?? []).forEach((item, i) => {
 			renderKeyValueRow(
-				headerListEl, header, i,
-				async (updated: McpHeader) => {
-					const oldKey = config.headers![i]!.key;
-					const wasSensitive = config.headers![i]!.sensitive;
-					config.headers![i] = updated;
-					if (wasSensitive && !updated.sensitive) {
-						const stored = await secrets.get(mcpHeaderSecretKey(serverName, oldKey));
-						if (stored) config.headers![i].value = stored;
-						await secrets.delete(mcpHeaderSecretKey(serverName, oldKey));
+				listEl, item, i,
+				async (updated) => {
+					const rows = opts.ensure();
+					const prev = rows[i];
+					if (!prev) return;
+					const next = {
+						key: updated.key.trim(),
+						value: updated.value,
+						sensitive: updated.sensitive,
+					};
+
+					if (prev.sensitive && !next.sensitive) {
+						// Sensitive → plain: bring the stored value back inline
+						// (unless the user typed a replacement), then drop the secret.
+						const stored = secrets.get(kind, serverName, prev.key);
+						if (stored && !next.value) next.value = stored;
+						secrets.clear(kind, serverName, prev.key);
+					} else if (prev.sensitive && next.sensitive && prev.key !== next.key) {
+						// Renamed while sensitive: move the secret to the new ID.
+						const stored = secrets.get(kind, serverName, prev.key);
+						if (stored) secrets.set(kind, serverName, next.key, stored);
+						secrets.clear(kind, serverName, prev.key);
 					}
-					if (!wasSensitive && updated.sensitive && updated.value) {
-						await secrets.set(mcpHeaderSecretKey(serverName, updated.key), updated.value);
-						config.headers![i].value = "";
+
+					// Any sensitive row carrying a typed value: move it into secret
+					// storage. This covers both toggling sensitive on and editing the
+					// value of a row that was already sensitive — the latter used to
+					// fall through and persist the credential into settings.
+					let movedToSecrets = false;
+					if (next.sensitive && next.value) {
+						secrets.set(kind, serverName, next.key, next.value);
+						next.value = "";
+						movedToSecrets = true;
 					}
-					if (wasSensitive && updated.sensitive && oldKey !== updated.key) {
-						const stored = await secrets.get(mcpHeaderSecretKey(serverName, oldKey));
-						if (stored) await secrets.set(mcpHeaderSecretKey(serverName, updated.key), stored);
-						await secrets.delete(mcpHeaderSecretKey(serverName, oldKey));
-					}
+
+					rows[i] = next;
 					await ctx.saveSettings();
+					// Re-render so the input reflects that the value now lives in the
+					// keychain rather than in the field the user typed into.
+					if (movedToSecrets) renderRows();
 				},
 				async () => {
-					const hdr = config.headers![i]!;
-					if (hdr.sensitive) await secrets.delete(mcpHeaderSecretKey(serverName, hdr.key));
-					config.headers!.splice(i, 1);
+					const rows = opts.ensure();
+					const removed = rows[i];
+					if (removed?.sensitive) secrets.clear(kind, serverName, removed.key);
+					rows.splice(i, 1);
 					await ctx.saveSettings();
-					renderHeaderList();
-				}
+					renderRows();
+				},
+				item.sensitive && !item.value && secrets.has(kind, serverName, item.key)
 			);
 		});
 	};
 
-	renderHeaderList();
+	renderRows();
 
 	new Setting(containerEl)
 		.addButton((btn) =>
-			btn.setButtonText("+ add header").onClick(() => {
-				if (!config.headers) config.headers = [];
-				config.headers.push({ key: "", value: "", sensitive: false });
-				renderHeaderList();
+			btn.setButtonText(opts.addLabel).onClick(() => {
+				opts.ensure().push({ key: "", value: "", sensitive: false });
+				renderRows();
 			})
 		);
 }
@@ -598,12 +592,17 @@ function renderHttpFields(
 // Key/value row renderer with sensitive toggle (INT-003)
 // ---------------------------------------------------------------------------
 
+/**
+ * @param hasStoredSecret - True when this row's value is already held in secret
+ *   storage, so the empty input can say so instead of looking unconfigured.
+ */
 function renderKeyValueRow(
 	containerEl: HTMLElement,
 	item: McpEnvVar | McpHeader,
 	_index: number,
 	onChange: (updated: McpEnvVar | McpHeader) => Promise<void>,
-	onRemove: () => Promise<void>
+	onRemove: () => Promise<void>,
+	hasStoredSecret = false
 ): void {
 	const rowEl = containerEl.createDiv({ cls: "notor-mcp-kv-row" });
 
@@ -611,9 +610,10 @@ function renderKeyValueRow(
 	keyInput.value = item.key;
 	keyInput.classList.add("notor-mcp-kv-key");
 
+	const sensitivePlaceholder = hasStoredSecret ? "Stored in keychain" : "••••••••";
 	const valueInput = rowEl.createEl("input", {
 		type: item.sensitive ? "password" : "text",
-		placeholder: item.sensitive ? "••••••••" : "Value",
+		placeholder: item.sensitive ? sensitivePlaceholder : "Value",
 	});
 	valueInput.value = item.value;
 	valueInput.classList.add("notor-mcp-kv-value");
@@ -637,7 +637,7 @@ function renderKeyValueRow(
 	valueInput.addEventListener("change", () => void emitChange());
 	sensitiveCheck.addEventListener("change", () => {
 		valueInput.type = sensitiveCheck.checked ? "password" : "text";
-		valueInput.placeholder = sensitiveCheck.checked ? "••••••••" : "Value";
+		valueInput.placeholder = sensitiveCheck.checked ? sensitivePlaceholder : "Value";
 		void emitChange();
 	});
 	removeBtn.addEventListener("click", () => {
@@ -784,6 +784,8 @@ function renderAddServerForm(
 		text: "Custom MCP tools run outside Notor's built-in safety guarantees. Only add servers you trust.",
 	});
 
+	const secrets = createMcpSecretStore(ctx.app);
+
 	// State for the form. The draft cwd / env / header state lives out here
 	// (not inside updateTransportFields) so switching transport back and forth
 	// doesn't discard values the user already typed.
@@ -900,7 +902,7 @@ function renderAddServerForm(
 			renderDraftKeyValueList(
 				transportFieldsEl,
 				"Environment variables",
-				"Additional environment variables for the spawned process. Mark sensitive values to store them securely.",
+				secretStorageDesc(secrets, "Additional environment variables for the spawned process."),
 				"+ add variable",
 				draftEnv
 			);
@@ -916,7 +918,7 @@ function renderAddServerForm(
 			renderDraftKeyValueList(
 				transportFieldsEl,
 				"Headers",
-				"Custom HTTP headers (e.g., for API key authentication). Mark sensitive values to store them securely.",
+				secretStorageDesc(secrets, "Custom HTTP headers (e.g., for API key authentication)."),
 				"+ add header",
 				draftHeaders
 			);
@@ -980,6 +982,14 @@ function renderAddServerForm(
 					collected.push({ key, value: row.value, sensitive: row.sensitive });
 				}
 
+				// Refuse rather than silently downgrade a credential to plain text.
+				if (!secrets.isAvailable() && collected.some((r) => r.sensitive && r.value)) {
+					errorEl.textContent =
+						"Cannot store sensitive values — Obsidian's secret storage is unavailable. Update Obsidian, or clear the sensitive checkbox.";
+					errorEl.removeClass("notor-hidden");
+					return;
+				}
+
 				// Build config
 				const newConfig: McpServerConfig = {
 					name: nameInput,
@@ -994,18 +1004,15 @@ function renderAddServerForm(
 					newConfig.url = httpUrlInput;
 				}
 
-				// Sensitive values go to secret storage under a name-scoped key —
-				// which is why this happens only now that the name is final. Only an
-				// empty placeholder is persisted in settings, matching what
+				// Sensitive values go to Obsidian's SecretStorage under an ID scoped
+				// to the server name — which is why this happens only now that the
+				// name is final. Settings keep an empty placeholder, matching what
 				// McpHub.resolveEnvironment()/resolveHeaders() expect.
-				const secrets = makeSecretStorage(ctx);
+				const kind: McpSecretKind = isStdio ? "env" : "header";
 				const persisted: McpEnvVar[] = [];
 				for (const row of collected) {
 					if (row.sensitive && row.value) {
-						const secretKey = isStdio
-							? mcpEnvSecretKey(nameInput, row.key)
-							: mcpHeaderSecretKey(nameInput, row.key);
-						await secrets.set(secretKey, row.value);
+						secrets.set(kind, nameInput, row.key, row.value);
 						persisted.push({ key: row.key, value: "", sensitive: true });
 					} else {
 						persisted.push(row);

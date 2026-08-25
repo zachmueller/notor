@@ -1,18 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-	slugifySecretId,
 	parseSettingsSchema,
 	resolveSettings,
 	resolveSharedSettings,
 } from "../settings-schema";
+import { slugifySecretId } from "../../utils/secrets";
 
 // ---------------------------------------------------------------------------
-// Mock getSecret
+// Mock getSecret (keeping the real slugifySecretId — it has its own tests below)
 // ---------------------------------------------------------------------------
 
 const mockGetSecret = vi.fn<[unknown, string], string | null>().mockReturnValue(null);
 
-vi.mock("../../utils/secrets", () => ({
+vi.mock("../../utils/secrets", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../utils/secrets")>()),
 	getSecret: (...args: unknown[]) => mockGetSecret(args[0], args[1] as string),
 }));
 

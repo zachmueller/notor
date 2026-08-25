@@ -112,6 +112,7 @@ import { wireView as wireViewFn } from "./ui/wire-view";
 import { McpHub } from "./mcp/mcp-hub";
 import { SleepWakeDetector } from "./utils/sleep-wake-detector";
 import type { McpServerConfig } from "./mcp/mcp-types";
+import { createMcpSecretStore } from "./mcp/mcp-secrets";
 import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
 import { showMcpMissingAnnotationsNotice } from "./tool-config/notices";
 
@@ -1350,25 +1351,13 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			}
 		});
 
-		// Use Obsidian's plugin-level secret storage if available
-		const pluginSecretStorage = {
-			get: (key: string): Promise<string | undefined> => {
-				try {
-					// Obsidian stores secrets via the app's internal SecretStorage
-					const app = this.app as unknown as {
-						vault: { adapter: { basePath?: string } };
-						loadLocalStorage?: (key: string) => string | null;
-					};
-					const val = app.loadLocalStorage?.(`notor-secret-${key}`);
-					return Promise.resolve(val ?? undefined);
-				} catch {
-					return Promise.resolve(undefined);
-				}
-			},
-		};
+		// Sensitive env vars / headers live in Obsidian's SecretStorage (the
+		// OS-encrypted keychain), with a read-time migration for values written
+		// to the old unencrypted localStorage location.
+		const mcpSecrets = createMcpSecretStore(this.app);
 
 		// Initialize McpHub — non-blocking, fires off connections asynchronously
-		mcpHub.initialize(this.settings, pluginSecretStorage).catch((e) => {
+		mcpHub.initialize(this.settings, mcpSecrets).catch((e) => {
 			log.error("McpHub initialization failed", { error: String(e) });
 		});
 

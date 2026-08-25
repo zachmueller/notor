@@ -4,10 +4,13 @@
  *
  * Covers the two MCP settings changes that have no other coverage:
  *
- * Workstream A — the "Add server" form collects connection parameters up front:
+ * Workstream A — the "Add server" form collects connection parameters up front,
+ * and values marked sensitive land in Obsidian's SecretStorage (OS-encrypted
+ * keychain), never in plugin settings or the vault's plain localStorage:
  *   1. stdio: working directory + plain env var + sensitive env var persist on add
  *   2. HTTP: sensitive header persists on add
- *      (sensitive values land in secret storage with an empty inline value)
+ *   7. a credential left in the pre-SecretStorage localStorage location is
+ *      migrated into the keychain on first read, and the plaintext copy deleted
  *
  * Workstream B — toggles and connection status changes update in place instead of
  * rebuilding the whole settings pane (which reset scroll position on every click):
@@ -152,12 +155,49 @@ async function getServerConfig(page: Page, name: string): Promise<Record<string,
 	}, name);
 }
 
-/** Read a value out of Notor's secret storage (localStorage-backed). */
-async function getSecret(page: Page, key: string): Promise<string | null> {
+/**
+ * Find the single secret whose ID starts with `prefix` in Obsidian's
+ * SecretStorage, returning its ID and value.
+ *
+ * Matching by prefix rather than by full ID keeps the test from duplicating the
+ * hash suffix that `mcpSecretId()` appends.
+ */
+async function findSecret(
+	page: Page,
+	prefix: string,
+): Promise<{ count: number; id: string | null; value: string | null }> {
+	return page.evaluate((idPrefix: string) => {
+		const ss = (window as any).app?.secretStorage;
+		if (!ss) return { count: 0, id: null, value: null };
+		const ids = (ss.listSecrets() as string[]).filter((id) => id.startsWith(idPrefix));
+		return {
+			count: ids.length,
+			id: ids[0] ?? null,
+			value: ids[0] ? ss.getSecret(ids[0]) : null,
+		};
+	}, prefix);
+}
+
+/** Read a raw value out of the vault's (unencrypted) localStorage. */
+async function getLocalStorage(page: Page, key: string): Promise<string | null> {
 	return page.evaluate(
-		(secretKey: string) => (window as any).app?.loadLocalStorage?.(`notor-secret-${secretKey}`) ?? null,
+		(k: string) => (window as any).app?.loadLocalStorage?.(k) ?? null,
 		key,
 	);
+}
+
+/** Delete every secret this test owns, so runs don't inherit keychain state. */
+async function purgeTestSecrets(page: Page): Promise<string[]> {
+	return page.evaluate(() => {
+		const ss = (window as any).app?.secretStorage;
+		if (!ss) return [];
+		const ids = (ss.listSecrets() as string[]).filter((id) => id.startsWith("notor-mcp-"));
+		for (const id of ids) {
+			if (typeof ss.deleteSecret === "function") ss.deleteSecret(id);
+			else ss.setSecret(id, "");
+		}
+		return ids;
+	});
 }
 
 /** Current scroll offset of the settings pane. */
@@ -259,7 +299,8 @@ async function testAddStdioServerWithEnvAndCwd(ctx: TestContext): Promise<void> 
 	const env = (config.env ?? []) as Array<{ key: string; value: string; sensitive: boolean }>;
 	const plain = env.find((e) => e.key === "PLAIN_VAR");
 	const secret = env.find((e) => e.key === "SECRET_TOKEN");
-	const storedSecret = await getSecret(page, `mcp_env_${STDIO_SERVER}_SECRET_TOKEN`);
+	const stored = await findSecret(page, `notor-mcp-env-${STDIO_SERVER}-secret-token-`);
+	const legacyCopy = await getLocalStorage(page, `notor-secret-mcp_env_${STDIO_SERVER}_SECRET_TOKEN`);
 	const shot = await ctx.screenshot("01-after-add-stdio");
 
 	if (config.cwd === "/tmp") {
@@ -280,13 +321,22 @@ async function testAddStdioServerWithEnvAndCwd(ctx: TestContext): Promise<void> 
 		ctx.fail("Sensitive env var placeholder persisted", `Got ${JSON.stringify(secret)}`);
 	}
 
-	if (storedSecret === "s3cret-token") {
-		ctx.pass("Sensitive env var in secret storage", `mcp_env_${STDIO_SERVER}_SECRET_TOKEN resolved`);
+	if (stored.value === "s3cret-token" && stored.count === 1) {
+		ctx.pass(
+			"Sensitive env var in Obsidian SecretStorage",
+			`Resolved from app.secretStorage under "${String(stored.id)}"`,
+		);
 	} else {
 		ctx.fail(
-			"Sensitive env var in secret storage",
-			`Expected "s3cret-token" under mcp_env_${STDIO_SERVER}_SECRET_TOKEN, got ${String(storedSecret)}`,
+			"Sensitive env var in Obsidian SecretStorage",
+			`Expected exactly one secret holding "s3cret-token", got count=${stored.count} id=${String(stored.id)} value=${String(stored.value)}`,
 		);
+	}
+
+	if (legacyCopy === null) {
+		ctx.pass("No plaintext copy in local storage", "The old notor-secret-mcp_env_* key is unused");
+	} else {
+		ctx.fail("No plaintext copy in local storage", `Found unencrypted copy: ${legacyCopy}`);
 	}
 
 	if (Array.isArray(config.args) && (config.args as string[]).join(" ") === "--serve /tmp") {
@@ -331,7 +381,7 @@ async function testAddHttpServerWithHeader(ctx: TestContext): Promise<void> {
 	const config = await getServerConfig(page, HTTP_SERVER);
 	const headers = (config?.headers ?? []) as Array<{ key: string; value: string; sensitive: boolean }>;
 	const auth = headers.find((h) => h.key === "Authorization");
-	const storedSecret = await getSecret(page, `mcp_header_${HTTP_SERVER}_Authorization`);
+	const stored = await findSecret(page, `notor-mcp-header-${HTTP_SERVER}-authorization-`);
 	const shot = await ctx.screenshot("02-after-add-http");
 
 	if (config?.url === DEAD_URL) {
@@ -346,12 +396,15 @@ async function testAddHttpServerWithHeader(ctx: TestContext): Promise<void> {
 		ctx.fail("Sensitive header placeholder persisted", `Got ${JSON.stringify(auth)}`);
 	}
 
-	if (storedSecret === "Bearer e2e") {
-		ctx.pass("Sensitive header in secret storage", `mcp_header_${HTTP_SERVER}_Authorization resolved`);
+	if (stored.value === "Bearer e2e" && stored.count === 1) {
+		ctx.pass(
+			"Sensitive header in Obsidian SecretStorage",
+			`Resolved from app.secretStorage under "${String(stored.id)}"`,
+		);
 	} else {
 		ctx.fail(
-			"Sensitive header in secret storage",
-			`Expected "Bearer e2e", got ${String(storedSecret)}`,
+			"Sensitive header in Obsidian SecretStorage",
+			`Expected exactly one secret holding "Bearer e2e", got count=${stored.count} value=${String(stored.value)}`,
 		);
 	}
 
@@ -794,6 +847,83 @@ async function testRemoveServersCleansUp(ctx: TestContext): Promise<void> {
 	await closeSettings(page);
 }
 
+/**
+ * Test 7: a credential left in the pre-SecretStorage localStorage location is
+ * migrated into Obsidian's keychain the first time it's read.
+ */
+async function testLegacySecretMigration(ctx: TestContext): Promise<void> {
+	const { page } = ctx;
+	console.log("\nTest 7: legacy plaintext credential migrates into SecretStorage");
+
+	const legacyServer = "e2e-legacy-secret";
+	const legacyKey = `notor-secret-mcp_env_${legacyServer}_LEGACY_TOKEN`;
+
+	// Seed the old unencrypted location plus a config that expects a secret.
+	await page.evaluate(
+		({ name, key, command }: { name: string; key: string; command: string }) => {
+			const app = (window as any).app;
+			const plugin = app?.plugins?.plugins?.["notor"];
+			app.saveLocalStorage(key, "legacy-plaintext-value");
+			plugin.settings.mcp_servers = plugin.settings.mcp_servers ?? {};
+			plugin.settings.mcp_servers[name] = {
+				name,
+				type: "stdio",
+				command,
+				args: [],
+				timeout: 5,
+				env: [{ key: "LEGACY_TOKEN", value: "", sensitive: true }],
+			};
+			plugin._mcpHub?.updateSettings(plugin.settings);
+			plugin._mcpHub?.connectServer(name);
+		},
+		{ name: legacyServer, key: legacyKey, command: BOGUS_COMMAND },
+	);
+
+	// The connection fails, but resolveEnvironment() runs first — which is what
+	// triggers the migration.
+	await pollUntil(async () => {
+		const status = await page.evaluate((name: string) => {
+			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
+			return plugin?._mcpHub?.getConnection(name)?.status ?? null;
+		}, legacyServer);
+		return status === "error" || status === "disconnected";
+	}, 20_000);
+
+	const stored = await findSecret(page, `notor-mcp-env-${legacyServer}-legacy-token-`);
+	const legacyRemains = await getLocalStorage(page, legacyKey);
+
+	if (stored.value === "legacy-plaintext-value") {
+		ctx.pass(
+			"Legacy credential migrated into SecretStorage",
+			`Now stored under "${String(stored.id)}"`,
+		);
+	} else {
+		ctx.fail(
+			"Legacy credential migrated into SecretStorage",
+			`Expected "legacy-plaintext-value", got ${String(stored.value)} (id=${String(stored.id)})`,
+		);
+	}
+
+	if (legacyRemains === null) {
+		ctx.pass("Plaintext copy deleted after migration", `${legacyKey} is gone`);
+	} else {
+		ctx.fail("Plaintext copy deleted after migration", `Still present: ${legacyRemains}`);
+	}
+
+	// Clean up this test's own fixture (server config + migrated secret) so the
+	// end-of-run orphan check only reflects the removal flow.
+	await page.evaluate(
+		({ name, id }: { name: string; id: string | null }) => {
+			const app = (window as any).app;
+			const plugin = app?.plugins?.plugins?.["notor"];
+			plugin?._mcpHub?.disconnectServer(name);
+			if (plugin?.settings?.mcp_servers) delete plugin.settings.mcp_servers[name];
+			if (id) app?.secretStorage?.deleteSecret?.(id);
+		},
+		{ name: legacyServer, id: stored.id },
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -801,12 +931,27 @@ async function testRemoveServersCleansUp(ctx: TestContext): Promise<void> {
 async function tests(ctx: TestContext): Promise<void> {
 	await ctx.page.waitForTimeout(4_000);
 
+	const purged = await purgeTestSecrets(ctx.page);
+	if (purged.length > 0) console.log(`  [setup] purged stale secrets: ${purged.join(", ")}`);
+
 	await testAddStdioServerWithEnvAndCwd(ctx);
 	await testAddHttpServerWithHeader(ctx);
 	await testToolToggleKeepsScroll(ctx);
 	await testServerToggleKeepsRow(ctx);
 	await testStatusChangeKeepsPane(ctx);
+	await testLegacySecretMigration(ctx);
 	await testRemoveServersCleansUp(ctx);
+
+	// Removing the servers should have taken their credentials with them.
+	const leftover = await purgeTestSecrets(ctx.page);
+	if (leftover.length === 0) {
+		ctx.pass("Server removal cleared its credentials", "No notor-mcp-* secrets left in the keychain");
+	} else {
+		ctx.fail(
+			"Server removal cleared its credentials",
+			`Orphaned secrets remained: ${leftover.join(", ")}`,
+		);
+	}
 }
 
 const settings = buildDefaultSettings({

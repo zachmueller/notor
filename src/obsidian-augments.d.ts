@@ -15,12 +15,25 @@ declare module "obsidian" {
 	 * Available since Obsidian 1.11.4 via `app.secretStorage`.
 	 */
 	interface SecretStorage {
-		/** Store a secret. ID must be lowercase alphanumeric with dashes. */
+		/** Store a secret. ID must be lowercase alphanumeric with dashes, ≤ 64 chars. */
 		setSecret(id: string, secret: string): void;
 		/** Retrieve a secret by ID. Returns null if not found. */
 		getSecret(id: string): string | null;
 		/** List all stored secret IDs. */
 		listSecrets(): string[];
+		/**
+		 * Remove a secret entirely, so its ID also leaves `listSecrets()`.
+		 *
+		 * Undocumented but present at runtime (Obsidian's own Keychain settings
+		 * UI calls it). Optional so older builds fall back to `setSecret(id, "")`.
+		 */
+		deleteSecret?(id: string): void;
+		/**
+		 * Whether the OS-level encryption backend is usable (Keychain / DPAPI /
+		 * libsecret). When false, Obsidian stores secrets without encrypting them.
+		 * Undocumented but present at runtime.
+		 */
+		isEncryptionAvailable?(): boolean;
 	}
 
 	interface App {

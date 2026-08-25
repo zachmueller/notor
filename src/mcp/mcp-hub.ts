@@ -32,8 +32,8 @@ import type {
 	McpConnection,
 	McpConnectionStatus,
 	McpDiscoveredTool,
+	McpSecretResolver,
 } from "./mcp-types";
-import { mcpEnvSecretKey, mcpHeaderSecretKey } from "./mcp-types";
 import type { TaskLaneQueue } from "../queue/task-lane-queue";
 import { logger } from "../utils/logger";
 import { sanitizeInputSchemaForBedrock } from "../utils/json-schema-sanitizer";
@@ -66,11 +66,6 @@ const SLEEP_RECONNECT_DELAY_MS = 2_000;
 /** Image MIME types that can be converted to ContentBlock. */
 const SUPPORTED_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
-/** Obsidian SecretStorage interface (minimal — just what we need). */
-interface SecretStorage {
-	get(key: string): Promise<string | undefined>;
-}
-
 /** Status change callback signature. */
 export type StatusChangeCallback = (
 	serverName: string,
@@ -96,8 +91,8 @@ export class McpHub {
 	/** Plugin settings reference (read-only). */
 	private settings: NotorSettings | null = null;
 
-	/** Obsidian SecretStorage for credential resolution. */
-	private secretStorage: SecretStorage | null = null;
+	/** Resolver for credentials stored in Obsidian's SecretStorage. */
+	private secrets: McpSecretResolver | null = null;
 
 	/** Plugin version string for MCP client info. */
 	private pluginVersion: string;
@@ -150,9 +145,9 @@ export class McpHub {
 	 * Non-blocking — fires off connections asynchronously so plugin load
 	 * completes immediately.
 	 */
-	initialize(settings: NotorSettings, secretStorage: SecretStorage): Promise<void> {
+	initialize(settings: NotorSettings, secrets: McpSecretResolver): Promise<void> {
 		this.settings = settings;
-		this.secretStorage = secretStorage;
+		this.secrets = secrets;
 
 		const servers = settings.mcp_servers ?? {};
 		const enabledServers = Object.entries(servers).filter(
@@ -807,7 +802,7 @@ export class McpHub {
 		});
 
 		// Resolve environment variables (system + config + secrets)
-		const env = await this.resolveEnvironment(config);
+		const env = this.resolveEnvironment(config);
 
 		// Resolve the user's login shell PATH so tools installed via
 		// Homebrew, nvm, pyenv, etc. are found when spawning the process.
@@ -861,7 +856,7 @@ export class McpHub {
 			throw new Error("Streamable HTTP transport requires a URL.");
 		}
 
-		const headers = await this.resolveHeaders(config);
+		const headers = this.resolveHeaders(config);
 
 		log.debug("Creating streamable HTTP transport", {
 			serverName: config.name,
@@ -881,18 +876,22 @@ export class McpHub {
 	/**
 	 * Resolve environment variables for an stdio server.
 	 *
-	 * Non-sensitive values come from config; sensitive values from SecretStorage.
+	 * Non-sensitive values come from config; sensitive values come from
+	 * Obsidian's SecretStorage via the injected resolver.
 	 */
-	private async resolveEnvironment(config: McpServerConfig): Promise<Record<string, string>> {
+	private resolveEnvironment(config: McpServerConfig): Record<string, string> {
 		const env: Record<string, string> = {};
 
 		for (const envVar of config.env ?? []) {
-			if (envVar.sensitive && this.secretStorage) {
-				const value = await this.secretStorage.get(
-					mcpEnvSecretKey(config.name, envVar.key)
-				);
+			if (envVar.sensitive) {
+				const value = this.secrets?.get("env", config.name, envVar.key);
 				if (value) {
 					env[envVar.key] = value;
+				} else {
+					log.warn("Sensitive env var has no stored value", {
+						serverName: config.name,
+						key: envVar.key,
+					});
 				}
 			} else {
 				env[envVar.key] = envVar.value;
@@ -905,18 +904,22 @@ export class McpHub {
 	/**
 	 * Resolve HTTP headers for an HTTP-transport server.
 	 *
-	 * Non-sensitive values come from config; sensitive values from SecretStorage.
+	 * Non-sensitive values come from config; sensitive values come from
+	 * Obsidian's SecretStorage via the injected resolver.
 	 */
-	private async resolveHeaders(config: McpServerConfig): Promise<Record<string, string>> {
+	private resolveHeaders(config: McpServerConfig): Record<string, string> {
 		const headers: Record<string, string> = {};
 
 		for (const header of config.headers ?? []) {
-			if (header.sensitive && this.secretStorage) {
-				const value = await this.secretStorage.get(
-					mcpHeaderSecretKey(config.name, header.key)
-				);
+			if (header.sensitive) {
+				const value = this.secrets?.get("header", config.name, header.key);
 				if (value) {
 					headers[header.key] = value;
+				} else {
+					log.warn("Sensitive header has no stored value", {
+						serverName: config.name,
+						key: header.key,
+					});
 				}
 			} else {
 				headers[header.key] = header.value;
@@ -1190,7 +1193,7 @@ export class McpHub {
 		this.stdioExitTimestamps.clear();
 		this.statusCallbacks = [];
 		this.settings = null;
-		this.secretStorage = null;
+		this.secrets = null;
 
 		log.info("McpHub disposed");
 	}

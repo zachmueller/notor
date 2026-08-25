@@ -2,7 +2,7 @@ import { Notice } from "obsidian";
 import type { App } from "obsidian";
 import type { NotorSettings } from "./types";
 import { DEFAULT_MODEL_PRESETS } from "./defaults";
-import { slugifySecretId } from "../extensions/settings-schema";
+import { slugifySecretId } from "../utils/secrets";
 import { getSecret, setSecret, clearSecret } from "../utils/secrets";
 
 export interface MigrationDeps {
