@@ -21,7 +21,7 @@ Obsidian exposes a dedicated `SecretStorage` class available via `app.secretStor
 
 - All methods are **synchronous** (no `Promise` return types).
 - The `id` parameter is constrained: **lowercase alphanumeric characters and dashes only** (e.g., `openai-api-key`, `anthropic-key`). Invalid IDs throw an `Error`.
-- There is **no `deleteSecret` method** in the public API. To "clear" a secret, the recommended approach is `setSecret(id, "")` — storing an empty string.
+- There is no `deleteSecret` method in the **published type definitions**, but one **does exist at runtime** — Obsidian's own Keychain settings UI calls it, and it was verified against Obsidian 1.13.7 (see the 2026-08-25 update in §3). Prefer it, falling back to `setSecret(id, "")` on builds without it.
 
 ### `SecretComponent` (since 1.11.1, updated 1.11.4)
 
@@ -95,10 +95,14 @@ The Obsidian API type definitions and public documentation do **not** specify th
 | **Create** | `setSecret(id, secret)` | ✅ |
 | **Read** | `getSecret(id)` | ✅ (returns `null` if not found) |
 | **Update** | `setSecret(id, newSecret)` | ✅ (overwrites existing) |
-| **Delete** | *None* | ❌ No public `deleteSecret` method |
+| **Delete** | `deleteSecret(id)` | ⚠️ Undocumented, but present at runtime |
 | **List** | `listSecrets()` | ✅ (returns array of IDs) |
 
-**Deletion workaround:** Set the secret to an empty string via `setSecret(id, "")`. The ID will still appear in `listSecrets()`, but `getSecret(id)` will return `""` (empty string, not `null`). Code should treat both `null` and `""` as "no secret configured."
+**Deletion (verified 2026-08-25 against Obsidian 1.13.7):** `deleteSecret(id)` exists on `app.secretStorage` and removes the entry outright — afterwards `getSecret(id)` returns `null` and the ID is gone from `listSecrets()`. It is absent from the published types, so treat it as optional and keep the fallback: `setSecret(id, "")` leaves the ID in `listSecrets()` with an empty value. Code should treat both `null` and `""` as "no secret configured."
+
+Two other undocumented runtime members exist on the same object: `isEncryptionAvailable()` (false when the platform has no keychain backend, in which case Obsidian stores secrets unencrypted) and `peekSecret(id)` (a read that skips access recording). `src/obsidian-augments.d.ts` declares the ones Notor relies on.
+
+**ID validation (verified same run):** `setSecret` **throws** — it does not sanitize — for any ID failing `/^[a-z0-9-]+$/` or exceeding 64 characters: "Secret ID is invalid. Use only lowercase letters, numbers and dashes. 64 characters max." Build IDs with `slugifySecretId()` from `src/utils/secrets.ts`, and bound the length when a segment comes from user input (see `mcpSecretId()` in `src/mcp/mcp-secrets.ts`).
 
 **Namespace:** Secrets are global to the vault, not namespaced per plugin. Use descriptive, plugin-prefixed IDs to avoid collisions (e.g., `notor-openai-api-key`). However, the shared nature is by design — the official docs explicitly state secrets can be shared across plugins.
 
