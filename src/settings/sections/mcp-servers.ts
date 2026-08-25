@@ -24,7 +24,7 @@ import {
 } from "../../mcp/mcp-types";
 import { parseShellArgs, serializeShellArgs } from "../../utils/shell-args";
 import type { McpHub } from "../../mcp/mcp-hub";
-import type { McpConnectionStatus } from "../../mcp/mcp-types";
+import type { McpConnection, McpConnectionStatus } from "../../mcp/mcp-types";
 import { applyTruncationToElement } from "../helpers";
 
 // ---------------------------------------------------------------------------
@@ -107,6 +107,34 @@ function getMcpHub(ctx: SettingsContext): McpHub | undefined {
 	return (ctx.plugin as unknown as { _mcpHub?: McpHub })._mcpHub;
 }
 
+/**
+ * Live handles into one rendered server row.
+ *
+ * Kept so status changes and the enable toggle can update a single row in place
+ * instead of rebuilding the whole list (which discards `<details>` expansion
+ * state, half-typed add-form input, and the pane's scroll position).
+ */
+interface ServerRow {
+	/** The collapsible entry for this server. */
+	details: HTMLDetailsElement;
+	/** Status icon span in the summary. */
+	dotSpan: HTMLElement;
+	/** Inline error hint in the summary — always present, hidden when there is no error. */
+	errorHintEl: HTMLElement;
+	/** Detail body, re-rendered only when the connection state actually changes. */
+	body: HTMLElement;
+	/** {@link connectionSignature} of the last body render. */
+	bodySig: string;
+}
+
+/**
+ * Signature of everything in a connection that the detail body renders.
+ * Used to skip body re-renders that would clobber in-progress edits.
+ */
+function connectionSignature(conn: McpConnection | undefined): string {
+	return `${conn?.status ?? "disconnected"}|${conn?.error ?? ""}|${conn?.tools.length ?? 0}`;
+}
+
 // ---------------------------------------------------------------------------
 // Main section renderer
 // ---------------------------------------------------------------------------
@@ -130,48 +158,72 @@ export function renderMcpServersSection(
 	});
 
 	const mcpHub = getMcpHub(ctx);
-	const servers = ctx.settings.mcp_servers ?? {};
 
-	// Render existing server entries
 	const serverListEl = containerEl.createDiv({ cls: "notor-mcp-server-list" });
-	renderServerList(serverListEl, ctx, mcpHub, () => {
-		serverListEl.empty();
-		renderServerList(serverListEl, ctx, mcpHub, arguments.callee as () => void);
-		addServerFormEl.empty();
-		renderAddServerForm(addServerFormEl, ctx, mcpHub, () => {
-			serverListEl.empty();
-			renderServerList(serverListEl, ctx, mcpHub, refresh);
-		});
-	});
-
-	// Keep a stable refresh reference
-	function refresh() {
-		serverListEl.empty();
-		renderServerList(serverListEl, ctx, mcpHub, refresh);
-		addServerFormEl.empty();
-		renderAddServerForm(addServerFormEl, ctx, mcpHub, refresh);
-	}
-
-	// Re-render list with stable refresh
-	serverListEl.empty();
-	renderServerList(serverListEl, ctx, mcpHub, refresh);
-
-	// Subscribe to live status changes so icons update as connections resolve.
-	if (mcpHub) {
-		ctx.addCleanup?.(mcpHub.onStatusChange(refresh));
-	}
-
-	// "Add server" form section
 	const addServerFormEl = containerEl.createDiv({ cls: "notor-mcp-add-server" });
-	renderAddServerForm(addServerFormEl, ctx, mcpHub, refresh);
 
-	// Empty state
-	if (Object.keys(servers).length === 0) {
+	/** Rendered rows by server name, for scoped in-place updates. */
+	const rows = new Map<string, ServerRow>();
+
+	const renderEmptyState = () => {
 		serverListEl.createEl("p", {
 			text: "No MCP servers configured yet. Add one below.",
 			cls: "notor-mcp-empty",
 		});
+	};
+
+	/**
+	 * Update one server's row in place: status dot, inline error hint, and — only
+	 * when the connection state changed — the detail body.
+	 *
+	 * Structural changes fall back to a full redisplay: a server added while the
+	 * pane is open has no row yet, and the Tools section has to learn about it too.
+	 */
+	const updateServerRow = (serverName: string): void => {
+		const row = rows.get(serverName);
+		const config = ctx.settings.mcp_servers?.[serverName];
+
+		if (!row) {
+			// Newly added server — rebuild once so every section picks it up.
+			if (config) ctx.redisplay();
+			return;
+		}
+		if (!config) {
+			// A status event landed for a server that is already gone (e.g. an
+			// in-flight HTTP reconnect after removal) — drop the orphaned row.
+			row.details.remove();
+			rows.delete(serverName);
+			if (rows.size === 0) renderEmptyState();
+			return;
+		}
+
+		const conn = mcpHub?.getConnection(serverName);
+		const status = conn?.status;
+
+		row.dotSpan.className = `notor-mcp-status-dot notor-mcp-dot-${status ?? "disconnected"}`;
+		setStatusIcon(row.dotSpan, status);
+
+		const hint = status === "error" ? conn?.error ?? "" : "";
+		row.errorHintEl.setText(hint);
+		row.errorHintEl.toggleClass("notor-hidden", !hint);
+
+		const sig = connectionSignature(conn);
+		if (sig !== row.bodySig) {
+			row.bodySig = sig;
+			row.body.empty();
+			renderServerDetail(row.body, serverName, config, ctx, mcpHub, updateServerRow);
+		}
+	};
+
+	renderServerList(serverListEl, ctx, mcpHub, rows, updateServerRow);
+	if (rows.size === 0) renderEmptyState();
+
+	// Subscribe to live status changes so icons update as connections resolve.
+	if (mcpHub) {
+		ctx.addCleanup?.(mcpHub.onStatusChange((serverName) => updateServerRow(serverName)));
 	}
+
+	renderAddServerForm(addServerFormEl, ctx, mcpHub);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +234,8 @@ function renderServerList(
 	containerEl: HTMLElement,
 	ctx: SettingsContext,
 	mcpHub: McpHub | undefined,
-	refresh: () => void
+	rows: Map<string, ServerRow>,
+	updateServerRow: (serverName: string) => void
 ): void {
 	const servers = ctx.settings.mcp_servers ?? {};
 	const serverNames = Object.keys(servers);
@@ -207,9 +260,12 @@ function renderServerList(
 		summaryLeft.createSpan({ cls: "notor-mcp-server-name", text: serverName });
 		summaryLeft.createSpan({ cls: "notor-mcp-transport-badge", text: transportLabel(config.type) });
 
-		if (status === "error" && conn?.error) {
-			summaryLeft.createSpan({ cls: "notor-mcp-server-error-hint", text: conn.error });
-		}
+		// Always created — a stable DOM position lets in-place updates show and
+		// hide the hint without rebuilding the summary.
+		const errorHintEl = summaryLeft.createSpan({ cls: "notor-mcp-server-error-hint" });
+		const errorHint = status === "error" ? conn?.error ?? "" : "";
+		errorHintEl.setText(errorHint);
+		if (!errorHint) errorHintEl.addClass("notor-hidden");
 
 		// Enable/disable toggle (right side of summary)
 		const summaryRight = summary.createDiv({ cls: "notor-mcp-server-summary-right" });
@@ -223,14 +279,22 @@ function renderServerList(
 				} else {
 					mcpHub?.disconnectServer(serverName).catch(() => {});
 				}
-				refresh();
+				updateServerRow(serverName);
 			});
 		// Prevent the <details> element from collapsing when clicking the toggle
 		toggle.toggleEl.addEventListener("click", (e) => e.stopPropagation());
 
 		// Detail body
 		const body = details.createDiv({ cls: "notor-mcp-server-body" });
-		renderServerDetail(body, serverName, config, ctx, mcpHub, refresh);
+		renderServerDetail(body, serverName, config, ctx, mcpHub, updateServerRow);
+
+		rows.set(serverName, {
+			details,
+			dotSpan,
+			errorHintEl,
+			body,
+			bodySig: connectionSignature(conn),
+		});
 	}
 }
 
@@ -244,7 +308,7 @@ function renderServerDetail(
 	config: McpServerConfig,
 	ctx: SettingsContext,
 	mcpHub: McpHub | undefined,
-	refresh: () => void
+	updateServerRow: (serverName: string) => void
 ): void {
 	const conn = mcpHub?.getConnection(serverName);
 
@@ -285,7 +349,7 @@ function renderServerDetail(
 
 	// Discovered tools summary (only when connected)
 	if (conn?.status === "connected") {
-		renderToolsSummary(containerEl, serverName, mcpHub, refresh);
+		renderToolsSummary(containerEl, serverName, mcpHub, updateServerRow);
 	}
 
 	// Remove server button
@@ -321,7 +385,12 @@ function renderServerDetail(
 
 							delete ctx.settings.mcp_servers[serverName];
 							await ctx.saveSettings();
-							refresh();
+							// Structural, like adding a server: the Tools section has a
+							// sub-group for this server that has to go too, and the
+							// disconnect above can't be relied on to announce it (it
+							// emits nothing for a server that never connected, and when
+							// it does emit, the config still exists). So rebuild once.
+							ctx.redisplay();
 						},
 						"Remove",
 						true
@@ -579,6 +648,56 @@ function renderKeyValueRow(
 	});
 }
 
+/**
+ * Render an editable key/value list bound to an in-memory draft array.
+ *
+ * Used by the add-server form, where nothing is persisted until submit — so
+ * unlike the per-server lists there is no `saveSettings()` call and no secret
+ * write on edit (secret keys are server-name scoped, and the name isn't final
+ * until the form is submitted).
+ */
+function renderDraftKeyValueList(
+	containerEl: HTMLElement,
+	heading: string,
+	desc: string,
+	addLabel: string,
+	items: Array<McpEnvVar | McpHeader>
+): void {
+	new Setting(containerEl).setHeading().setName(heading);
+	containerEl.createEl("p", { text: desc, cls: "setting-item-description" });
+
+	const listEl = containerEl.createDiv({ cls: "notor-mcp-kv-list" });
+
+	const renderRows = () => {
+		listEl.empty();
+		items.forEach((item, i) => {
+			renderKeyValueRow(
+				listEl, item, i,
+				(updated) => {
+					items[i] = updated;
+					return Promise.resolve();
+				},
+				() => {
+					items.splice(i, 1);
+					// Re-render so the remaining rows capture fresh indices.
+					renderRows();
+					return Promise.resolve();
+				}
+			);
+		});
+	};
+
+	renderRows();
+
+	new Setting(containerEl)
+		.addButton((btn) =>
+			btn.setButtonText(addLabel).onClick(() => {
+				items.push({ key: "", value: "", sensitive: false });
+				renderRows();
+			})
+		);
+}
+
 // ---------------------------------------------------------------------------
 // Tools summary (simplified — full controls are in the unified Tools section)
 // ---------------------------------------------------------------------------
@@ -587,7 +706,7 @@ function renderToolsSummary(
 	containerEl: HTMLElement,
 	serverName: string,
 	mcpHub: McpHub | undefined,
-	refresh: () => void
+	updateServerRow: (serverName: string) => void
 ): void {
 	containerEl.createEl("hr", { cls: "notor-mcp-divider" });
 
@@ -606,12 +725,15 @@ function renderToolsSummary(
 			try {
 				await mcpHub?.refreshTools(serverName);
 				new Notice(`Tools refreshed for "${serverName}".`);
-				refresh();
 			} catch (e) {
 				new Notice(`Failed to refresh tools: ${e instanceof Error ? e.message : String(e)}`);
 			} finally {
+				// refreshTools() emits a status change, so this button may already
+				// have been replaced by a scoped re-render — restoring its state is
+				// a no-op in that case and correct when the tool list was unchanged.
 				refreshBtn.disabled = false;
 				refreshBtn.textContent = "Refresh tools";
+				updateServerRow(serverName);
 			}
 		})();
 	});
@@ -651,8 +773,7 @@ function renderToolsSummary(
 function renderAddServerForm(
 	containerEl: HTMLElement,
 	ctx: SettingsContext,
-	mcpHub: McpHub | undefined,
-	refresh: () => void
+	mcpHub: McpHub | undefined
 ): void {
 	new Setting(containerEl).setHeading().setName("Add server");
 
@@ -663,11 +784,16 @@ function renderAddServerForm(
 		text: "Custom MCP tools run outside Notor's built-in safety guarantees. Only add servers you trust.",
 	});
 
-	// State for the form
+	// State for the form. The draft cwd / env / header state lives out here
+	// (not inside updateTransportFields) so switching transport back and forth
+	// doesn't discard values the user already typed.
 	let selectedType: McpServerConfig["type"] = "stdio";
 	let nameInput = "";
 	let stdioCommand = "";
 	let stdioArgs = "";
+	let stdioCwd = "";
+	const draftEnv: McpEnvVar[] = [];
+	const draftHeaders: McpHeader[] = [];
 	let stdioWarningEl: HTMLElement | null = null;
 
 	// Transport type selector
@@ -748,6 +874,7 @@ function renderAddServerForm(
 				.setDesc("Command to spawn (e.g., npx).")
 				.addText((t) => {
 					t.setPlaceholder("Npx");
+					t.setValue(stdioCommand);
 					t.onChange((v) => { stdioCommand = v.trim(); });
 				});
 			new Setting(transportFieldsEl)
@@ -759,16 +886,40 @@ function renderAddServerForm(
 				)
 				.addText((t) => {
 					t.setPlaceholder('-y @modelcontextprotocol/server-filesystem "/path/with spaces"');
+					t.setValue(stdioArgs);
 					t.onChange((v) => { stdioArgs = v; });
 				});
+			new Setting(transportFieldsEl)
+				.setName("Working directory")
+				.setDesc("Working directory for the process (defaults to vault root).")
+				.addText((t) => {
+					t.setPlaceholder("/path/to/dir");
+					t.setValue(stdioCwd);
+					t.onChange((v) => { stdioCwd = v.trim(); });
+				});
+			renderDraftKeyValueList(
+				transportFieldsEl,
+				"Environment variables",
+				"Additional environment variables for the spawned process. Mark sensitive values to store them securely.",
+				"+ add variable",
+				draftEnv
+			);
 		} else {
 			new Setting(transportFieldsEl)
 				.setName("URL")
 				.setDesc("Server endpoint URL.")
 				.addText((t) => {
 					t.setPlaceholder("https://my-mcp-server.example.com/mcp");
+					t.setValue(httpUrlInput);
 					t.onChange((v) => { httpUrlInput = v.trim(); });
 				});
+			renderDraftKeyValueList(
+				transportFieldsEl,
+				"Headers",
+				"Custom HTTP headers (e.g., for API key authentication). Mark sensitive values to store them securely.",
+				"+ add header",
+				draftHeaders
+			);
 		}
 	};
 	updateTransportFields();
@@ -810,27 +961,71 @@ function renderAddServerForm(
 					return;
 				}
 
+				// Collect the draft key/value rows for the active transport,
+				// dropping blank keys (they would land as env[""] at spawn time).
+				const isStdio = selectedType === "stdio";
+				const draftRows = isStdio ? draftEnv : draftHeaders;
+				const rowLabel = isStdio ? "environment variable" : "header";
+				const collected: McpEnvVar[] = [];
+				const seenKeys = new Set<string>();
+				for (const row of draftRows) {
+					const key = row.key.trim();
+					if (!key) continue;
+					if (seenKeys.has(key)) {
+						errorEl.textContent = `Duplicate ${rowLabel} key: ${key}`;
+						errorEl.removeClass("notor-hidden");
+						return;
+					}
+					seenKeys.add(key);
+					collected.push({ key, value: row.value, sensitive: row.sensitive });
+				}
+
 				// Build config
 				const newConfig: McpServerConfig = {
 					name: nameInput,
 					type: selectedType,
 				};
-				if (selectedType === "stdio") {
+				if (isStdio) {
 					newConfig.command = stdioCommand;
 					const parsedArgs = parseShellArgs(stdioArgs);
 					if (parsedArgs.length > 0) newConfig.args = parsedArgs;
+					if (stdioCwd) newConfig.cwd = stdioCwd;
 				} else {
 					newConfig.url = httpUrlInput;
+				}
+
+				// Sensitive values go to secret storage under a name-scoped key —
+				// which is why this happens only now that the name is final. Only an
+				// empty placeholder is persisted in settings, matching what
+				// McpHub.resolveEnvironment()/resolveHeaders() expect.
+				const secrets = makeSecretStorage(ctx);
+				const persisted: McpEnvVar[] = [];
+				for (const row of collected) {
+					if (row.sensitive && row.value) {
+						const secretKey = isStdio
+							? mcpEnvSecretKey(nameInput, row.key)
+							: mcpHeaderSecretKey(nameInput, row.key);
+						await secrets.set(secretKey, row.value);
+						persisted.push({ key: row.key, value: "", sensitive: true });
+					} else {
+						persisted.push(row);
+					}
+				}
+				if (persisted.length > 0) {
+					if (isStdio) newConfig.env = persisted;
+					else newConfig.headers = persisted;
 				}
 
 				if (!ctx.settings.mcp_servers) ctx.settings.mcp_servers = {};
 				ctx.settings.mcp_servers[nameInput] = newConfig;
 				await ctx.saveSettings();
 
-				// Connect if enabled
-				mcpHub?.connectServer(nameInput).catch(() => {});
 				new Notice(`MCP server "${nameInput}" added.`);
-				refresh();
+				// Adding a server is structural — the Tools section needs a row for
+				// it — so rebuild the pane once, then connect. Rebuilding first means
+				// the connection's status events land on the new row's subscriber.
+				ctx.redisplay();
+				mcpHub?.connectServer(nameInput).catch(() => {});
 			})
 		);
 }

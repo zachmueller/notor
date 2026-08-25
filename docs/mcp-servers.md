@@ -16,8 +16,10 @@ Register and manage servers in **Settings → Notor → MCP servers**. Each serv
 
 - **Name** — slug format: `[a-z0-9-]`
 - **Transport type** — stdio, SSE, or Streamable HTTP
-- **Connection parameters** — command/args/working directory (stdio) or URL/headers (HTTP)
+- **Connection parameters** — command/args/working directory/environment variables (stdio) or URL/headers (HTTP)
 - **Optional per-tool overrides** — read/write classification and auto-approve per tool
+
+The **Add server** form collects the connection parameters up front, so a server that needs an API key in its environment (or an `Authorization` header) connects on the first attempt instead of failing and needing an edit. Everything remains editable afterwards by expanding the server's entry in the list.
 
 Configuration is persisted in plugin settings; no separate config file.
 
@@ -63,7 +65,7 @@ MCP tool calls go through the same pipeline as built-in tools:
 
 ## Sensitive credential storage
 
-stdio environment variables and HTTP headers (e.g., `Authorization`) can be individually marked "sensitive" via a toggle in Settings. Sensitive values are stored in Obsidian's secrets manager (OS-level encrypted storage); non-sensitive values are stored in plain-text settings.
+stdio environment variables and HTTP headers (e.g., `Authorization`) can be individually marked "sensitive" via a toggle in Settings — both when adding a server and when editing one later. Sensitive values are stored in Obsidian's secrets manager (OS-level encrypted storage); non-sensitive values are stored in plain-text settings.
 
 ## Connection lifecycle
 

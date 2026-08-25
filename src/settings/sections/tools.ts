@@ -11,7 +11,7 @@
  */
 
 import { Notice, Platform, Setting, TextComponent, normalizePath, setIcon, prepareSimpleSearch } from "obsidian";
-import type { SearchMatchPart } from "obsidian";
+import type { DropdownComponent, SearchMatchPart, ToggleComponent } from "obsidian";
 import { TOOL_DISPLAY_NAMES, TOOLS_DEFAULT_DISABLED, defaultAutoApproveFor } from "../constants";
 import type { SettingsContext } from "./context";
 import type { McpServerConfig } from "../../mcp/mcp-types";
@@ -131,6 +131,11 @@ function getUserTools(ctx: SettingsContext): UserToolDefinition[] {
 	const manager = ctx.plugin.getExtensionManager();
 	const builtinNames = new Set(manager.getBuiltinToolNames());
 	return manager.getTools().filter((t) => !builtinNames.has(t.name));
+}
+
+/** Persisted collapse-state key for an MCP server's tool sub-group. */
+function mcpSubgroupPersistKey(serverName: string): string {
+	return `Tools/MCP:${serverName}`;
 }
 
 /** Set a Lucide status icon on an element based on connection status. */
@@ -261,6 +266,11 @@ export function renderToolsSection(
 		subgroupRefs: [],
 	};
 
+	// Assigned once applyFilter() exists below. MCP server rows are re-rendered
+	// in place on connection status changes, so the active filter has to be
+	// reapplied to the rows that were just recreated.
+	let reapplyFilter: () => void = () => { /* no filter yet during first render */ };
+
 	// --- Built-in tools ---
 	renderBuiltinTools(containerEl, ctx, groups, subgroupOpts);
 
@@ -268,7 +278,7 @@ export function renderToolsSection(
 	renderUserTools(containerEl, ctx, groups, subgroupOpts);
 
 	// --- MCP tools ---
-	renderMcpTools(containerEl, ctx, groups, subgroupOpts);
+	renderMcpTools(containerEl, ctx, groups, subgroupOpts, () => reapplyFilter());
 
 	// --- Copy tool config YAML ---
 	new Setting(containerEl)
@@ -362,6 +372,8 @@ export function renderToolsSection(
 			noMatchEl.addClass("notor-hidden");
 		}
 	};
+
+	reapplyFilter = () => applyFilter(persistedToolSearchQuery);
 
 	searchInput.addEventListener("input", () => {
 		applyFilter(searchInput.value.trim());
@@ -458,6 +470,10 @@ function renderBuiltinToolRow(
 		.setDesc(meta.desc);
 	applyDescriptionTruncation(setting, meta.desc);
 
+	// Updated in place by the enabled toggle — a full ctx.redisplay() here would
+	// rebuild the whole pane and lose the user's scroll position mid-edit.
+	let autoApproveToggle: ToggleComponent | null = null;
+
 	// Enabled toggle
 	setting.addToggle((toggle) =>
 		toggle
@@ -466,12 +482,14 @@ function renderBuiltinToolRow(
 			.onChange(async (value) => {
 				ctx.settings.tool_enabled[toolId] = value;
 				await ctx.saveSettings();
-				ctx.redisplay();
+				setting.settingEl.toggleClass("notor-tool-row-disabled", !value);
+				autoApproveToggle?.setDisabled(!value);
 			})
 	);
 
 	// Auto-approve toggle
 	setting.addToggle((toggle) => {
+		autoApproveToggle = toggle;
 		toggle
 			.setValue(isAutoApproved)
 			.setTooltip("Auto-approve")
@@ -722,6 +740,9 @@ function renderUserToolRow(
 		.setDesc(tool.description);
 	applyDescriptionTruncation(setting, tool.description);
 
+	// Updated in place by the enabled toggle — see renderBuiltinToolRow().
+	let autoApproveToggle: ToggleComponent | null = null;
+
 	// Enabled toggle
 	setting.addToggle((toggle) =>
 		toggle
@@ -730,12 +751,14 @@ function renderUserToolRow(
 			.onChange(async (value) => {
 				ctx.settings.tool_enabled[tool.name] = value;
 				await ctx.saveSettings();
-				ctx.redisplay();
+				setting.settingEl.toggleClass("notor-tool-row-disabled", !value);
+				autoApproveToggle?.setDisabled(!value);
 			})
 	);
 
 	// Auto-approve toggle
 	setting.addToggle((toggle) => {
+		autoApproveToggle = toggle;
 		toggle
 			.setValue(isAutoApproved)
 			.setTooltip("Auto-approve")
@@ -798,6 +821,7 @@ function renderMcpTools(
 	ctx: SettingsContext,
 	groups: SectionGroup[],
 	opts: ToolSubgroupOpts,
+	reapplyFilter: () => void,
 ): void {
 	const mcpHub = getMcpHub(ctx);
 	const servers = ctx.settings.mcp_servers ?? {};
@@ -815,32 +839,84 @@ function renderMcpTools(
 
 	const mcpParentElements = [mcpHeading.settingEl, mcpDesc];
 
+	// One wrapper element and one long-lived SectionGroup per configured server,
+	// so a status change can re-render a single server's rows in place. Wrappers
+	// exist for disconnected and disabled servers too, which guarantees every
+	// status event for a configured server has somewhere to land.
+	const renderers = new Map<string, () => void>();
+
 	for (const serverName of serverNames) {
-		const config = servers[serverName];
-		if (!config) continue;
-		renderMcpServerTools(containerEl, serverName, config, ctx, mcpHub, groups, mcpParentElements, opts);
+		if (!servers[serverName]) continue;
+
+		const wrapperEl = containerEl.createDiv({ cls: "notor-tool-mcp-server-wrapper" });
+		// Pushed once; re-renders mutate this object so the filter's reference stays valid.
+		const group: SectionGroup = { elements: [], entries: [] };
+		groups.push(group);
+
+		const render = () => {
+			// Re-read from settings rather than closing over the config object, so
+			// remove-then-re-add can't leave this pointing at a dangling entry.
+			const current = ctx.settings.mcp_servers?.[serverName];
+			wrapperEl.empty();
+			group.elements.length = 0;
+			group.entries.length = 0;
+			if (!current) {
+				// Server was removed — take this subgroup down with it, including the
+				// filter's ref to its <details> (the filter force-opens those, which
+				// would fire a toggle and persist state for a server that's gone).
+				wrapperEl.remove();
+				const refIdx = opts.subgroupRefs.findIndex(
+					(r) => r.persistKey === mcpSubgroupPersistKey(serverName),
+				);
+				if (refIdx >= 0) opts.subgroupRefs.splice(refIdx, 1);
+				renderers.delete(serverName);
+				return;
+			}
+			renderMcpServerTools(wrapperEl, serverName, current, ctx, mcpHub, group, mcpParentElements, opts);
+		};
+
+		renderers.set(serverName, render);
+		render();
 	}
 
 	// Subscribe to live status changes so tool lists update as servers connect.
 	if (mcpHub) {
-		ctx.addCleanup?.(mcpHub.onStatusChange(() => ctx.redisplay()));
+		ctx.addCleanup?.(mcpHub.onStatusChange((serverName) => {
+			const render = renderers.get(serverName);
+			if (!render) {
+				// A server added while the pane was open has no wrapper yet — that's
+				// structural, so fall back to a full rebuild. Events for servers that
+				// are gone from settings are ignored.
+				if (ctx.settings.mcp_servers?.[serverName]) ctx.redisplay();
+				return;
+			}
+			render();
+			// The rows were recreated, so re-hide any that the active filter excludes.
+			reapplyFilter();
+		}));
 	}
 }
 
+/**
+ * Render one MCP server's tool rows into `containerEl`, filling `group` in place.
+ *
+ * `group` is owned by the caller and reused across re-renders so the search
+ * filter's reference to it never goes stale.
+ */
 function renderMcpServerTools(
 	containerEl: HTMLElement,
 	serverName: string,
 	config: McpServerConfig,
 	ctx: SettingsContext,
 	mcpHub: McpHub | undefined,
-	groups: SectionGroup[],
+	group: SectionGroup,
 	mcpParentElements: HTMLElement[],
 	opts: ToolSubgroupOpts,
 ): void {
 	const conn = mcpHub?.getConnection(serverName);
 	const status = conn?.status;
 
-	const persistKey = `Tools/MCP:${serverName}`;
+	const persistKey = mcpSubgroupPersistKey(serverName);
 	const { body, details } = createToolSubgroup(
 		containerEl, serverName, persistKey, opts.persisted, opts.onToggle,
 		(summaryEl) => {
@@ -851,15 +927,20 @@ function renderMcpServerTools(
 			summaryEl.createSpan({ text: serverName, cls: "notor-tool-mcp-server-name" });
 		},
 	);
-	opts.subgroupRefs.push({ details, persistKey });
+	// Replace rather than append: a re-render would otherwise leave the filter
+	// force-opening a detached <details>.
+	const existingRef = opts.subgroupRefs.findIndex((r) => r.persistKey === persistKey);
+	if (existingRef >= 0) opts.subgroupRefs[existingRef] = { details, persistKey };
+	else opts.subgroupRefs.push({ details, persistKey });
 	details.setAttribute("data-notor-subsection", `mcp-server:${serverName}`);
+
+	group.elements.push(...mcpParentElements, details);
 
 	if (config.disabled) {
 		body.createEl("p", {
 			text: "Server is disabled. Enable it in the MCP servers section.",
 			cls: "setting-item-description notor-tool-mcp-note",
 		});
-		groups.push({ elements: [...mcpParentElements, details], entries: [] });
 		return;
 	}
 
@@ -870,7 +951,6 @@ function renderMcpServerTools(
 				: "Server is not connected.",
 			cls: "setting-item-description notor-tool-mcp-note",
 		});
-		groups.push({ elements: [...mcpParentElements, details], entries: [] });
 		return;
 	}
 
@@ -880,17 +960,14 @@ function renderMcpServerTools(
 			text: "No tools discovered for this server.",
 			cls: "setting-item-description notor-tool-mcp-note",
 		});
-		groups.push({ elements: [...mcpParentElements, details], entries: [] });
 		return;
 	}
 
 	renderColumnHeaders(body);
-	const group: SectionGroup = { elements: [...mcpParentElements, details], entries: [] };
 	for (const tool of tools) {
 		const setting = renderMcpToolRow(body, serverName, tool, config, ctx);
 		group.entries.push({ settingEl: setting.settingEl, nameEl: setting.nameEl, name: tool.name, searchTexts: [tool.name, tool.description, serverName] });
 	}
-	groups.push(group);
 }
 
 function renderMcpToolRow(
@@ -919,8 +996,13 @@ function renderMcpToolRow(
 		.setDesc(desc);
 	applyDescriptionTruncation(setting, desc);
 
+	// Updated in place by the enabled toggle — see renderBuiltinToolRow().
+	let autoApproveToggle: ToggleComponent | null = null;
+	let classificationDropdown: DropdownComponent | null = null;
+
 	// Classification dropdown
 	setting.addDropdown((dropdown) => {
+		classificationDropdown = dropdown;
 		dropdown
 			.addOption("read", "Read-only")
 			.addOption("write", "Write")
@@ -948,12 +1030,15 @@ function renderMcpToolRow(
 			.onChange(async (value) => {
 				ctx.settings.tool_enabled[namespacedName] = value;
 				await ctx.saveSettings();
-				ctx.redisplay();
+				setting.settingEl.toggleClass("notor-tool-row-disabled", !value);
+				autoApproveToggle?.setDisabled(!value);
+				classificationDropdown?.setDisabled(!value);
 			})
 	);
 
 	// Auto-approve toggle
 	setting.addToggle((toggle) => {
+		autoApproveToggle = toggle;
 		toggle
 			.setValue(isAutoApproved)
 			.setTooltip("Auto-approve")
