@@ -146,8 +146,8 @@ function estimateSingleMessageTokens(msg: Message): number {
  * Check whether the conversation should be compacted.
  *
  * Compares cumulative estimated tokens against `threshold * contextWindow`.
- * For models where the context window is unknown (null), returns false
- * (falls back to existing truncation behavior).
+ * Returns false only when no model is selected; an unrecognized model is
+ * checked against the 128K default (see `getContextWindow`).
  *
  * @param messages - All messages in the conversation.
  * @param settings - Plugin settings (for threshold).
@@ -184,16 +184,15 @@ export function shouldCompact(
 }
 
 /**
- * Get the context window for a model, returning null if unknown.
+ * Get the context window for a model, or null when no model is selected
+ * (which disables compaction).
  *
- * Unlike `getContextWindow()` which returns a default, this function
- * returns null for truly unknown models so compaction can fall back
- * to truncation.
+ * Otherwise delegates to `getContextWindow()`, which always returns a number:
+ * a user override, else the API / static / inferred window (clamped by any
+ * learned limit), else the 128K default with a one-time warning.
  */
 function getContextWindowForModel(modelId: string, useExtendedContext?: boolean): number | null {
 	if (!modelId) return null;
-	// getContextWindow returns DEFAULT_CONTEXT_WINDOW (128000) for unknown models.
-	// We use it as-is since the default is a reasonable assumption.
 	return getContextWindow(modelId, useExtendedContext);
 }
 
@@ -335,8 +334,11 @@ export async function performCompaction(
 	});
 
 	try {
+		// Carry the 1M selection so summarizing a >200K conversation on a
+		// Bedrock extended-context model sends the beta header.
 		const options: SendMessageOptions = {
 			model: modelId,
+			use_extended_context: useExtendedContext,
 		};
 
 		// Stream the summarization response

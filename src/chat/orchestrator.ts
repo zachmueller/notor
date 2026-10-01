@@ -26,6 +26,7 @@ import { resolveConversationModel } from "../presets/preset-resolver";
 import { ConfigResolver } from "./config-resolver";
 import { HookDispatcher } from "./hook-dispatcher";
 import { CompactionManager } from "./compaction-manager";
+import { recoverFromContextOverflow } from "./context-overflow-recovery";
 import { ViewRouter } from "./view-router";
 import { SessionManager } from "./session-manager";
 import { ConversationLifecycleManager } from "./conversation-lifecycle";
@@ -1162,6 +1163,23 @@ export class ChatOrchestrator implements ToolSessionContext {
 			await session.responsePromise;
 		} catch (e) {
 			session.setStatus("errored");
+			// Context overflow: learn a limit when the provider gave none and
+			// build the suggestion. Computed before the error is persisted so the
+			// estimate covers only what was sent.
+			let overflowNote: string | undefined;
+			if (e instanceof ProviderError && e.code === "CONTEXT_LENGTH_EXCEEDED") {
+				try {
+					overflowNote = recoverFromContextOverflow({
+						rawMessage: e.details?.rawMessage ?? e.message,
+						modelId: session.modelId,
+						useExtendedContext: session.useExtendedContext,
+						messages: session.conversationManager.getMessages(),
+						settings: this.settings,
+					}).suggestion || undefined;
+				} catch (recoveryError) {
+					log.warn("Context overflow recovery failed", { error: String(recoveryError) });
+				}
+			}
 			// Persist a thrown provider error into the conversation JSONL so the
 			// failure is diagnosable on reload (mirrors the yielded-error path).
 			try {
@@ -1179,7 +1197,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			} catch {
 				// Best-effort — never let error persistence mask the original error.
 			}
-			this.handleError(e);
+			this.handleError(e, overflowNote);
 		} finally {
 			if (session.status === "running" || session.status === "waiting_approval") {
 				session.setStatus("completed");
@@ -1538,6 +1556,20 @@ export class ChatOrchestrator implements ToolSessionContext {
 						: (result.error as unknown) instanceof Error
 							? (result.error as unknown as Error).message
 							: JSON.stringify(result.error);
+					// Mid-stream context overflow (e.g. Bedrock ValidationException):
+					// learn a limit if needed and tell the user what happens next.
+					let overflowSuggestion = "";
+					try {
+						overflowSuggestion = recoverFromContextOverflow({
+							rawMessage: result.details?.rawMessage ?? errStr,
+							modelId: session.modelId,
+							useExtendedContext: session.useExtendedContext,
+							messages: convManager.getMessages(),
+							settings: this.settings,
+						}).suggestion;
+					} catch (recoveryError) {
+						log.warn("Context overflow recovery failed", { error: String(recoveryError) });
+					}
 					// Persist the error into the conversation JSONL so a failed chat
 					// carries diagnostic detail (previously errors were UI-only and
 					// lost on reload). Auto-persists via the onMessageAdded wiring.
@@ -1550,7 +1582,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 							offending_fields: result.details?.offendingFields,
 						},
 					});
-					this.getViewForSession(session)?.showError(errStr);
+					this.getViewForSession(session)?.showError(errStr + overflowSuggestion);
 				}
 			}
 		} finally {
@@ -1816,7 +1848,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	// Error handling
 	// -----------------------------------------------------------------------
 
-	private handleError(e: unknown): void {
+	private handleError(e: unknown, overflowNote?: string): void {
 		if (e instanceof ProviderError) {
 			let suggestion = "";
 			switch (e.code) {
@@ -1842,7 +1874,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					suggestion = " Wait a moment and try again.";
 					break;
 				case "CONTEXT_LENGTH_EXCEEDED":
-					suggestion = " Try starting a new conversation or reducing message length.";
+					suggestion = overflowNote ?? " Try starting a new conversation or reducing message length.";
 					break;
 				case "MODEL_NOT_FOUND":
 					suggestion = " Check that a model is selected in the model picker, or verify the model ID in Settings → Notor.";

@@ -1,8 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 import { AnthropicProvider } from "./anthropic-provider";
 import type { StreamChunk } from "./provider";
 import type { App } from "obsidian";
+import { getApiContextWindow, getLearnedContextWindow, resetModelLimits } from "./model-limits";
+import { getContextWindow } from "./model-metadata";
 
 // ---------------------------------------------------------------------------
 // handleAnthropicEvent — thinking lifecycle on content_block_start
@@ -87,5 +89,56 @@ describe("AnthropicProvider — stop_reason on message_end", () => {
 		expect(chunks).toEqual([
 			{ type: "message_end", input_tokens: 5, output_tokens: 10, stop_reason: "end_turn" },
 		]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Live limits from /v1/models and context-overflow classification
+// ---------------------------------------------------------------------------
+
+describe("AnthropicProvider — model limits", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		resetModelLimits();
+	});
+
+	function makeKeyedProvider(): AnthropicProvider {
+		const app = { secretStorage: { getSecret: () => "sk-test" } } as unknown as App;
+		return new AnthropicProvider({ id: "test", endpoint: "https://api.example.com" } as never, app);
+	}
+
+	it("maps max_input_tokens onto ModelInfo and records it as an API limit", async () => {
+		vi.stubGlobal("fetch", vi.fn(async () => ({
+			ok: true,
+			status: 200,
+			json: async () => ({
+				data: [
+					{ id: "claude-opus-5-5", display_name: "Claude Opus 5.5", max_input_tokens: 1_000_000, max_tokens: 128_000 },
+					{ id: "claude-legacy", display_name: "Legacy" },
+				],
+				has_more: false,
+			}),
+		})));
+
+		const models = await makeKeyedProvider().listModels();
+		expect(models.map((m) => m.context_window)).toEqual([1_000_000, null]);
+		expect(getApiContextWindow("claude-opus-5-5")).toBe(1_000_000);
+		expect(getContextWindow("claude-opus-5-5")).toBe(1_000_000);
+	});
+
+	it("classifies 'prompt is too long' as CONTEXT_LENGTH_EXCEEDED and learns the limit", async () => {
+		const body = '{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 250000 tokens > 200000 maximum"}}';
+		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 400, text: async () => body })));
+
+		const consume = async () => {
+			for await (const _chunk of makeKeyedProvider().sendMessage([{ role: "user", content: "hi" }], [], { model: "claude-opus-5-5" })) {
+				// drain
+			}
+		};
+		await expect(consume()).rejects.toMatchObject({
+			code: "CONTEXT_LENGTH_EXCEEDED",
+			details: { rawMessage: body },
+		});
+		expect(getLearnedContextWindow("claude-opus-5-5")).toBe(200_000);
 	});
 });

@@ -84,12 +84,14 @@ Available subsections:
 - Tools → Shared settings, User tools, MCP tools
 - Rules and workflows → Rules, Workflows
 - Automation → Hooks, Vault event hooks
+- Reference → Model context limits
 
 ## Behavior
 
 - Always read settings before proposing changes — do not assume current values.
 - Never make bulk changes. Each \`edit_notor_settings\` call should target one specific field.
 - If a setting path is rejected, report the error clearly and suggest the correct path.
+- \`model_context_overrides\` (model ID → context window in tokens; an \`<id>::1m\` key targets only the 1M variant) can only be written as a whole object: read it, add or change the entry, then write the full object back. \`model_limits_cache\` is internal and cannot be edited.
 - If the user asks about a feature you're unsure of, delegate to the \`notor-help\` sub-agent for documentation.
 - Keep answers practical and focused — step-by-step instructions preferred.
 

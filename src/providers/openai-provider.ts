@@ -28,6 +28,7 @@ import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
 import { resolveOpenAIReasoning } from "./thinking-config";
 import { supportsThinking } from "./model-metadata";
+import { contextOverflowMessage, noteContextOverflow } from "./context-overflow";
 
 const log = logger("OpenAIProvider");
 
@@ -264,12 +265,17 @@ export class OpenAIProvider implements LLMProvider {
 					"MODEL_NOT_FOUND"
 				);
 			}
-			if (response.status === 400 && errorText.includes("context_length")) {
-				throw new ProviderError(
-					"Context length exceeded for this model.",
-					"openai",
-					"CONTEXT_LENGTH_EXCEEDED"
-				);
+			if (response.status === 400) {
+				const overflow = noteContextOverflow(options.model, options.use_extended_context, errorText);
+				if (overflow.isOverflow) {
+					throw new ProviderError(
+						contextOverflowMessage(overflow.limit),
+						"openai",
+						"CONTEXT_LENGTH_EXCEEDED",
+						undefined,
+						{ rawMessage: errorText }
+					);
+				}
 			}
 			throw new ProviderError(
 				`OpenAI API error (${response.status}): ${errorText}`,

@@ -115,6 +115,8 @@ import type { McpServerConfig } from "./mcp/mcp-types";
 import { createMcpSecretStore } from "./mcp/mcp-secrets";
 import { McpRegisteredTool } from "./mcp/mcp-tool-adapter";
 import { showMcpMissingAnnotationsNotice } from "./tool-config/notices";
+import { showUnknownContextWindowNotice } from "./ui/context-window-notice";
+import { initModelLimits, resetModelLimits } from "./providers/model-limits";
 
 // Queue
 import { TaskLaneQueue } from "./queue/task-lane-queue";
@@ -446,6 +448,19 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		await this.loadSettings();
 		setLogLevel(this.settings.log_level);
 		log.debug("Settings loaded", { settings: this.settings });
+
+		// Runtime model-limits registry (API-reported, learned and overridden
+		// context windows). Persists through a lightweight saveData — NOT
+		// saveSettings(), which rebuilds providers and drops model caches.
+		initModelLimits({
+			cache: this.settings.model_limits_cache,
+			getOverrides: () => this.settings.model_context_overrides,
+			persist: (cache) => {
+				this.settings.model_limits_cache = cache;
+				void this.saveData(this.settings);
+			},
+			onFallbackContextWindow: (modelId) => showUnknownContextWindowNotice(this, modelId),
+		});
 
 		// 2. Register the settings tab
 		this._settingTab = new NotorSettingTab(this.app, this);
@@ -875,6 +890,8 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		}
 		this._personaStaleNotice?.hide();
 		this._personaStaleNotice = null;
+
+		resetModelLimits();
 
 		// All DOM elements, intervals, and event listeners registered via
 		// this.register* / this.registerEvent / this.registerDomEvent are

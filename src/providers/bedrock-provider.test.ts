@@ -1,8 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 
 import { BedrockProvider } from "./bedrock-provider";
 import type { StreamChunk } from "./provider";
 import type { App } from "obsidian";
+import { getLearnedContextWindow, isBetaRejected, resetModelLimits } from "./model-limits";
 
 // ---------------------------------------------------------------------------
 // handleBedrockEvent — thinking (reasoningContent) wire shapes
@@ -192,5 +193,107 @@ describe("BedrockProvider — credential expiry retry", () => {
 		expect(keysMsg).toMatch(/access keys/i);
 		expect(profileMsg).toMatch(/credentials have expired/i);
 		expect(keysMsg).toMatch(/Settings → Notor/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// sendMessage — 1M beta header, context overflow and beta rejection
+// ---------------------------------------------------------------------------
+
+/**
+ * Run sendMessage with the SDK call replaced: captures the Converse input and
+ * rejects with `error` (or resolves with an empty stream when omitted).
+ */
+async function runSend(
+	model: string,
+	opts: { useExtendedContext?: boolean; error?: Error } = {}
+): Promise<{ input: Record<string, unknown>; thrown?: unknown }> {
+	const provider = makeProvider();
+	let input: Record<string, unknown> = {};
+	(provider as unknown as { sendWithCredentialRetry: unknown }).sendWithCredentialRetry = async (
+		_getClient: unknown,
+		makeCommand: () => { input: Record<string, unknown> }
+	) => {
+		input = makeCommand().input;
+		if (opts.error) throw opts.error;
+		return { stream: (async function* () { /* empty */ })() };
+	};
+	try {
+		for await (const _chunk of provider.sendMessage([{ role: "user", content: "hi" }], [], {
+			model,
+			use_extended_context: opts.useExtendedContext,
+		})) {
+			// drain
+		}
+		return { input };
+	} catch (thrown) {
+		return { input, thrown };
+	}
+}
+
+function awsError(name: string, message: string): Error {
+	const e = new Error(message);
+	e.name = name;
+	return e;
+}
+
+function betaOf(input: Record<string, unknown>): unknown {
+	return (input.additionalModelRequestFields as Record<string, unknown> | undefined)?.anthropic_beta;
+}
+
+describe("BedrockProvider — 1M beta and context limits", () => {
+	afterEach(() => resetModelLimits());
+
+	it("sends the 1M beta by default for a new (inferred) Sonnet+ model", async () => {
+		const { input } = await runSend("us.anthropic.claude-opus-5-5");
+		expect(betaOf(input)).toEqual(["context-1m-2025-08-07"]);
+	});
+
+	it("sends the beta for a known model only when the 1M variant is selected", async () => {
+		expect(betaOf((await runSend("us.anthropic.claude-opus-5")).input)).toBeUndefined();
+		expect(betaOf((await runSend("us.anthropic.claude-opus-5", { useExtendedContext: true })).input))
+			.toEqual(["context-1m-2025-08-07"]);
+	});
+
+	it("classifies 'Input is too long' as CONTEXT_LENGTH_EXCEEDED without learning a limit", async () => {
+		const { thrown } = await runSend("us.anthropic.claude-opus-5-5", {
+			error: awsError("ValidationException", "Input is too long for requested model."),
+		});
+		expect(thrown).toMatchObject({ code: "CONTEXT_LENGTH_EXCEEDED" });
+		expect(getLearnedContextWindow("us.anthropic.claude-opus-5-5")).toBeUndefined();
+	});
+
+	it("learns a numeric limit under the ::1m key when the 1M variant is selected", async () => {
+		await runSend("us.anthropic.claude-sonnet-4-6", {
+			useExtendedContext: true,
+			error: awsError("ValidationException", "prompt is too long: 950000 tokens > 900000 maximum"),
+		});
+		expect(getLearnedContextWindow("us.anthropic.claude-sonnet-4-6", true)).toBe(900_000);
+	});
+
+	it("keeps 'Too many tokens' as RATE_LIMITED", async () => {
+		const { thrown } = await runSend("us.anthropic.claude-opus-5-5", {
+			error: awsError("ThrottlingException", "Too many tokens, please wait before trying again."),
+		});
+		expect(thrown).toMatchObject({ code: "RATE_LIMITED" });
+	});
+
+	it("records a rejected inferred beta and stops sending it", async () => {
+		const { thrown } = await runSend("us.anthropic.claude-opus-5-5", {
+			error: awsError("ValidationException", "invalid beta flag"),
+		});
+		expect(thrown).toMatchObject({ code: "PROVIDER_ERROR" });
+		expect(isBetaRejected("us.anthropic.claude-opus-5-5")).toBe(true);
+		expect(betaOf((await runSend("us.anthropic.claude-opus-5-5")).input)).toBeUndefined();
+	});
+
+	it("attaches details to stream validation exceptions and learns from them", () => {
+		const chunks = [...getHandler(makeProvider())(
+			{ validationException: { message: "prompt is too long: 300000 tokens > 200000 maximum" } },
+			new Map(),
+			{ model: "us.anthropic.claude-opus-5-5" } as { stopReason?: string },
+		)];
+		expect(chunks[0]).toMatchObject({ type: "error", details: { name: "ValidationException" } });
+		expect(getLearnedContextWindow("us.anthropic.claude-opus-5-5")).toBe(200_000);
 	});
 });

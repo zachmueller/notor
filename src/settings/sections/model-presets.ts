@@ -340,7 +340,9 @@ function renderModelDropdown(
 			}
 		}
 
-		dropdown.setValue(currentValue);
+		// Fall back to the base option when a persisted `id::1m` has no 1M variant.
+		const hasCurrent = Array.from(dropdown.selectEl.options).some((o) => o.value === currentValue);
+		dropdown.setValue(hasCurrent ? currentValue : parseOptionValue(currentValue).modelId);
 		dropdown.onChange(async (value) => {
 			if (value === "") {
 				preset.model_id = null;

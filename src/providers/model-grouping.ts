@@ -13,6 +13,11 @@
 
 import type { ModelInfo } from "../types";
 import { getModelExtendedContext } from "./model-metadata";
+import { getContextOverride } from "./model-limits";
+import { EXTENDED_CONTEXT_SUFFIX, parseProfileId, stripVersionSuffix } from "./model-id";
+
+// Re-exported so existing importers keep working after the move to model-id.ts.
+export { EXTENDED_CONTEXT_SUFFIX, parseProfileId, stripVersionSuffix };
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -46,54 +51,12 @@ export interface ModelVariant {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Known geographic prefixes on Bedrock inference profile IDs. */
-const GEO_PREFIXES: Record<string, string> = {
-	"us.": "US",
-	"eu.": "EU",
-	"apac.": "APAC",
-	"global.": "Global",
-};
-
-/** Extended context delimiter — cannot appear in a real profile ID. */
-export const EXTENDED_CONTEXT_SUFFIX = "::1m";
-
 /** Default context window when no metadata is available (128K). */
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 // ---------------------------------------------------------------------------
 // Core functions
 // ---------------------------------------------------------------------------
-
-/**
- * Parse a Bedrock inference profile ID into geographic prefix and base key.
- *
- * Examples:
- * - `"us.anthropic.claude-sonnet-4-6"` → `{ geo: "US", baseKey: "anthropic.claude-sonnet-4-6" }`
- * - `"global.amazon.nova-pro-v1:0"` → `{ geo: "Global", baseKey: "amazon.nova-pro-v1:0" }`
- * - `"claude-sonnet-4-6"` → `{ geo: null, baseKey: "claude-sonnet-4-6" }` (non-Bedrock)
- */
-export function parseProfileId(id: string): { geo: string | null; baseKey: string } {
-	for (const [prefix, label] of Object.entries(GEO_PREFIXES)) {
-		if (id.startsWith(prefix)) {
-			return { geo: label, baseKey: id.slice(prefix.length) };
-		}
-	}
-	return { geo: null, baseKey: id };
-}
-
-/**
- * Derive a grouping key from a base key by stripping version suffixes.
- *
- * Strips `-v1:0`, `-v1`, `-v2:0`, etc. from the end.
- *
- * Examples:
- * - `"anthropic.claude-sonnet-4-6"` → `"anthropic.claude-sonnet-4-6"` (no suffix)
- * - `"amazon.nova-pro-v1:0"` → `"amazon.nova-pro"`
- * - `"anthropic.claude-sonnet-4-20250514-v1:0"` → `"anthropic.claude-sonnet-4-20250514"`
- */
-export function stripVersionSuffix(baseKey: string): string {
-	return baseKey.replace(/-v\d+(?::\d+)?$/, "");
-}
 
 /**
  * Convert a base key to a human-readable label.
@@ -166,7 +129,9 @@ export function groupModels(models: ModelInfo[]): ModelGroup[] {
 		const { geo, baseKey } = parseProfileId(model.id);
 		const groupKey = stripVersionSuffix(baseKey);
 		const label = baseKeyToLabel(groupKey);
-		const contextLabel = formatContextLabel(model.context_window);
+		// A user override (Settings → Reference) wins over listed/static metadata.
+		const baseWindow = getContextOverride(model.id, false) ?? model.context_window;
+		const contextLabel = formatContextLabel(baseWindow);
 
 		if (!groupMap.has(groupKey)) {
 			groupMap.set(groupKey, { label, variants: [] });
@@ -176,7 +141,7 @@ export function groupModels(models: ModelInfo[]): ModelGroup[] {
 
 		// Add the base variant
 		group.variants.push({
-			model,
+			model: baseWindow === model.context_window ? model : { ...model, context_window: baseWindow },
 			region: geo,
 			contextLabel,
 			isExtendedContext: false,
@@ -186,15 +151,16 @@ export function groupModels(models: ModelInfo[]): ModelGroup[] {
 		// Synthesize 1M variant if model has extended_context metadata
 		const extCtx = getModelExtendedContext(model.id);
 		if (extCtx) {
+			const extWindow = getContextOverride(model.id, true) ?? extCtx.context_window;
 			group.variants.push({
 				model: {
 					...model,
-					context_window: extCtx.context_window,
+					context_window: extWindow,
 					input_price_per_1k: extCtx.input_price_per_1k ?? model.input_price_per_1k,
 					output_price_per_1k: extCtx.output_price_per_1k ?? model.output_price_per_1k,
 				},
 				region: geo,
-				contextLabel: formatContextLabel(extCtx.context_window),
+				contextLabel: formatContextLabel(extWindow),
 				isExtendedContext: true,
 				optionValue: model.id + EXTENDED_CONTEXT_SUFFIX,
 			});

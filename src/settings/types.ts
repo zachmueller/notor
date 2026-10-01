@@ -11,6 +11,7 @@
 import type { ConversationMode, LLMProviderConfig, ModelPreset, VaultEventHookConfig } from "../types";
 import type { McpServerConfig } from "../mcp/mcp-types";
 import type { LogLevel } from "../utils/logger";
+import type { ModelLimitsCache } from "../providers/model-limits";
 import type { PathScopeRule } from "./path-scoping";
 
 // ---------------------------------------------------------------------------
@@ -158,6 +159,21 @@ export interface NotorSettings {
 
 	/** Per-model pricing (per 1K tokens), keyed by model ID. */
 	model_pricing: Record<string, ModelPricing>;
+
+	/**
+	 * Per-model context window overrides (tokens), keyed by model ID.
+	 * A bare ID applies to both the standard and 1M variants; an
+	 * `{id}::1m` key applies to the 1M variant only. Wins over all
+	 * built-in, API-reported, inferred and learned limits.
+	 */
+	model_context_overrides: Record<string, number>;
+
+	/**
+	 * Internal: context limits reported by provider model-list APIs,
+	 * learned from overflow errors, and rejected 1M betas. Managed by
+	 * `providers/model-limits.ts`; not user-editable.
+	 */
+	model_limits_cache: ModelLimitsCache;
 
 	// -------------------------------------------------------------------
 	// Phase 3: Auto-context settings

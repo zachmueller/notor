@@ -550,6 +550,8 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 		checkpoint_max_per_conversation: 100,
 		checkpoint_max_age_days: 30,
 		model_pricing: {},
+		model_context_overrides: {},
+		model_limits_cache: { version: 1, api: {}, learned: {}, beta_rejected: {} },
 		auto_context_open_notes: false,
 		auto_context_vault_structure: false,
 		auto_context_os: false,

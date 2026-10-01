@@ -80,3 +80,17 @@ When a conversation approaches the active model's context window limit, Notor au
 - The AI continues seamlessly. The full conversation history is always retained in the JSONL log; compaction only affects what is sent to the LLM.
 - The compaction system prompt has a built-in default and can be overridden in **Settings → Notor**.
 - Manual compaction is available via the command palette (**Notor: Compact context**).
+
+### How Notor determines a model's context window
+
+Compaction triggers at a fraction of the active model's context window, so Notor needs to know that window. It resolves it in this order:
+
+1. **Your override** — set in **Settings → Notor → Reference → Model context limits**. An override for a model ID applies to both its standard and 1M variants; add `::1m` to the model ID (e.g. `us.anthropic.claude-sonnet-4-6::1m`) to override only the 1M variant.
+2. **The Anthropic models API** — for the Anthropic provider, Notor reads each model's context window from the model list.
+3. **Built-in data** — a table of known models.
+4. **A related model** — for a Claude model Notor doesn't recognize yet (for example a newly released Bedrock profile), it borrows the limits of the nearest known model in the same family. A *new* Sonnet, Opus or Fable version (newer than any Notor knows) is assumed to have a 1M window; on Bedrock, Notor sends the 1M context beta automatically for it. If Bedrock rejects that beta, Notor stops sending it and falls back to the related model's standard window.
+5. **128K tokens** — for anything else. Notor shows a one-time notice per model per session when it falls back to this default; add an override to silence it.
+
+**Learned limits.** When a provider rejects a request for exceeding the context window, Notor records the real limit (from the error message, or — when the message has no number — from its own estimate of the request) and uses it from then on, so the next message compacts at the right point. Learned limits only ever lower a window. They appear under **Detected limits** in the same settings section, where you can forget one if a model's limit increases.
+
+Pricing is never inferred: models without built-in or configured pricing show token counts but no cost.

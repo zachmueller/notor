@@ -10,6 +10,7 @@
 
 import type { LLMProviderConfig, ModelPreset, VaultEventHookConfig } from "../types";
 import type { HookConfig, NotorSettings } from "./types";
+import { createEmptyModelLimitsCache } from "../providers/model-limits";
 
 // ---------------------------------------------------------------------------
 // Sub-defaults
@@ -153,6 +154,8 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	checkpoint_max_per_conversation: 100,
 	checkpoint_max_age_days: 30,
 	model_pricing: {},
+	model_context_overrides: {},
+	model_limits_cache: createEmptyModelLimitsCache(),
 
 	// Phase 3: Auto-context
 	auto_context_open_notes: true,

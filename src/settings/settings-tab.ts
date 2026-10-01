@@ -31,6 +31,7 @@ import { renderPathScopingSection } from "./sections/path-scoping";
 import { renderHistorySection } from "./sections/history";
 import { renderCheckpointSection } from "./sections/checkpoints";
 import { renderModelPricingSection } from "./sections/model-pricing";
+import { renderModelContextLimitsSection } from "./sections/model-context-limits";
 import { renderMcpServersSection } from "./sections/mcp-servers";
 import { renderPersonasSection } from "./sections/personas";
 import { renderSubAgentsSection } from "./sections/sub-agents";
@@ -249,6 +250,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		const referenceGroup = createSettingsGroup(containerEl, "Reference", false, persisted, onToggle);
 		renderProviderModelReferenceSection(referenceGroup, ctx);
 		renderModelPricingSection(referenceGroup, ctx);
+		renderModelContextLimitsSection(referenceGroup, ctx);
 
 		this.isRestoring = true;
 		restoreDetailsState(containerEl, detailsState);

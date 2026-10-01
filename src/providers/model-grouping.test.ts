@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { initModelLimits, resetModelLimits } from "./model-limits";
 import {
 	parseProfileId,
 	stripVersionSuffix,
@@ -422,5 +423,42 @@ describe("formatFullVariantLabel", () => {
 			optionValue: "anthropic.claude-opus-4-8",
 		});
 		expect(label).toBe("Claude Opus 4.8");
+	});
+});
+
+describe("groupModels — inferred and overridden windows", () => {
+	afterEach(() => resetModelLimits());
+
+	it("gives a new Bedrock Sonnet+ model a single 1M variant", () => {
+		const models: ModelInfo[] = [
+			{ id: "us.anthropic.claude-opus-5-5", display_name: "us.anthropic.claude-opus-5-5", context_window: 1_000_000 },
+		];
+		const groups = groupModels(models);
+		expect(groups[0]!.label).toBe("Claude Opus 5.5");
+		expect(groups[0]!.variants).toHaveLength(1);
+		expect(groups[0]!.variants[0]!.contextLabel).toBe("1M");
+		expect(groups[0]!.variants[0]!.isExtendedContext).toBe(false);
+	});
+
+	it("synthesizes an inherited 1M variant (without pricing) for an unknown regional variant", () => {
+		const models: ModelInfo[] = [
+			{ id: "eu.anthropic.claude-opus-5", display_name: "eu.anthropic.claude-opus-5", context_window: 200_000 },
+		];
+		const ext = groupModels(models)[0]!.variants.find((v) => v.isExtendedContext);
+		expect(ext?.optionValue).toBe("eu.anthropic.claude-opus-5::1m");
+		expect(ext?.model.input_price_per_1k).toBeUndefined();
+	});
+
+	it("labels variants with the user's override", () => {
+		initModelLimits({
+			getOverrides: () => ({ "us.anthropic.claude-sonnet-4-6": 500_000, "us.anthropic.claude-sonnet-4-6::1m": 900_000 }),
+			persist: () => {},
+		});
+		const models: ModelInfo[] = [
+			{ id: "us.anthropic.claude-sonnet-4-6", display_name: "us.anthropic.claude-sonnet-4-6", context_window: 200_000 },
+		];
+		const variants = groupModels(models)[0]!.variants;
+		expect(variants.find((v) => !v.isExtendedContext)?.contextLabel).toBe("500K");
+		expect(variants.find((v) => v.isExtendedContext)?.contextLabel).toBe("900K");
 	});
 });

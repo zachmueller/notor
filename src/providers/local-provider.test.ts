@@ -4,6 +4,7 @@ import { LocalProvider } from "./local-provider";
 import type { LLMProviderConfig } from "../types";
 import type { App } from "obsidian";
 import type { ChatMessage, SendMessageOptions } from "./provider";
+import { getLearnedContextWindow, resetModelLimits } from "./model-limits";
 
 // ---------------------------------------------------------------------------
 // LocalProvider — extra_body_params merge into the request body
@@ -114,5 +115,32 @@ describe("LocalProvider — extra_body_params merge", () => {
 			stream: true,
 			stream_options: { include_usage: true },
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// LocalProvider — context overflow (llama.cpp returns 400/500 with n_ctx)
+// ---------------------------------------------------------------------------
+
+describe("LocalProvider — context overflow", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		resetModelLimits();
+	});
+
+	it("classifies a llama.cpp overflow and learns n_ctx", async () => {
+		const body = '{"error":{"code":400,"type":"exceed_context_size_error","n_prompt_tokens":9000,"n_ctx":8192}}';
+		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, text: async () => body })));
+		const provider = new LocalProvider(
+			{ id: "local", type: "local", endpoint: "http://localhost:8080/v1" } as LLMProviderConfig,
+			makeApp()
+		);
+		const consume = async () => {
+			for await (const _chunk of provider.sendMessage([{ role: "user", content: "hi" }], [], { model: "qwen3:32b" })) {
+				// drain
+			}
+		};
+		await expect(consume()).rejects.toMatchObject({ code: "CONTEXT_LENGTH_EXCEEDED" });
+		expect(getLearnedContextWindow("qwen3:32b")).toBe(8_192);
 	});
 });

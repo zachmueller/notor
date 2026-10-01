@@ -26,6 +26,7 @@ import { parseSSEStream } from "./sse";
 import { getSecret, secretIdForApiKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
+import { contextOverflowMessage, noteContextOverflow } from "./context-overflow";
 
 const log = logger("LocalProvider");
 
@@ -285,6 +286,17 @@ export class LocalProvider implements LLMProvider {
 					`Rate limited by local LLM server.`,
 					"local",
 					"RATE_LIMITED"
+				);
+			}
+			// Local servers report overflow with assorted statuses (400, 500, …).
+			const overflow = noteContextOverflow(options.model, options.use_extended_context, errorText);
+			if (overflow.isOverflow) {
+				throw new ProviderError(
+					contextOverflowMessage(overflow.limit),
+					"local",
+					"CONTEXT_LENGTH_EXCEEDED",
+					undefined,
+					{ rawMessage: errorText }
 				);
 			}
 			throw new ProviderError(

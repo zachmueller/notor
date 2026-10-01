@@ -278,6 +278,9 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				}
 			}
 
+			// Internal cache managed by providers/model-limits.ts.
+			delete clone.model_limits_cache;
+
 			return clone;
 		},
 
@@ -289,6 +292,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				/^mcp_servers\.[^.]+\.headers/,
 				/^providers\.\d+\.model_cache/,
 				/^providers\.\d+\.model_cache_timestamp/,
+				/^model_limits_cache(\.|$)/,
 			];
 
 			return async (keyPath: string, value: unknown): Promise<{

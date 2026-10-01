@@ -19,15 +19,31 @@
  */
 
 import type { ModelInfo } from "../types";
+import { logger } from "../utils/logger";
+import {
+	parseClaudeModelId,
+	pickNearestClaudeEntry,
+	type ClaudeCandidate,
+	type ClaudeFamily,
+} from "./model-family";
+import {
+	getApiContextWindow,
+	getContextOverride,
+	getLearnedContextWindow,
+	isBetaRejected,
+	reportFallbackContextWindow,
+} from "./model-limits";
+
+const log = logger("ModelMetadata");
 
 /** Default context window for unknown models. */
-const DEFAULT_CONTEXT_WINDOW = 128_000;
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
 
 /**
  * Extended context configuration for models that support
  * the 1M context window beta header on Bedrock.
  */
-interface ExtendedContext {
+export interface ExtendedContext {
 	context_window: number;
 	beta_flag: string;
 	input_price_per_1k?: number;
@@ -38,7 +54,7 @@ interface ExtendedContext {
  * Metadata entry for a known model.
  * Only includes fields not available from provider list APIs.
  */
-interface ModelMetadataEntry {
+export interface ModelMetadataEntry {
 	context_window: number;
 	input_price_per_1k: number | null;
 	output_price_per_1k: number | null;
@@ -898,23 +914,197 @@ export function getModelMetadata(modelId: string): ModelInfo | null {
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Claude family inference (models not yet in the static table)
+// ---------------------------------------------------------------------------
+
+/**
+ * Claude families whose newly released versions are assumed to ship with a
+ * 1M context window (every Sonnet/Opus/Fable since 4.6 does). Haiku is
+ * excluded — new Haiku versions inherit their nearest sibling's window.
+ */
+const DEFAULT_1M_FAMILIES: ReadonlySet<ClaudeFamily> = new Set(["sonnet", "opus", "fable", "mythos"]);
+
+/** Context window assumed for a new Sonnet+ model. */
+const ASSUMED_NEW_MODEL_CONTEXT_WINDOW = 1_000_000;
+
+/** Beta flag sent for a new Bedrock Sonnet+ model when its sibling has none. */
+const DEFAULT_EXTENDED_BETA_FLAG = "context-1m-2025-08-07";
+
+/** Base window for a sibling-less new model once Bedrock rejects its 1M beta. */
+const CLAUDE_BASE_CONTEXT_WINDOW = 200_000;
+
+/** Metadata inferred for a Claude model missing from the static table. Never carries pricing. */
+interface InferredEntry {
+	/** Sibling table entry this was derived from, or null when none exists. */
+	from: string | null;
+	/** Base context window. */
+	context_window: number;
+	/** Extended (1M) variant inherited from the sibling. */
+	extended_context?: { context_window: number; beta_flag: string };
+	/**
+	 * Set for a new Sonnet+ model: the base window is assumed to be 1M. On
+	 * Bedrock the beta header is sent by default; if rejected, the window
+	 * falls back to `fallback_context_window`.
+	 */
+	default1m?: { beta_flag?: string; fallback_context_window: number };
+}
+
+let claudeCandidates: Array<ClaudeCandidate<ModelMetadataEntry>> | null = null;
+const inferenceMemo = new Map<string, InferredEntry | null>();
+
+function getClaudeCandidates(): Array<ClaudeCandidate<ModelMetadataEntry>> {
+	if (!claudeCandidates) {
+		claudeCandidates = [];
+		for (const [id, value] of Object.entries(MODEL_METADATA)) {
+			const parsed = parseClaudeModelId(id);
+			if (parsed) claudeCandidates.push({ id, parsed, value });
+		}
+	}
+	return claudeCandidates;
+}
+
+/** Infer metadata for an unknown Claude model ID (memoized). */
+function inferClaude(modelId: string): InferredEntry | null {
+	const cached = inferenceMemo.get(modelId);
+	if (cached !== undefined) return cached;
+
+	let inferred: InferredEntry | null = null;
+	const parsed = parseClaudeModelId(modelId);
+	if (parsed) {
+		const sibling = pickNearestClaudeEntry(parsed, getClaudeCandidates());
+		if (DEFAULT_1M_FAMILIES.has(parsed.family) && (!sibling || sibling.newerThanAll)) {
+			inferred = {
+				from: sibling?.id ?? null,
+				context_window: ASSUMED_NEW_MODEL_CONTEXT_WINDOW,
+				default1m: {
+					beta_flag:
+						parsed.shape === "bedrock"
+							? (sibling?.value.extended_context?.beta_flag ?? DEFAULT_EXTENDED_BETA_FLAG)
+							: undefined,
+					fallback_context_window: sibling?.value.context_window ?? CLAUDE_BASE_CONTEXT_WINDOW,
+				},
+			};
+		} else if (sibling) {
+			const ext = sibling.value.extended_context;
+			inferred = {
+				from: sibling.id,
+				context_window: sibling.value.context_window,
+				extended_context: ext ? { context_window: ext.context_window, beta_flag: ext.beta_flag } : undefined,
+			};
+		}
+	}
+
+	inferenceMemo.set(modelId, inferred);
+	if (inferred) {
+		log.info("Inferred context window for unknown model", {
+			modelId,
+			from: inferred.from,
+			contextWindow: inferred.context_window,
+			assumedNew1m: inferred.default1m !== undefined,
+		});
+	}
+	return inferred;
+}
+
+/** Context window for an inferred entry, honoring a rejected 1M beta. */
+function inferredContextWindow(modelId: string, inferred: InferredEntry, useExtendedContext?: boolean): number {
+	if (inferred.default1m) {
+		return inferred.default1m.beta_flag && isBetaRejected(modelId)
+			? inferred.default1m.fallback_context_window
+			: inferred.context_window;
+	}
+	if (useExtendedContext && inferred.extended_context) {
+		return inferred.extended_context.context_window;
+	}
+	return inferred.context_window;
+}
+
+// ---------------------------------------------------------------------------
+// Context window resolution
+// ---------------------------------------------------------------------------
+
+/** Where a resolved context window came from. */
+export type ContextWindowSource = "override" | "learned" | "api" | "static" | "inferred" | "default";
+
+/** A resolved context window plus how it was derived. */
+export interface ContextWindowInfo {
+	/** The effective window. */
+	tokens: number;
+	source: ContextWindowSource;
+	/** The window before overrides and learned limits. */
+	base: number;
+	baseSource: "api" | "static" | "inferred" | "default";
+	learned?: number;
+	override?: number;
+	/** Sibling table entry used when `baseSource` is "inferred" (null if none). */
+	inferredFrom?: string | null;
+}
+
+function resolveBaseContextWindow(
+	modelId: string,
+	useExtendedContext?: boolean
+): Pick<ContextWindowInfo, "base" | "baseSource" | "inferredFrom"> {
+	const api = getApiContextWindow(modelId);
+	if (api !== undefined) {
+		// The Anthropic API reports one window per model — no beta variant.
+		return { base: api, baseSource: "api" };
+	}
+	const entry = MODEL_METADATA[modelId];
+	if (entry) {
+		return {
+			base: useExtendedContext && entry.extended_context ? entry.extended_context.context_window : entry.context_window,
+			baseSource: "static",
+		};
+	}
+	const inferred = inferClaude(modelId);
+	if (inferred) {
+		return {
+			base: inferredContextWindow(modelId, inferred, useExtendedContext),
+			baseSource: "inferred",
+			inferredFrom: inferred.from,
+		};
+	}
+	return { base: DEFAULT_CONTEXT_WINDOW, baseSource: "default" };
+}
+
+/**
+ * Resolve a model's context window and report where it came from.
+ *
+ * Precedence: user override → (API limit → static table → Claude family
+ * inference → 128K default), then clamped down by any limit learned from an
+ * overflow error. Unlike {@link getContextWindow}, never warns.
+ */
+export function describeContextWindow(modelId: string, useExtendedContext?: boolean): ContextWindowInfo {
+	const id = modelId.trim();
+	const base = resolveBaseContextWindow(id, useExtendedContext);
+	const override = getContextOverride(id, useExtendedContext);
+	const learned = getLearnedContextWindow(id, useExtendedContext);
+	const detail = { ...base, learned, override };
+
+	if (override !== undefined) return { ...detail, tokens: override, source: "override" };
+	if (learned !== undefined && learned < base.base) return { ...detail, tokens: learned, source: "learned" };
+	return { ...detail, tokens: base.base, source: base.baseSource };
+}
+
 /**
  * Get the context window size for a model.
  *
- * Falls back to DEFAULT_CONTEXT_WINDOW (128,000) for unknown models.
- * When `useExtendedContext` is true and the model supports the 1M beta,
- * returns the extended context window instead.
+ * Resolution order: user override, then the provider's model-list API, the
+ * static table, Claude family inference, and finally DEFAULT_CONTEXT_WINDOW
+ * (128,000) — clamped down by any limit learned from an overflow error.
+ * Using the 128K default reports a one-time warning for the model.
  *
  * @param modelId - The model identifier
  * @param useExtendedContext - Whether to use the extended (1M) context window
  * @returns Context window size in tokens
  */
 export function getContextWindow(modelId: string, useExtendedContext?: boolean): number {
-	const entry = MODEL_METADATA[modelId];
-	if (useExtendedContext && entry?.extended_context?.context_window) {
-		return entry.extended_context.context_window;
+	const info = describeContextWindow(modelId, useExtendedContext);
+	if (info.source === "default") {
+		reportFallbackContextWindow(modelId);
 	}
-	return entry?.context_window ?? DEFAULT_CONTEXT_WINDOW;
+	return info.tokens;
 }
 
 /**
@@ -922,6 +1112,8 @@ export function getContextWindow(modelId: string, useExtendedContext?: boolean):
  *
  * Fills in context_window and pricing if available from the static
  * table. Fields already present on the input are not overwritten.
+ * For Claude models missing from the table, fills only the inferred
+ * context_window — pricing is never inferred.
  *
  * @param model - A ModelInfo object (e.g., from a provider's listModels)
  * @returns The same object with enriched fields
@@ -929,7 +1121,11 @@ export function getContextWindow(modelId: string, useExtendedContext?: boolean):
 export function enrichModelInfo(model: ModelInfo): ModelInfo {
 	const entry = MODEL_METADATA[model.id];
 	if (!entry) {
-		return model;
+		if (model.context_window != null) return model;
+		const inferred = inferClaude(model.id);
+		return inferred
+			? { ...model, context_window: inferredContextWindow(model.id, inferred) }
+			: model;
 	}
 	return {
 		...model,
@@ -948,11 +1144,45 @@ export function enrichModelInfo(model: ModelInfo): ModelInfo {
 /**
  * Get the extended context configuration for a model, if available.
  *
+ * A static entry is authoritative (even one without extended context).
+ * Models with an API-reported window have no beta variant. Otherwise an
+ * inferred Claude model inherits its sibling's extended context (without
+ * pricing) — except new Sonnet+ models, whose base window is already 1M.
+ *
  * @param modelId - The model identifier
  * @returns ExtendedContext config, or undefined if not supported
  */
 export function getModelExtendedContext(modelId: string): ExtendedContext | undefined {
-	return MODEL_METADATA[modelId]?.extended_context;
+	const entry = MODEL_METADATA[modelId];
+	if (entry) return entry.extended_context;
+	if (getApiContextWindow(modelId) !== undefined) return undefined;
+	const inferred = inferClaude(modelId);
+	return inferred?.default1m ? undefined : inferred?.extended_context;
+}
+
+/**
+ * The 1M beta flag to send with a Bedrock request, if any.
+ *
+ * Sent when the user selected the extended variant of a model that has one,
+ * or by default for a new (inferred) Sonnet+ Bedrock model whose beta has
+ * not been rejected.
+ */
+export function getExtendedContextBeta(modelId: string, useExtendedContext?: boolean): string | undefined {
+	if (useExtendedContext) {
+		const flag = getModelExtendedContext(modelId)?.beta_flag;
+		if (flag) return flag;
+	}
+	return hasInferredExtendedBeta(modelId) ? inferClaude(modelId)?.default1m?.beta_flag : undefined;
+}
+
+/**
+ * Whether a model sends the 1M beta by default because it was inferred as a
+ * new Sonnet+ Bedrock model (and Bedrock hasn't rejected the beta yet).
+ */
+export function hasInferredExtendedBeta(modelId: string): boolean {
+	if (MODEL_METADATA[modelId] || getApiContextWindow(modelId) !== undefined) return false;
+	const flag = inferClaude(modelId)?.default1m?.beta_flag;
+	return flag !== undefined && !isBetaRejected(modelId);
 }
 
 /**

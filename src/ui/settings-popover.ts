@@ -7,7 +7,7 @@
 import { Modal, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type { ModelInfo, ModelPreset, Checkpoint } from "../types";
-import { groupModels, formatFullVariantLabel, type ModelGroup } from "../providers/model-grouping";
+import { groupModels, formatFullVariantLabel, parseOptionValue, type ModelGroup } from "../providers/model-grouping";
 import { supportsThinking } from "../providers/model-metadata";
 import { formatRelativeTime } from "../utils/format-time";
 import { logger } from "../utils/logger";
@@ -332,6 +332,12 @@ export class SettingsPopover {
 		groups: ModelGroup[],
 		currentModel: string
 	): void {
+		// A persisted `id::1m` selection with no matching variant (the model has no
+		// separate 1M option) falls back to the base option instead of showing blank.
+		const optionValues = new Set(groups.flatMap((g) => g.variants.map((v) => v.optionValue)));
+		if (!optionValues.has(currentModel)) {
+			currentModel = parseOptionValue(currentModel).modelId;
+		}
 		for (const group of groups) {
 			if (group.variants.length === 1) {
 				const variant = group.variants[0]!;

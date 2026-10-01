@@ -34,7 +34,9 @@ import { ProviderError } from "./provider";
 import { getSecret, secretIdForAccessKeyId, secretIdForSecretAccessKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import type { ContentBlock as MediaContentBlock } from "../media/types";
-import { getModelExtendedContext, supportsThinking } from "./model-metadata";
+import { getExtendedContextBeta, hasInferredExtendedBeta, supportsThinking } from "./model-metadata";
+import { contextOverflowMessage, noteContextOverflow } from "./context-overflow";
+import { recordBetaRejected } from "./model-limits";
 import { parseProfileId } from "./model-grouping";
 import { resolveAnthropicThinking } from "./thinking-config";
 import { logger } from "../utils/logger";
@@ -65,6 +67,17 @@ import {
 import { fromIni } from "@aws-sdk/credential-providers";
 
 const log = logger("BedrockProvider");
+
+/**
+ * Per-request stream state. `stopReason` is stashed from messageStop so it can
+ * ride on the metadata-driven message_end; `model`/`useExtendedContext` let
+ * stream-level validation errors record a learned context limit.
+ */
+interface BedrockStreamState {
+	stopReason?: string;
+	model?: string;
+	useExtendedContext?: boolean;
+}
 
 /** Recursive JSON document type — mirrors @smithy/types DocumentType for AWS SDK compatibility. */
 type DocumentType = null | boolean | number | string | DocumentType[] | { [key: string]: DocumentType };
@@ -387,7 +400,10 @@ export class BedrockProvider implements LLMProvider {
 		// event, so a single message_end carries both real token counts and the
 		// stop reason — avoids a second, token-zeroed message_end that would clobber
 		// accounting downstream.
-		const streamState: { stopReason?: string } = {};
+		const streamState: BedrockStreamState = {
+			model: options.model,
+			useExtendedContext: options.use_extended_context,
+		};
 		const { system, messages: bedrockMessages } =
 			toBedrockMessages(messages);
 
@@ -413,15 +429,15 @@ export class BedrockProvider implements LLMProvider {
 			input.toolConfig = toolConfig;
 		}
 
-		// Inject 1M context beta header when extended context is active
-		if (options.use_extended_context) {
-			const extCtx = getModelExtendedContext(options.model);
-			if (extCtx?.beta_flag) {
-				input.additionalModelRequestFields = {
-					...input.additionalModelRequestFields as Record<string, DocumentType>,
-					anthropic_beta: [extCtx.beta_flag],
-				};
-			}
+		// Inject the 1M context beta header when the extended variant is selected,
+		// or by default for a new (inferred) Sonnet+ model assumed to be 1M.
+		const betaFlag = getExtendedContextBeta(options.model, options.use_extended_context);
+		const betaIsInferred = betaFlag !== undefined && hasInferredExtendedBeta(options.model);
+		if (betaFlag) {
+			input.additionalModelRequestFields = {
+				...input.additionalModelRequestFields as Record<string, DocumentType>,
+				anthropic_beta: [betaFlag],
+			};
 		}
 
 		// Inject thinking config for Anthropic-on-Bedrock models
@@ -504,6 +520,17 @@ export class BedrockProvider implements LLMProvider {
 					errDetails
 				);
 			}
+			// Checked after throttling, which also mentions tokens ("Too many tokens").
+			const overflow = noteContextOverflow(options.model, options.use_extended_context, errMsg);
+			if (overflow.isOverflow) {
+				throw new ProviderError(
+					contextOverflowMessage(overflow.limit),
+					"bedrock",
+					"CONTEXT_LENGTH_EXCEEDED",
+					e instanceof Error ? e : undefined,
+					errDetails
+				);
+			}
 			if (
 				errName === "ModelNotReadyException" ||
 				errMsg.includes("model") && errMsg.includes("not found")
@@ -519,7 +546,24 @@ export class BedrockProvider implements LLMProvider {
 			if (
 				errName === "ValidationException" &&
 				errMsg.includes("invalid beta flag") &&
-				options.use_extended_context
+				betaIsInferred
+			) {
+				// The 1M beta was sent only because this model was assumed to be a
+				// new 1M model. Stop sending it; the window falls back to the
+				// nearest sibling's base window.
+				recordBetaRejected(options.model);
+				throw new ProviderError(
+					`Bedrock rejected the 1M context beta for "${options.model}". Notor will stop sending it for this model — send your message again.`,
+					"bedrock",
+					"PROVIDER_ERROR",
+					e instanceof Error ? e : undefined,
+					errDetails
+				);
+			}
+			if (
+				errName === "ValidationException" &&
+				errMsg.includes("invalid beta flag") &&
+				betaFlag !== undefined
 			) {
 				throw new ProviderError(
 					"The 1M context beta flag was rejected by Bedrock. The beta may have been updated or revoked — check for a plugin update.",
@@ -590,6 +634,7 @@ export class BedrockProvider implements LLMProvider {
 				return;
 			}
 			log.error("Bedrock stream error (full object for debugging)", e);
+			noteContextOverflow(options.model, options.use_extended_context, e instanceof Error ? e.message : String(e));
 			yield {
 				type: "error",
 				error: e instanceof Error ? e.message : String(e),
@@ -610,7 +655,7 @@ export class BedrockProvider implements LLMProvider {
 	private *handleBedrockEvent(
 		event: ConverseStreamOutput,
 		activeToolBlockIndices: Map<number, string>,
-		streamState: { stopReason?: string }
+		streamState: BedrockStreamState
 	): Iterable<StreamChunk> {
 		if (event.contentBlockStart) {
 			const start = event.contentBlockStart.start;
@@ -745,10 +790,14 @@ export class BedrockProvider implements LLMProvider {
 		}
 
 		if (event.validationException) {
+			const rawMessage = event.validationException.message ?? "Validation error";
+			if (streamState.model) {
+				noteContextOverflow(streamState.model, streamState.useExtendedContext, rawMessage);
+			}
 			yield {
 				type: "error",
-				error:
-					event.validationException.message ?? "Validation error",
+				error: rawMessage,
+				details: { name: "ValidationException", rawMessage },
 			};
 		}
 	}

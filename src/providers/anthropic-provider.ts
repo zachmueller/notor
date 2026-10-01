@@ -25,6 +25,8 @@ import { estimateTokenCount } from "../utils/tokens";
 import { logger } from "../utils/logger";
 import { resolveAnthropicThinking } from "./thinking-config";
 import { supportsThinking } from "./model-metadata";
+import { contextOverflowMessage, noteContextOverflow } from "./context-overflow";
+import { recordApiModelLimits } from "./model-limits";
 
 const log = logger("AnthropicProvider");
 
@@ -44,6 +46,12 @@ interface AnthropicEventData {
 interface AnthropicModelEntry {
 	id: string;
 	display_name?: string;
+	/** Context window (input token limit). */
+	max_input_tokens?: number | null;
+	/** Output token cap. */
+	max_tokens?: number | null;
+	/** Capability tree (thinking, effort, …); not read yet. */
+	capabilities?: Record<string, unknown>;
 }
 
 /** The paginated Anthropic `/v1/models` listing response (fields Notor reads). */
@@ -315,12 +323,17 @@ export class AnthropicProvider implements LLMProvider {
 					"RATE_LIMITED"
 				);
 			}
-			if (response.status === 400 && errorText.includes("context_length")) {
-				throw new ProviderError(
-					"Context length exceeded for this model.",
-					"anthropic",
-					"CONTEXT_LENGTH_EXCEEDED"
-				);
+			if (response.status === 400 || response.status === 413) {
+				const overflow = noteContextOverflow(options.model, options.use_extended_context, errorText);
+				if (overflow.isOverflow) {
+					throw new ProviderError(
+						contextOverflowMessage(overflow.limit),
+						"anthropic",
+						"CONTEXT_LENGTH_EXCEEDED",
+						undefined,
+						{ rawMessage: errorText }
+					);
+				}
 			}
 			throw new ProviderError(
 				`Anthropic API error (${response.status}): ${errorText}`,
@@ -509,6 +522,7 @@ export class AnthropicProvider implements LLMProvider {
 	async listModels(): Promise<ModelInfo[]> {
 		const apiKey = this.getApiKey();
 		const allModels: ModelInfo[] = [];
+		const rawEntries: AnthropicModelEntry[] = [];
 		let afterId: string | undefined;
 		let hasMore = true;
 
@@ -551,11 +565,15 @@ export class AnthropicProvider implements LLMProvider {
 			}
 
 			const json = await response.json() as AnthropicModelsResponse;
+			rawEntries.push(...(json.data ?? []));
 			const models: ModelInfo[] = (json.data ?? []).map(
 				(m) => ({
 					id: m.id,
 					display_name: m.display_name || m.id,
-					context_window: null,
+					context_window:
+						typeof m.max_input_tokens === "number" && m.max_input_tokens > 0
+							? m.max_input_tokens
+							: null,
 					input_price_per_1k: null,
 					output_price_per_1k: null,
 					provider: "anthropic",
@@ -567,6 +585,8 @@ export class AnthropicProvider implements LLMProvider {
 			afterId = json.last_id;
 		}
 
+		// Live limits outrank the static table for context-window resolution.
+		recordApiModelLimits(rawEntries);
 		return allModels;
 	}
 
