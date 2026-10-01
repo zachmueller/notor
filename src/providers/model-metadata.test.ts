@@ -6,7 +6,7 @@ import {
 	getExtendedContextBeta,
 	getModelExtendedContext,
 	getModelMetadata,
-	hasInferredExtendedBeta,
+	sendsExtendedBetaByDefault,
 } from "./model-metadata";
 import {
 	initModelLimits,
@@ -120,26 +120,90 @@ describe("getContextWindow", () => {
 	});
 });
 
+describe("getContextWindow — 5.5-series / Fable 5.1 entries", () => {
+	beforeEach(() => resetModelLimits());
+
+	const bedrockIds = [
+		"us.anthropic.claude-opus-5-5",
+		"global.anthropic.claude-opus-5-5",
+		"us.anthropic.claude-sonnet-5-5",
+		"global.anthropic.claude-sonnet-5-5",
+		"us.anthropic.claude-fable-5-1",
+		"global.anthropic.claude-fable-5-1",
+	];
+
+	it("defaults Bedrock profiles to 1M and sends the beta on every request", () => {
+		for (const id of bedrockIds) {
+			expect(getContextWindow(id)).toBe(1_000_000);
+			expect(getContextWindow(id, true)).toBe(1_000_000);
+			expect(getExtendedContextBeta(id, false)).toBe("context-1m-2025-08-07");
+			expect(sendsExtendedBetaByDefault(id)).toBe(true);
+			// No separate 1M picker variant — 1M is the default.
+			expect(getModelExtendedContext(id)).toBeUndefined();
+			expect(describeContextWindow(id).source).toBe("static");
+		}
+	});
+
+	it("falls back to the 200K base once Bedrock rejects the beta", () => {
+		recordBetaRejected("us.anthropic.claude-opus-5-5");
+		expect(getContextWindow("us.anthropic.claude-opus-5-5")).toBe(200_000);
+		expect(getContextWindow("us.anthropic.claude-opus-5-5", true)).toBe(200_000);
+		expect(getExtendedContextBeta("us.anthropic.claude-opus-5-5", true)).toBeUndefined();
+		expect(sendsExtendedBetaByDefault("us.anthropic.claude-opus-5-5")).toBe(false);
+		// Other profiles are unaffected.
+		expect(getContextWindow("global.anthropic.claude-opus-5-5")).toBe(1_000_000);
+	});
+
+	it("gives direct-API aliases a 1M base window with no beta", () => {
+		for (const id of ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]) {
+			expect(getContextWindow(id)).toBe(1_000_000);
+			expect(getExtendedContextBeta(id, true)).toBeUndefined();
+		}
+	});
+
+	it("carries pricing and display names", () => {
+		expect(getModelMetadata("us.anthropic.claude-opus-5-5")).toMatchObject({
+			display_name: "Claude Opus 5.5",
+			input_price_per_1k: 0.004,
+			output_price_per_1k: 0.020,
+		});
+		expect(enrichModelInfo({ id: "global.anthropic.claude-sonnet-5-5", display_name: "global.anthropic.claude-sonnet-5-5" }))
+			.toMatchObject({ display_name: "Claude Sonnet 5.5", context_window: 1_000_000 });
+	});
+});
+
+describe("getContextWindow — new non-Anthropic Bedrock profiles", () => {
+	it("returns the model-card context windows", () => {
+		expect(getContextWindow("us.openai.gpt-6-sol")).toBe(1_050_000);
+		expect(getContextWindow("global.openai.gpt-5.6-terra")).toBe(1_050_000);
+		expect(getContextWindow("us.openai.gpt-6.1-sol")).toBe(1_000_000);
+		expect(getContextWindow("us.xai.grok-4.7")).toBe(500_000);
+		expect(getContextWindow("global.moonshotai.kimi-k3")).toBe(1_000_000);
+		// No 1M beta variant for non-Anthropic models.
+		expect(getModelExtendedContext("us.openai.gpt-6-sol")).toBeUndefined();
+	});
+});
+
 describe("getContextWindow — inferred Claude models", () => {
 	beforeEach(() => resetModelLimits());
 
 	it("assumes 1M for a new Bedrock Sonnet+ model and sends the beta by default", () => {
-		for (const id of ["us.anthropic.claude-opus-5-5", "global.anthropic.claude-opus-5-5", "us.anthropic.claude-sonnet-5-5"]) {
+		for (const id of ["us.anthropic.claude-opus-6", "global.anthropic.claude-opus-6", "us.anthropic.claude-sonnet-6"]) {
 			expect(getContextWindow(id)).toBe(1_000_000);
 			expect(getContextWindow(id, true)).toBe(1_000_000);
 			expect(getExtendedContextBeta(id, false)).toBe("context-1m-2025-08-07");
-			expect(hasInferredExtendedBeta(id)).toBe(true);
+			expect(sendsExtendedBetaByDefault(id)).toBe(true);
 			// No separate 1M picker variant — the base window is already 1M.
 			expect(getModelExtendedContext(id)).toBeUndefined();
 		}
 	});
 
 	it("assumes 1M for a new direct-API model, with no beta", () => {
-		expect(getContextWindow("claude-opus-5-5")).toBe(1_000_000);
-		expect(getExtendedContextBeta("claude-opus-5-5", true)).toBeUndefined();
+		expect(getContextWindow("claude-opus-6")).toBe(1_000_000);
+		expect(getExtendedContextBeta("claude-opus-6", true)).toBeUndefined();
 	});
 
-	it("assumes 1M for a new family member with no table sibling (mythos)", () => {
+	it("assumes 1M for a mythos model via the fable lineage", () => {
 		expect(getContextWindow("us.anthropic.claude-mythos-5-1")).toBe(1_000_000);
 	});
 
@@ -152,30 +216,35 @@ describe("getContextWindow — inferred Claude models", () => {
 		const id = "eu.anthropic.claude-opus-5";
 		expect(getContextWindow(id)).toBe(200_000);
 		expect(getContextWindow(id, true)).toBe(1_000_000);
-		expect(getModelExtendedContext(id)).toEqual({ context_window: 1_000_000, beta_flag: "context-1m-2025-08-07" });
+		expect(getModelExtendedContext(id)).toMatchObject({ context_window: 1_000_000, beta_flag: "context-1m-2025-08-07" });
 		expect(getExtendedContextBeta(id, false)).toBeUndefined();
 		expect(getExtendedContextBeta(id, true)).toBe("context-1m-2025-08-07");
 	});
 
+	it("inherits a default-on 1M window for an unknown regional variant of a 5.5 model", () => {
+		expect(getContextWindow("eu.anthropic.claude-opus-5-5")).toBe(1_000_000);
+		expect(getExtendedContextBeta("eu.anthropic.claude-opus-5-5", false)).toBe("context-1m-2025-08-07");
+	});
+
 	it("falls back to the sibling's base window once the inferred beta is rejected", () => {
-		recordBetaRejected("us.anthropic.claude-opus-5-5");
-		expect(getContextWindow("us.anthropic.claude-opus-5-5")).toBe(200_000);
-		expect(getExtendedContextBeta("us.anthropic.claude-opus-5-5", false)).toBeUndefined();
-		expect(hasInferredExtendedBeta("us.anthropic.claude-opus-5-5")).toBe(false);
+		recordBetaRejected("us.anthropic.claude-opus-6");
+		expect(getContextWindow("us.anthropic.claude-opus-6")).toBe(200_000);
+		expect(getExtendedContextBeta("us.anthropic.claude-opus-6", false)).toBeUndefined();
+		expect(sendsExtendedBetaByDefault("us.anthropic.claude-opus-6")).toBe(false);
 	});
 
 	it("never infers pricing", () => {
-		expect(getModelMetadata("us.anthropic.claude-opus-5-5")).toBeNull();
-		const enriched = enrichModelInfo({ id: "us.anthropic.claude-opus-5-5", display_name: "x" });
+		expect(getModelMetadata("us.anthropic.claude-opus-6")).toBeNull();
+		const enriched = enrichModelInfo({ id: "us.anthropic.claude-opus-6", display_name: "x" });
 		expect(enriched.context_window).toBe(1_000_000);
 		expect(enriched.input_price_per_1k).toBeUndefined();
 	});
 
 	it("reports the inference source", () => {
-		expect(describeContextWindow("us.anthropic.claude-opus-5-5")).toMatchObject({
+		expect(describeContextWindow("us.anthropic.claude-opus-6")).toMatchObject({
 			source: "inferred",
 			baseSource: "inferred",
-			inferredFrom: "us.anthropic.claude-opus-5",
+			inferredFrom: "us.anthropic.claude-opus-5-5",
 		});
 	});
 });

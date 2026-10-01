@@ -34,7 +34,7 @@ import { ProviderError } from "./provider";
 import { getSecret, secretIdForAccessKeyId, secretIdForSecretAccessKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import type { ContentBlock as MediaContentBlock } from "../media/types";
-import { getExtendedContextBeta, hasInferredExtendedBeta, supportsThinking } from "./model-metadata";
+import { getExtendedContextBeta, sendsExtendedBetaByDefault, supportsThinking } from "./model-metadata";
 import { contextOverflowMessage, noteContextOverflow } from "./context-overflow";
 import { recordBetaRejected } from "./model-limits";
 import { parseProfileId } from "./model-grouping";
@@ -430,9 +430,9 @@ export class BedrockProvider implements LLMProvider {
 		}
 
 		// Inject the 1M context beta header when the extended variant is selected,
-		// or by default for a new (inferred) Sonnet+ model assumed to be 1M.
+		// or on every request for a model whose 1M window is the default.
 		const betaFlag = getExtendedContextBeta(options.model, options.use_extended_context);
-		const betaIsInferred = betaFlag !== undefined && hasInferredExtendedBeta(options.model);
+		const betaIsDefault = betaFlag !== undefined && sendsExtendedBetaByDefault(options.model);
 		if (betaFlag) {
 			input.additionalModelRequestFields = {
 				...input.additionalModelRequestFields as Record<string, DocumentType>,
@@ -546,11 +546,11 @@ export class BedrockProvider implements LLMProvider {
 			if (
 				errName === "ValidationException" &&
 				errMsg.includes("invalid beta flag") &&
-				betaIsInferred
+				betaIsDefault
 			) {
-				// The 1M beta was sent only because this model was assumed to be a
-				// new 1M model. Stop sending it; the window falls back to the
-				// nearest sibling's base window.
+				// The 1M beta was sent by default (1M is this model's default
+				// window). Stop sending it; the window falls back to the entry's
+				// base window.
 				recordBetaRejected(options.model);
 				throw new ProviderError(
 					`Bedrock rejected the 1M context beta for "${options.model}". Notor will stop sending it for this model — send your message again.`,

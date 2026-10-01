@@ -79,7 +79,7 @@ describe("parseContextOverflow — not overflows", () => {
 
 describe("noteContextOverflow", () => {
 	it("records a limit below the model's base window", () => {
-		// Inferred new Sonnet+ model: assumed 1M.
+		// Default-1M model (Opus 5.5 on Bedrock).
 		const r = noteContextOverflow("us.anthropic.claude-opus-5-5", false, "prompt is too long: 250000 tokens > 200000 maximum");
 		expect(r).toMatchObject({ isOverflow: true, limit: 200_000, recorded: true });
 		expect(getLearnedContextWindow("us.anthropic.claude-opus-5-5", false)).toBe(200_000);

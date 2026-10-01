@@ -4,7 +4,7 @@
  *
  * Validates the "Model context limits" section in Settings → Notor → Reference
  * and, through its override descriptions, that the bundled plugin resolves an
- * unknown new Claude model (Opus 5.5) by family inference.
+ * unknown new Claude model (a hypothetical Opus 6) by family inference.
  *
  * Scenarios:
  *   1. Section renders — deep-linkable heading, "Add override" row, and the
@@ -32,7 +32,8 @@ import {
 // ---------------------------------------------------------------------------
 
 const SUBSECTION = "Model context limits";
-const MODEL_ID = "us.anthropic.claude-opus-5-5";
+/** Not in the static table — resolved by Claude family inference. */
+const MODEL_ID = "us.anthropic.claude-opus-6";
 const OVERRIDE_INPUT = "500k";
 const OVERRIDE_TOKENS = 500_000;
 /** Stamped on the heading; disappears if the pane is rebuilt. */
@@ -138,7 +139,7 @@ async function testAddOverride(ctx: TestContext): Promise<void> {
 		ctx.fail("Override row", `No row named ${MODEL_ID}`, shot);
 		return;
 	}
-	const expectedDesc = `500,000 tokens · otherwise 1,000,000 inferred from us.anthropic.claude-opus-5`;
+	const expectedDesc = `500,000 tokens · otherwise 1,000,000 inferred from us.anthropic.claude-opus-5-5`;
 	if (row.desc === expectedDesc) {
 		ctx.pass("Override row reports the inferred window", row.desc, shot);
 	} else {

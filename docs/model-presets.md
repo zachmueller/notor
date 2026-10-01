@@ -21,7 +21,7 @@ Open **Settings → Notor → Models**. Each preset appears as a row with:
 
 - **Name** — editable text field (must be unique across presets)
 - **Provider** dropdown — lists only enabled and configured providers
-- **Model** dropdown — populated from the selected provider's model list. Extended context (1M) variants appear with an `(1M)` suffix. New Claude Sonnet, Opus and Fable models that Notor doesn't recognize yet are assumed to have a 1M window, so they have no separate `(1M)` variant (see [How Notor determines a model's context window](context.md#how-notor-determines-a-models-context-window)).
+- **Model** dropdown — populated from the selected provider's model list. Extended context (1M) variants appear with an `(1M)` suffix. Models whose 1M window is the default — Claude Opus 5.5, Sonnet 5.5 and Fable 5.1, plus new Claude Sonnet, Opus and Fable models that Notor doesn't recognize yet — have no separate `(1M)` variant (see [How Notor determines a model's context window](context.md#how-notor-determines-a-models-context-window)).
 - **Reorder** buttons (↑ ↓) — controls display order in the chat panel dropdown
 - **Delete** button — removes the preset (disabled for the current default preset)
 

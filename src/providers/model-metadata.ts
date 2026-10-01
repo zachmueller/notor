@@ -48,6 +48,12 @@ export interface ExtendedContext {
 	beta_flag: string;
 	input_price_per_1k?: number;
 	output_price_per_1k?: number;
+	/**
+	 * The extended window is the model's default: the beta flag is sent on
+	 * every request and the picker shows no separate 1M variant. If Bedrock
+	 * rejects the beta, the model falls back to the entry's base window.
+	 */
+	default?: boolean;
 }
 
 /**
@@ -93,6 +99,26 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		input_price_per_1k: 0.010, // verify pricing
 		output_price_per_1k: 0.050, // verify pricing
 		display_name: "Claude Fable 5",
+	},
+	// 5.5-series / Fable 5.1 — 1M is the default (and maximum) window on the
+	// Anthropic API, no beta header. Pricing: Anthropic list rates.
+	"claude-opus-5-5": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.004,
+		output_price_per_1k: 0.020,
+		display_name: "Claude Opus 5.5",
+	},
+	"claude-sonnet-5-5": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.002,
+		output_price_per_1k: 0.010,
+		display_name: "Claude Sonnet 5.5",
+	},
+	"claude-fable-5-1": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.010,
+		output_price_per_1k: 0.050,
+		display_name: "Claude Fable 5.1",
 	},
 	"claude-opus-4-8": {
 		context_window: 200_000,
@@ -475,6 +501,93 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 			beta_flag: "context-1m-2025-08-07",
 			input_price_per_1k: 0.010, // verify
 			output_price_per_1k: 0.050, // verify
+		},
+	},
+
+	// -----------------------------------------------------------------------
+	// Claude 5.5-series / Fable 5.1 — 1M by default.
+	//
+	// As of 2026-10, us-east-1 lists only `us.` and `global.` profiles (the
+	// model cards also name eu./au./jp. geos — not added until seen live).
+	// Live converse probes: all three accept the `context-1m-2025-08-07` beta
+	// and reject thinking.type=enabled ("use adaptive"), so they classify
+	// "effort" via the getThinkingMode() default. The AWS model cards list a
+	// 1M context window, so `extended_context.default` sends the beta on every
+	// request (no separate 1M picker variant); if Bedrock ever rejects it the
+	// model falls back to the 200K base. No long-context premium, so the 1M
+	// window uses base pricing. Bedrock rates aren't published on the pricing
+	// page yet — Anthropic list rates below.
+	// -----------------------------------------------------------------------
+
+	// Claude Opus 5.5
+	"us.anthropic.claude-opus-5-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.004, // verify (Anthropic list rate; geo profiles may add ~10%)
+		output_price_per_1k: 0.020, // verify
+		display_name: "Claude Opus 5.5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			default: true,
+		},
+	},
+	"global.anthropic.claude-opus-5-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.004, // verify (Anthropic list rate; geo profiles may add ~10%)
+		output_price_per_1k: 0.020, // verify
+		display_name: "Claude Opus 5.5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			default: true,
+		},
+	},
+
+	// Claude Sonnet 5.5
+	"us.anthropic.claude-sonnet-5-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.002, // verify (Anthropic list rate; geo profiles may add ~10%)
+		output_price_per_1k: 0.010, // verify
+		display_name: "Claude Sonnet 5.5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			default: true,
+		},
+	},
+	"global.anthropic.claude-sonnet-5-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.002, // verify (Anthropic list rate; geo profiles may add ~10%)
+		output_price_per_1k: 0.010, // verify
+		display_name: "Claude Sonnet 5.5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			default: true,
+		},
+	},
+
+	// Claude Fable 5.1 — the account's data-retention mode must be aws_review (model card)
+	"us.anthropic.claude-fable-5-1": {
+		context_window: 200_000,
+		input_price_per_1k: 0.010, // verify (Anthropic list rate; geo profiles may add ~10%)
+		output_price_per_1k: 0.050, // verify
+		display_name: "Claude Fable 5.1",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			default: true,
+		},
+	},
+	"global.anthropic.claude-fable-5-1": {
+		context_window: 200_000,
+		input_price_per_1k: 0.010, // verify (Anthropic list rate; geo profiles may add ~10%)
+		output_price_per_1k: 0.050, // verify
+		display_name: "Claude Fable 5.1",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			default: true,
 		},
 	},
 
@@ -892,6 +1005,149 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		input_price_per_1k: 0.00135,
 		output_price_per_1k: 0.0054,
 	},
+
+	// -----------------------------------------------------------------------
+	// AWS Bedrock — OpenAI inference profiles
+	// -----------------------------------------------------------------------
+	// Context windows and Standard-tier rates from the AWS model cards
+	// (2026-10). Prices are the short-context rate (≤272K input); requests
+	// above 272K input are billed at roughly 2x for the whole request.
+	// Geo (us.) profiles carry a 10% premium over global.
+	// GPT-5.4 / GPT-5.5: the model cards list bedrock-mantle only (no
+	// bedrock-runtime Converse), but the profiles are ACTIVE so they still list.
+	// Their us./global. rates are not published — In-Region rate (us.) and the
+	// OpenAI base rate (global.) used here.
+	"us.openai.gpt-5.4": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.00275, // verify pricing
+		output_price_per_1k: 0.0165, // verify pricing
+	},
+	"global.openai.gpt-5.4": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.0025, // verify pricing
+		output_price_per_1k: 0.015, // verify pricing
+	},
+	"us.openai.gpt-5.5": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.0055, // verify pricing
+		output_price_per_1k: 0.033, // verify pricing
+	},
+	"global.openai.gpt-5.5": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.005, // verify pricing
+		output_price_per_1k: 0.030, // verify pricing
+	},
+	"us.openai.gpt-5.6-sol": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.0044, // verify pricing
+		output_price_per_1k: 0.022, // verify pricing
+	},
+	"global.openai.gpt-5.6-sol": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.004, // verify pricing
+		output_price_per_1k: 0.020, // verify pricing
+	},
+	"us.openai.gpt-5.6-terra": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.0022, // verify pricing
+		output_price_per_1k: 0.0132, // verify pricing
+	},
+	"global.openai.gpt-5.6-terra": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.002, // verify pricing
+		output_price_per_1k: 0.012, // verify pricing
+	},
+	"us.openai.gpt-5.6-luna": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.00022, // verify pricing
+		output_price_per_1k: 0.00132, // verify pricing
+	},
+	"global.openai.gpt-5.6-luna": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.0002, // verify pricing
+		output_price_per_1k: 0.0012, // verify pricing
+	},
+	"us.openai.gpt-6-astra": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.011, // verify pricing
+		output_price_per_1k: 0.055, // verify pricing
+	},
+	"global.openai.gpt-6-astra": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.010, // verify pricing
+		output_price_per_1k: 0.050, // verify pricing
+	},
+	"us.openai.gpt-6-sol": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.0022, // verify pricing
+		output_price_per_1k: 0.011, // verify pricing
+	},
+	"global.openai.gpt-6-sol": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.002, // verify pricing
+		output_price_per_1k: 0.010, // verify pricing
+	},
+	"us.openai.gpt-6-luna": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.00011, // verify pricing
+		output_price_per_1k: 0.00055, // verify pricing
+	},
+	"global.openai.gpt-6-luna": {
+		context_window: 1_050_000,
+		input_price_per_1k: 0.0001, // verify pricing
+		output_price_per_1k: 0.0005, // verify pricing
+	},
+	"us.openai.gpt-6.1-sol": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.0022, // verify pricing
+		output_price_per_1k: 0.011, // verify pricing
+	},
+	"global.openai.gpt-6.1-sol": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.002, // verify pricing
+		output_price_per_1k: 0.010, // verify pricing
+	},
+
+	// -----------------------------------------------------------------------
+	// AWS Bedrock — xAI inference profiles
+	// -----------------------------------------------------------------------
+	// Grok 4.6 / 4.7 — 500K context; rates from the AWS model cards (2026-10).
+	"us.xai.grok-4.6": {
+		context_window: 500_000,
+		input_price_per_1k: 0.0022, // verify pricing
+		output_price_per_1k: 0.0066, // verify pricing
+	},
+	"global.xai.grok-4.6": {
+		context_window: 500_000,
+		input_price_per_1k: 0.002, // verify pricing
+		output_price_per_1k: 0.006, // verify pricing
+	},
+	"us.xai.grok-4.7": {
+		context_window: 500_000,
+		input_price_per_1k: 0.0022, // verify pricing
+		output_price_per_1k: 0.0066, // verify pricing
+	},
+	"global.xai.grok-4.7": {
+		context_window: 500_000,
+		input_price_per_1k: 0.002, // verify pricing
+		output_price_per_1k: 0.006, // verify pricing
+	},
+
+	// -----------------------------------------------------------------------
+	// AWS Bedrock — Moonshot AI inference profiles
+	// -----------------------------------------------------------------------
+	// Kimi K3 — 1M context; rates from the AWS model card (2026-10). The card
+	// notes Converse fails when prior-turn reasoning blocks are replayed.
+	"us.moonshotai.kimi-k3": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.0033, // verify pricing
+		output_price_per_1k: 0.0165, // verify pricing
+	},
+	"global.moonshotai.kimi-k3": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.003, // verify pricing
+		output_price_per_1k: 0.015, // verify pricing
+	},
 };
 
 /**
@@ -938,16 +1194,10 @@ const CLAUDE_BASE_CONTEXT_WINDOW = 200_000;
 interface InferredEntry {
 	/** Sibling table entry this was derived from, or null when none exists. */
 	from: string | null;
-	/** Base context window. */
+	/** Base context window (for a new Bedrock Sonnet+ model: the fallback if its beta is rejected). */
 	context_window: number;
-	/** Extended (1M) variant inherited from the sibling. */
-	extended_context?: { context_window: number; beta_flag: string };
-	/**
-	 * Set for a new Sonnet+ model: the base window is assumed to be 1M. On
-	 * Bedrock the beta header is sent by default; if rejected, the window
-	 * falls back to `fallback_context_window`.
-	 */
-	default1m?: { beta_flag?: string; fallback_context_window: number };
+	/** Extended context, inherited from the sibling or assumed by default for a new Sonnet+ model. */
+	extended_context?: ExtendedContext;
 }
 
 let claudeCandidates: Array<ClaudeCandidate<ModelMetadataEntry>> | null = null;
@@ -973,24 +1223,28 @@ function inferClaude(modelId: string): InferredEntry | null {
 	const parsed = parseClaudeModelId(modelId);
 	if (parsed) {
 		const sibling = pickNearestClaudeEntry(parsed, getClaudeCandidates());
+		const siblingExt = sibling?.value.extended_context;
 		if (DEFAULT_1M_FAMILIES.has(parsed.family) && (!sibling || sibling.newerThanAll)) {
-			inferred = {
-				from: sibling?.id ?? null,
-				context_window: ASSUMED_NEW_MODEL_CONTEXT_WINDOW,
-				default1m: {
-					beta_flag:
-						parsed.shape === "bedrock"
-							? (sibling?.value.extended_context?.beta_flag ?? DEFAULT_EXTENDED_BETA_FLAG)
-							: undefined,
-					fallback_context_window: sibling?.value.context_window ?? CLAUDE_BASE_CONTEXT_WINDOW,
-				},
-			};
+			// New Sonnet+ model: assume 1M. Direct-API IDs get it as the base
+			// window; Bedrock IDs send the 1M beta by default.
+			inferred = parsed.shape === "bedrock"
+				? {
+					from: sibling?.id ?? null,
+					context_window: sibling?.value.context_window ?? CLAUDE_BASE_CONTEXT_WINDOW,
+					extended_context: {
+						context_window: ASSUMED_NEW_MODEL_CONTEXT_WINDOW,
+						beta_flag: siblingExt?.beta_flag ?? DEFAULT_EXTENDED_BETA_FLAG,
+						default: true,
+					},
+				}
+				: { from: sibling?.id ?? null, context_window: ASSUMED_NEW_MODEL_CONTEXT_WINDOW };
 		} else if (sibling) {
-			const ext = sibling.value.extended_context;
 			inferred = {
 				from: sibling.id,
 				context_window: sibling.value.context_window,
-				extended_context: ext ? { context_window: ext.context_window, beta_flag: ext.beta_flag } : undefined,
+				extended_context: siblingExt
+					? { context_window: siblingExt.context_window, beta_flag: siblingExt.beta_flag, default: siblingExt.default }
+					: undefined,
 			};
 		}
 	}
@@ -1001,23 +1255,35 @@ function inferClaude(modelId: string): InferredEntry | null {
 			modelId,
 			from: inferred.from,
 			contextWindow: inferred.context_window,
-			assumedNew1m: inferred.default1m !== undefined,
+			extendedByDefault: inferred.extended_context?.default === true,
 		});
 	}
 	return inferred;
 }
 
-/** Context window for an inferred entry, honoring a rejected 1M beta. */
-function inferredContextWindow(modelId: string, inferred: InferredEntry, useExtendedContext?: boolean): number {
-	if (inferred.default1m) {
-		return inferred.default1m.beta_flag && isBetaRejected(modelId)
-			? inferred.default1m.fallback_context_window
-			: inferred.context_window;
-	}
-	if (useExtendedContext && inferred.extended_context) {
-		return inferred.extended_context.context_window;
-	}
-	return inferred.context_window;
+/** The static or inferred entry for a model, if any. */
+function lookupEntry(modelId: string): { entry: InferredEntry | ModelMetadataEntry; inferredFrom?: string | null } | null {
+	const entry = MODEL_METADATA[modelId];
+	if (entry) return { entry };
+	const inferred = inferClaude(modelId);
+	return inferred ? { entry: inferred, inferredFrom: inferred.from } : null;
+}
+
+/** Whether a default-on extended context is active (its beta not rejected). */
+function defaultExtendedActive(modelId: string, ext: ExtendedContext | undefined): boolean {
+	return ext?.default === true && !isBetaRejected(modelId);
+}
+
+/** Context window for a static or inferred entry in the given mode. */
+function entryContextWindow(
+	modelId: string,
+	entry: { context_window: number; extended_context?: ExtendedContext },
+	useExtendedContext?: boolean
+): number {
+	const ext = entry.extended_context;
+	if (!ext) return entry.context_window;
+	if (ext.default) return defaultExtendedActive(modelId, ext) ? ext.context_window : entry.context_window;
+	return useExtendedContext ? ext.context_window : entry.context_window;
 }
 
 // ---------------------------------------------------------------------------
@@ -1050,19 +1316,12 @@ function resolveBaseContextWindow(
 		// The Anthropic API reports one window per model — no beta variant.
 		return { base: api, baseSource: "api" };
 	}
-	const entry = MODEL_METADATA[modelId];
-	if (entry) {
+	const found = lookupEntry(modelId);
+	if (found) {
 		return {
-			base: useExtendedContext && entry.extended_context ? entry.extended_context.context_window : entry.context_window,
-			baseSource: "static",
-		};
-	}
-	const inferred = inferClaude(modelId);
-	if (inferred) {
-		return {
-			base: inferredContextWindow(modelId, inferred, useExtendedContext),
-			baseSource: "inferred",
-			inferredFrom: inferred.from,
+			base: entryContextWindow(modelId, found.entry, useExtendedContext),
+			baseSource: found.inferredFrom !== undefined ? "inferred" : "static",
+			...(found.inferredFrom !== undefined ? { inferredFrom: found.inferredFrom } : {}),
 		};
 	}
 	return { base: DEFAULT_CONTEXT_WINDOW, baseSource: "default" };
@@ -1124,7 +1383,7 @@ export function enrichModelInfo(model: ModelInfo): ModelInfo {
 		if (model.context_window != null) return model;
 		const inferred = inferClaude(model.id);
 		return inferred
-			? { ...model, context_window: inferredContextWindow(model.id, inferred) }
+			? { ...model, context_window: entryContextWindow(model.id, inferred) }
 			: model;
 	}
 	return {
@@ -1133,7 +1392,7 @@ export function enrichModelInfo(model: ModelInfo): ModelInfo {
 			model.display_name !== model.id
 				? model.display_name
 				: (entry.display_name ?? model.display_name),
-		context_window: model.context_window ?? entry.context_window,
+		context_window: model.context_window ?? entryContextWindow(model.id, entry),
 		input_price_per_1k:
 			model.input_price_per_1k ?? entry.input_price_per_1k,
 		output_price_per_1k:
@@ -1142,47 +1401,45 @@ export function enrichModelInfo(model: ModelInfo): ModelInfo {
 }
 
 /**
- * Get the extended context configuration for a model, if available.
+ * Get the extended context configuration for a model's selectable 1M variant.
  *
  * A static entry is authoritative (even one without extended context).
  * Models with an API-reported window have no beta variant. Otherwise an
  * inferred Claude model inherits its sibling's extended context (without
- * pricing) — except new Sonnet+ models, whose base window is already 1M.
+ * pricing). Returns undefined when the 1M window is already the default.
  *
  * @param modelId - The model identifier
- * @returns ExtendedContext config, or undefined if not supported
+ * @returns ExtendedContext config, or undefined if there is no separate 1M variant
  */
 export function getModelExtendedContext(modelId: string): ExtendedContext | undefined {
-	const entry = MODEL_METADATA[modelId];
-	if (entry) return entry.extended_context;
-	if (getApiContextWindow(modelId) !== undefined) return undefined;
-	const inferred = inferClaude(modelId);
-	return inferred?.default1m ? undefined : inferred?.extended_context;
+	if (!MODEL_METADATA[modelId] && getApiContextWindow(modelId) !== undefined) return undefined;
+	const ext = lookupEntry(modelId)?.entry.extended_context;
+	return ext && !ext.default ? ext : undefined;
 }
 
 /**
  * The 1M beta flag to send with a Bedrock request, if any.
  *
  * Sent when the user selected the extended variant of a model that has one,
- * or by default for a new (inferred) Sonnet+ Bedrock model whose beta has
- * not been rejected.
+ * or on every request for a model whose 1M window is the default (unless
+ * Bedrock has rejected its beta).
  */
 export function getExtendedContextBeta(modelId: string, useExtendedContext?: boolean): string | undefined {
-	if (useExtendedContext) {
-		const flag = getModelExtendedContext(modelId)?.beta_flag;
-		if (flag) return flag;
-	}
-	return hasInferredExtendedBeta(modelId) ? inferClaude(modelId)?.default1m?.beta_flag : undefined;
+	if (!MODEL_METADATA[modelId] && getApiContextWindow(modelId) !== undefined) return undefined;
+	const ext = lookupEntry(modelId)?.entry.extended_context;
+	if (!ext) return undefined;
+	if (ext.default) return defaultExtendedActive(modelId, ext) ? ext.beta_flag : undefined;
+	return useExtendedContext ? ext.beta_flag : undefined;
 }
 
 /**
- * Whether a model sends the 1M beta by default because it was inferred as a
- * new Sonnet+ Bedrock model (and Bedrock hasn't rejected the beta yet).
+ * Whether a model sends the 1M beta by default — its 1M window is the
+ * default (static entry or a new inferred Sonnet+ Bedrock model) and Bedrock
+ * hasn't rejected the beta yet.
  */
-export function hasInferredExtendedBeta(modelId: string): boolean {
-	if (MODEL_METADATA[modelId] || getApiContextWindow(modelId) !== undefined) return false;
-	const flag = inferClaude(modelId)?.default1m?.beta_flag;
-	return flag !== undefined && !isBetaRejected(modelId);
+export function sendsExtendedBetaByDefault(modelId: string): boolean {
+	if (!MODEL_METADATA[modelId] && getApiContextWindow(modelId) !== undefined) return false;
+	return defaultExtendedActive(modelId, lookupEntry(modelId)?.entry.extended_context);
 }
 
 /**

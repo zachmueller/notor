@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { initModelLimits, resetModelLimits } from "./model-limits";
+import { enrichModelInfo } from "./model-metadata";
 import {
 	parseProfileId,
 	stripVersionSuffix,
@@ -429,15 +430,14 @@ describe("formatFullVariantLabel", () => {
 describe("groupModels — inferred and overridden windows", () => {
 	afterEach(() => resetModelLimits());
 
-	it("gives a new Bedrock Sonnet+ model a single 1M variant", () => {
-		const models: ModelInfo[] = [
-			{ id: "us.anthropic.claude-opus-5-5", display_name: "us.anthropic.claude-opus-5-5", context_window: 1_000_000 },
-		];
-		const groups = groupModels(models);
-		expect(groups[0]!.label).toBe("Claude Opus 5.5");
-		expect(groups[0]!.variants).toHaveLength(1);
-		expect(groups[0]!.variants[0]!.contextLabel).toBe("1M");
-		expect(groups[0]!.variants[0]!.isExtendedContext).toBe(false);
+	it("gives default-1M models (Opus 5.5, an inferred Opus 6) a single 1M variant", () => {
+		for (const [id, label] of [["us.anthropic.claude-opus-5-5", "Claude Opus 5.5"], ["us.anthropic.claude-opus-6", "Claude Opus 6"]] as const) {
+			const groups = groupModels([enrichModelInfo({ id, display_name: id })]);
+			expect(groups[0]!.label).toBe(label);
+			expect(groups[0]!.variants).toHaveLength(1);
+			expect(groups[0]!.variants[0]!.contextLabel).toBe("1M");
+			expect(groups[0]!.variants[0]!.isExtendedContext).toBe(false);
+		}
 	});
 
 	it("synthesizes an inherited 1M variant (without pricing) for an unknown regional variant", () => {

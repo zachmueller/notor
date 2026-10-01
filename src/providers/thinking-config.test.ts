@@ -209,6 +209,27 @@ describe("getThinkingMode", () => {
 			expect(getThinkingMode(id)).toBe("effort");
 		}
 	});
+
+	// Opus 5.5 / Sonnet 5.5 / Fable 5.1 reject thinking.type=enabled ("use
+	// adaptive") on Bedrock (live converse probe, 2026-10) — "effort", and
+	// thinking is offered.
+	it("is 'effort' (and supported) for Opus 5.5 / Sonnet 5.5 / Fable 5.1", () => {
+		const ids = [
+			"claude-opus-5-5",
+			"claude-sonnet-5-5",
+			"claude-fable-5-1",
+			"us.anthropic.claude-opus-5-5",
+			"global.anthropic.claude-opus-5-5",
+			"us.anthropic.claude-sonnet-5-5",
+			"global.anthropic.claude-sonnet-5-5",
+			"us.anthropic.claude-fable-5-1",
+			"global.anthropic.claude-fable-5-1",
+		];
+		for (const id of ids) {
+			expect(supportsThinking(id)).toBe(true);
+			expect(getThinkingMode(id)).toBe("effort");
+		}
+	});
 });
 
 describe("supportsThinking", () => {

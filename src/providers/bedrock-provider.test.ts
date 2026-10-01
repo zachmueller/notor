@@ -244,9 +244,11 @@ function betaOf(input: Record<string, unknown>): unknown {
 describe("BedrockProvider — 1M beta and context limits", () => {
 	afterEach(() => resetModelLimits());
 
-	it("sends the 1M beta by default for a new (inferred) Sonnet+ model", async () => {
-		const { input } = await runSend("us.anthropic.claude-opus-5-5");
-		expect(betaOf(input)).toEqual(["context-1m-2025-08-07"]);
+	it("sends the 1M beta by default for default-1M models (static and inferred)", async () => {
+		for (const model of ["us.anthropic.claude-opus-5-5", "us.anthropic.claude-opus-6"]) {
+			const { input } = await runSend(model);
+			expect(betaOf(input)).toEqual(["context-1m-2025-08-07"]);
+		}
 	});
 
 	it("sends the beta for a known model only when the 1M variant is selected", async () => {
@@ -278,7 +280,7 @@ describe("BedrockProvider — 1M beta and context limits", () => {
 		expect(thrown).toMatchObject({ code: "RATE_LIMITED" });
 	});
 
-	it("records a rejected inferred beta and stops sending it", async () => {
+	it("records a rejected default beta and stops sending it", async () => {
 		const { thrown } = await runSend("us.anthropic.claude-opus-5-5", {
 			error: awsError("ValidationException", "invalid beta flag"),
 		});

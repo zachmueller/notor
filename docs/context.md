@@ -87,7 +87,7 @@ Compaction triggers at a fraction of the active model's context window, so Notor
 
 1. **Your override** — set in **Settings → Notor → Reference → Model context limits**. An override for a model ID applies to both its standard and 1M variants; add `::1m` to the model ID (e.g. `us.anthropic.claude-sonnet-4-6::1m`) to override only the 1M variant.
 2. **The Anthropic models API** — for the Anthropic provider, Notor reads each model's context window from the model list.
-3. **Built-in data** — a table of known models.
+3. **Built-in data** — a table of known models. On Bedrock, Claude Opus 5.5, Sonnet 5.5 and Fable 5.1 use their 1M window by default: Notor sends the 1M context beta automatically, and falls back to 200K if Bedrock rejects it.
 4. **A related model** — for a Claude model Notor doesn't recognize yet (for example a newly released Bedrock profile), it borrows the limits of the nearest known model in the same family. A *new* Sonnet, Opus or Fable version (newer than any Notor knows) is assumed to have a 1M window; on Bedrock, Notor sends the 1M context beta automatically for it. If Bedrock rejects that beta, Notor stops sending it and falls back to the related model's standard window.
 5. **128K tokens** — for anything else. Notor shows a one-time notice per model per session when it falls back to this default; add an override to silence it.
 
