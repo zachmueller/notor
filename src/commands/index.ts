@@ -178,6 +178,26 @@ export function registerCommands(plugin: NotorPlugin): void {
 	});
 
 	plugin.addCommand({
+		id: "open-plan",
+		name: "Open plan for current conversation",
+		callback: () => {
+			void (async () => {
+				const conversation = plugin.getActiveOrchestrator()?.getConversationManager().getActiveConversation();
+				if (!conversation) {
+					new Notice("No active conversation");
+					return;
+				}
+				const plan = await plugin.getPlanStore().load(conversation.id);
+				if (!plan) {
+					new Notice("This conversation has no plan yet");
+					return;
+				}
+				await plugin.openPlanView(conversation.id);
+			})();
+		},
+	});
+
+	plugin.addCommand({
 		id: "export-conversation",
 		name: "Export conversation",
 		callback: () => {

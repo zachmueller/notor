@@ -122,6 +122,11 @@ export class NotorChatView extends ItemView {
 	// Active conversation tracking
 	private activeConversationId: string | null = null;
 
+	/** Plan-review hooks wired by `wireView()` (typed reply → plan feedback). */
+	private planReviewHooks?: { interceptSend: (content: string) => boolean; isPending: () => boolean };
+	/** Unsubscribe from plan-review controller changes (set by `wireView()`). */
+	_unregisterPlanReview?: () => void;
+
 	/** Inline comment layer over assistant messages (contextmenu trigger). */
 	private commentLayer?: CommentLayer;
 	private commentSendBar?: CommentSendBar;
@@ -1070,6 +1075,8 @@ export class NotorChatView extends ItemView {
 			onSendWorkflow: this.onSendWorkflow,
 			onModeToggle: this.onModeToggle,
 			onForkToNewPanel: this.onForkToNewPanel,
+			interceptSend: this.planReviewHooks?.interceptSend,
+			isPlanReviewPending: this.planReviewHooks?.isPending,
 		});
 		this.chatInput.build();
 
@@ -1690,6 +1697,24 @@ export class NotorChatView extends ItemView {
 
 	updateModeDisplay(mode: ConversationMode): void {
 		this.chatInput.updateModeDisplay(mode);
+	}
+
+	/**
+	 * Install the plan-review send interceptor and pending-state probe (set by
+	 * `wireView()`): while a review is pending, a typed reply is routed to it.
+	 */
+	setPlanReviewHooks(hooks: { interceptSend: (content: string) => boolean; isPending: () => boolean }): void {
+		this.planReviewHooks = hooks;
+		if (this.chatInput) {
+			this.chatInput.deps.interceptSend = hooks.interceptSend;
+			this.chatInput.deps.isPlanReviewPending = hooks.isPending;
+			this.chatInput.refreshPlanReviewState();
+		}
+	}
+
+	/** Re-evaluate the pending plan-review affordances in the input. */
+	refreshPlanReviewState(): void {
+		this.chatInput?.refreshPlanReviewState();
 	}
 
 	/** Show/hide the "Auto-accepting edits" badge (plan approved with auto-accept). */

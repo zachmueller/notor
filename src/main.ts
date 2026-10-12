@@ -84,6 +84,11 @@ import { PersonaManager } from "./personas/persona-manager";
 import { SubAgentManager } from "./sub-agents/manager";
 import { UseSubagentTool } from "./tools/use-subagent";
 import { UpdateTasksTool } from "./tools/update-tasks";
+import { SubmitPlanTool } from "./tools/submit-plan";
+import { PlanStore } from "./plans/plan-store";
+import { PlanReviewController, setPlanReviewController } from "./plans/plan-review-controller";
+import { PlanView, PLAN_VIEW_TYPE } from "./ui/plan-view";
+import { createPlanBlockDefinition } from "./ui/chat-blocks/plan-block";
 import { RunFlowTool, RUN_FLOW_TOOL_NAME } from "./tools/run-flow";
 import { FlowCompositionManager } from "./orchestration/flow-composition-manager";
 import type { SpawnChildFlow } from "./orchestration/child-flow";
@@ -236,6 +241,8 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	private _pendingMemoryManager?: PendingMemoryManager;
 	private _extensionManager?: ExtensionManager;
 	private _chatBlockRegistry?: ChatBlockRegistry;
+	private _planStore?: PlanStore;
+	private _planReviewController?: PlanReviewController;
 	private _tempOutputSpiller?: import("./shell/temp-output-spiller").TempOutputSpiller;
 	private _settingTab?: NotorSettingTab;
 
@@ -482,6 +489,15 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		this._chatBlockRegistry = new ChatBlockRegistry();
 		setChatBlockRegistry(this._chatBlockRegistry);
 
+		// 2d. Plan document flow: the plugin-wide review controller (reachable by
+		// the plan-review interaction renderer) and the `plan` chat-history card.
+		// The card is a TS definition, so ExtensionManager.reload() leaves it alone.
+		setPlanReviewController(this.getPlanReviewController());
+		this._chatBlockRegistry.register(createPlanBlockDefinition({
+			openPlanView: (conversationId) => void this.openPlanView(conversationId),
+			loadPlan: (conversationId) => this.getPlanStore().load(conversationId),
+		}));
+
 		// 3. Register the chat panel view type (A1.8).
 		// Every panel gets its own orchestrator via createOrchestrator().
 		// Conversation loading is deferred to setState() or a setTimeout(0)
@@ -530,6 +546,9 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			ORCHESTRATION_RUN_TREE_VIEW_TYPE,
 			(leaf) => new OrchestrationRunTreeView(leaf, this),
 		);
+
+		// 3a-iii. Register the plan review leaf (submit_plan → review → hand-back).
+		this.registerView(PLAN_VIEW_TYPE, (leaf) => new PlanView(leaf, this));
 
 		// 3b. Register the tool config inspector view type (UI-003 / FR-88)
 		// A4.5: Inspector follows focus changes via resolver callback
@@ -799,6 +818,7 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 
 	onunload() {
 		log.info("Plugin unloading");
+		setPlanReviewController(null);
 
 		// Abort all active sessions so their response loops can flush JSONL
 		// writes before infrastructure singletons are torn down.
@@ -1717,6 +1737,13 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			// Internal task tracking tool — always-on, hidden from settings
 			const updateTasksTool = new UpdateTasksTool();
 			this._toolRegistry.register(updateTasksTool);
+
+			// Plan document flow — visible (disable-able) in settings
+			this._toolRegistry.register(new SubmitPlanTool({
+				planStore: this.getPlanStore(),
+				openPlanView: (conversationId) => this.openPlanView(conversationId),
+				getSettings: () => this.settings,
+			}));
 
 			// run_flow (INT-042) — a hand-written Tool (it needs the dynamic flow
 			// enum, mirroring use_subagent), gated on `orchestration_enabled`. Unlike
@@ -2946,6 +2973,40 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	 * existing run-tree leaf is re-rooted via `setViewState`; otherwise one is
 	 * opened in the right sidebar.
 	 */
+	/** Plan sidecar store (`{history_path}{conversationId}.plan.json`). */
+	getPlanStore(): PlanStore {
+		if (!this._planStore) {
+			this._planStore = new PlanStore(this.app.vault.adapter, () => this.settings.history_path);
+		}
+		return this._planStore;
+	}
+
+	/** Plugin-wide plan review controller (pending `submit_plan` reviews). */
+	getPlanReviewController(): PlanReviewController {
+		if (!this._planReviewController) {
+			this._planReviewController = new PlanReviewController();
+			this._planReviewController.setPlanOpener((conversationId) => void this.openPlanView(conversationId));
+		}
+		return this._planReviewController;
+	}
+
+	/**
+	 * Open the plan leaf for a conversation: reuse a plan leaf already showing
+	 * it, otherwise open a new tab in the main area.
+	 */
+	async openPlanView(conversationId: string): Promise<void> {
+		const { workspace } = this.app;
+		const state = { conversationId };
+		// Match on view state, not the view instance: background leaves can be
+		// deferred views in Obsidian 1.12 and have no PlanView yet.
+		const existing = workspace.getLeavesOfType(PLAN_VIEW_TYPE).find(
+			(leaf) => (leaf.getViewState().state as { conversationId?: string } | undefined)?.conversationId === conversationId,
+		);
+		const leaf = existing ?? workspace.getLeaf("tab");
+		await leaf.setViewState({ type: PLAN_VIEW_TYPE, active: true, state });
+		void workspace.revealLeaf(leaf);
+	}
+
 	async openRunTreeView(root: { sessionId?: string; conversationId?: string }): Promise<void> {
 		const { workspace } = this.app;
 		const state = { rootSessionId: root.sessionId, rootConversationId: root.conversationId };

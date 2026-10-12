@@ -61,6 +61,7 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		clearTimeout(view._loadFallbackTimeout);
 		orchestrator.setView(undefined);
 		view._unregisterSessionsChanged?.();
+		view._unregisterPlanReview?.();
 		view._unregisterPersonaChanged?.();
 		view._removeActivityCallback?.();
 		plugin.removeOrchestrator(leafId);
@@ -443,6 +444,26 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 			new Notice(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
 		}
 	});
+
+	// Plan review: while a submit_plan review is pending for the displayed
+	// conversation, a typed reply resolves it as "request changes" feedback.
+	const planReview = plugin.getPlanReviewController();
+	const displayedConversationId = () => orchestrator.getConversationManager().getActiveConversation()?.id;
+	view.setPlanReviewHooks({
+		isPending: () => {
+			const id = displayedConversationId();
+			return !!id && planReview.hasPending(id);
+		},
+		interceptSend: (content) => {
+			const id = displayedConversationId();
+			if (!id || !planReview.hasPending(id)) return false;
+			const resolved = planReview.resolve(id, { kind: "request-changes", feedback: content });
+			if (resolved) new Notice("Sent as feedback on the plan");
+			return resolved;
+		},
+	});
+	view._unregisterPlanReview?.();
+	view._unregisterPlanReview = planReview.onChange(() => view.refreshPlanReviewState());
 
 	// Inline comments: persist on the conversation header. Dual-write the
 	// display manager and the live session's manager (same as the mode toggle)

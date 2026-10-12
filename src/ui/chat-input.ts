@@ -58,6 +58,14 @@ export interface ChatInputDeps {
 	onSendWorkflow?: (workflow: Workflow, supplementaryText: string) => Promise<void>;
 	onModeToggle?: (mode: ConversationMode) => void;
 	onForkToNewPanel?: (messageId: string | undefined, initialText?: string) => Promise<void>;
+	/**
+	 * Called before the normal send path — even while a response is in flight.
+	 * Return true to consume the message (e.g. it was routed to a pending plan
+	 * review as feedback); the input is then cleared and nothing is sent.
+	 */
+	interceptSend?: (content: string) => boolean;
+	/** True while a plan review is pending for the displayed conversation. */
+	isPlanReviewPending?: () => boolean;
 }
 
 export class ChatInput {
@@ -68,6 +76,7 @@ export class ChatInput {
 	private stopButtonEl!: HTMLButtonElement;
 	private modeToggleEl!: HTMLButtonElement;
 	private autoAcceptBadgeEl!: HTMLElement;
+	private responding = false;
 	private attachmentChipContainerEl!: HTMLElement;
 
 	private userDragHeight: number | null = null;
@@ -337,8 +346,10 @@ export class ChatInput {
 	// --- Public API ---
 
 	setRespondingState(responding: boolean): void {
+		this.responding = responding;
+		this.refreshPlanReviewState();
 		if (responding) {
-			this.sendButtonEl.addClass("notor-hidden");
+			if (!this.deps.isPlanReviewPending?.()) this.sendButtonEl.addClass("notor-hidden");
 			this.stopButtonEl.removeClass("notor-hidden");
 			this.deps.getLoadingIndicatorEl().removeClass("notor-hidden");
 		} else {
@@ -379,6 +390,18 @@ export class ChatInput {
 		this.modeToggleEl.textContent = mode === "plan" ? "Plan" : "Act";
 		this.modeToggleEl.removeClass("notor-mode-plan", "notor-mode-act");
 		this.modeToggleEl.addClass(mode === "plan" ? "notor-mode-plan" : "notor-mode-act");
+	}
+
+	/**
+	 * Re-evaluate whether a plan review is pending: while it is, the send
+	 * button stays visible mid-run and the placeholder invites a reply that is
+	 * routed to the review as "request changes" feedback.
+	 */
+	refreshPlanReviewState(): void {
+		if (!this.textInputEl) return;
+		const pending = this.deps.isPlanReviewPending?.() ?? false;
+		this.textInputEl.setAttribute("data-placeholder", pending ? "Reply to request changes to the plan…" : "Ask Notor...");
+		if (this.responding) this.sendButtonEl.toggleClass("notor-hidden", !pending);
 	}
 
 	/** Show/hide the "Auto-accepting edits" badge next to the mode toggle. */
@@ -582,6 +605,15 @@ export class ChatInput {
 	}
 
 	private async handleSend(): Promise<void> {
+		// A pending plan review takes typed replies as feedback, even mid-run.
+		if (this.deps.interceptSend) {
+			const content = this.getInputContentExcludingWorkflowToken();
+			if (content && this.deps.interceptSend(content)) {
+				this.textInputEl.textContent = "";
+				this.recalcInputHeight();
+				return;
+			}
+		}
 		if (this.deps.getIsResponding()) return;
 
 		this.deps.setAutoScroll(true);

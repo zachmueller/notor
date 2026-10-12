@@ -4635,3 +4635,182 @@
 .notor-plan-review-spacer {
 	flex: 1;
 }
+
+/* ==========================================================================
+   Plan leaf (PlanView) and plan chat card
+   ========================================================================== */
+
+.workspace-leaf-content[data-type="notor-plan-view"] > .view-content.notor-plan-container {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 0;
+	overflow: hidden;
+}
+
+.notor-plan-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 16px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+}
+
+.notor-plan-title {
+	flex: 1;
+	font-weight: var(--font-semibold);
+	font-size: var(--font-ui-medium);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.notor-plan-status {
+	font-size: var(--font-ui-smaller);
+	padding: 1px 8px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.notor-plan-status[data-status="pending-review"] {
+	background: rgba(var(--color-yellow-rgb, 224, 172, 0), 0.2);
+	color: var(--text-normal);
+}
+
+.notor-plan-status[data-status="approved"] {
+	background: rgba(var(--color-green-rgb, 8, 185, 78), 0.2);
+	color: var(--text-normal);
+}
+
+.notor-plan-status[data-status="rejected"] {
+	background: rgba(var(--color-red-rgb, 233, 49, 71), 0.2);
+	color: var(--text-normal);
+}
+
+.notor-plan-body {
+	flex: 1;
+	overflow-y: auto;
+	padding: 8px 24px 24px;
+	user-select: text;
+	font-size: var(--font-text-size);
+}
+
+.notor-plan-empty {
+	color: var(--text-muted);
+	padding: 24px 0;
+}
+
+.notor-plan-comments {
+	max-height: 30%;
+	overflow-y: auto;
+	border-top: 1px solid var(--background-modifier-border);
+	padding: 6px 16px;
+	flex-shrink: 0;
+}
+
+.notor-plan-comments-header {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-bottom: 4px;
+}
+
+.notor-plan-comment {
+	position: relative;
+	padding: 4px 56px 4px 8px;
+	border-left: 2px solid rgba(var(--color-yellow-rgb, 224, 172, 0), 0.7);
+	margin-bottom: 4px;
+	cursor: pointer;
+	font-size: var(--font-ui-small);
+}
+
+.notor-plan-comment:hover {
+	background: var(--background-modifier-hover);
+}
+
+.notor-plan-comment.is-orphaned {
+	border-left-color: var(--text-faint);
+	opacity: 0.75;
+}
+
+.notor-plan-comment-quote {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.notor-plan-comment-actions {
+	position: absolute;
+	top: 2px;
+	right: 2px;
+	display: flex;
+	gap: 2px;
+}
+
+.notor-plan-footer {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px 16px 12px;
+	border-top: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+}
+
+.notor-plan-footer:not(.is-pending) .notor-plan-note {
+	display: none;
+}
+
+.notor-plan-note {
+	width: 100%;
+	resize: vertical;
+	font-size: var(--font-ui-small);
+	box-sizing: border-box;
+}
+
+.notor-plan-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.notor-plan-actions-spacer {
+	flex: 1;
+}
+
+.notor-plan-block {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-primary);
+}
+
+.notor-plan-block-icon {
+	display: flex;
+	color: var(--text-muted);
+}
+
+.notor-plan-block-text {
+	flex: 1;
+	min-width: 0;
+}
+
+.notor-plan-block-title {
+	font-weight: var(--font-semibold);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.notor-plan-block-status {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.notor-plan-block-open {
+	font-size: var(--font-ui-smaller);
+}
