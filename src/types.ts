@@ -292,6 +292,10 @@ export interface Message {
 	output_tokens?: number | null;
 	/** Estimated cost for this message (null if pricing unavailable). */
 	cost_estimate?: number | null;
+	/** Provider instance that produced this assistant message (LLM turns only). */
+	provider_id?: string;
+	/** Model that produced this assistant message (LLM turns only). */
+	model_id?: string;
 	/** Thinking/reasoning content from extended thinking (null if disabled). */
 	thinking?: string | null;
 	/** Elapsed wall-clock time the model spent thinking, in ms (null if none). */

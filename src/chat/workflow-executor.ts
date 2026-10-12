@@ -49,6 +49,7 @@ import {
 	assembleWorkflowPrompt,
 } from "../workflows/workflow-executor";
 import { resolvePreset } from "../presets/preset-resolver";
+import { writeSelection, type ModelSelection } from "./model-selection";
 import { logger } from "../utils/logger";
 import { resolveNote } from "../utils/resolve-note";
 
@@ -63,6 +64,7 @@ interface ResolvedProviderConfig {
 	modelId: string;
 	useExtendedContext: boolean;
 	thinkingLevel: string | null;
+	presetName: string | null;
 }
 
 function resolveWorkflowProviderConfig(
@@ -72,6 +74,7 @@ function resolveWorkflowProviderConfig(
 	fallbackModelId: string,
 	fallbackExtendedContext: boolean,
 	fallbackThinkingLevel: string | null,
+	fallbackPresetName: string | null = null,
 ): ResolvedProviderConfig {
 	if (workflow.model_preset) {
 		const resolved = resolvePreset(workflow.model_preset, settings.model_presets);
@@ -81,6 +84,7 @@ function resolveWorkflowProviderConfig(
 				modelId: resolved.modelId,
 				useExtendedContext: resolved.useExtendedContext,
 				thinkingLevel: resolved.thinkingLevel,
+				presetName: resolved.presetName,
 			};
 		}
 		log.warn("Workflow model preset not found or unconfigured, using fallback", {
@@ -93,6 +97,7 @@ function resolveWorkflowProviderConfig(
 		modelId: fallbackModelId,
 		useExtendedContext: fallbackExtendedContext,
 		thinkingLevel: fallbackThinkingLevel,
+		presetName: fallbackPresetName,
 	};
 }
 
@@ -133,6 +138,10 @@ export interface WorkflowExecutorDeps {
 	getActiveProviderId(): string;
 	getActiveModelId(): string;
 	getActiveUseExtendedContext(): boolean;
+	getActiveThinkingLevel(): string | null;
+	getActivePresetName(): string | null;
+	/** Point the panel's active selection at what the workflow applied. */
+	setActiveSelection(sel: ModelSelection): void;
 
 	// Utility getters
 	getVaultRootPath(): string | undefined;
@@ -305,16 +314,17 @@ export class WorkflowExecutor {
 		// via the E-008 path — we intentionally skip that here because we already
 		// handled persona switching above before creating the new conversation.)
 		const conversationManager = this.deps.getConversationManager();
-		const fallbackProviderId = this.deps.getActiveProviderId();
-		const fallbackConfig = this.deps.providerRegistry.getConfig(fallbackProviderId);
-		const { providerId, modelId, useExtendedContext, thinkingLevel } = resolveWorkflowProviderConfig(
+		// Fallback is the panel's own selection (not global provider defaults).
+		const selection = resolveWorkflowProviderConfig(
 			workflow,
 			this.deps.getSettings(),
-			fallbackProviderId,
+			this.deps.getActiveProviderId(),
 			this.deps.getActiveModelId(),
-			fallbackConfig?.use_extended_context ?? false,
-			null,
+			this.deps.getActiveUseExtendedContext(),
+			this.deps.getActiveThinkingLevel(),
+			this.deps.getActivePresetName(),
 		);
+		const { providerId, modelId, useExtendedContext, thinkingLevel } = selection;
 		const currentMode = workflow.mode
 			?? (conversationManager.hasActiveConversation()
 				? conversationManager.getMode()
@@ -338,15 +348,14 @@ export class WorkflowExecutor {
 			active.workflow_tool_configs = assemblyResult.toolConfigs;
 			active.workflow_deactivated = false;
 			active.persona_name = activePersonaName;
-			active.provider_id = providerId;
-			active.model_id = modelId;
-			active.use_extended_context = useExtendedContext;
+			writeSelection(active, selection);
 			if (workflow.mode) active.mode = workflow.mode;
 			conversationManager.loadConversation(active, conversationManager.getMessages(), { silent: true });
 			await this.deps.historyManager.updateConversationHeader(active);
 			conversation = active;
 			if (workflow.mode) view?.updateModeDisplay(conversation.mode);
 			// Reflect the applied provider/model/persona in the panel UI.
+			view?.updatePresetDisplay(selection.presetName);
 			view?.updateProviderDisplay(providerId);
 			view?.updateModelDisplay(useExtendedContext ? `${modelId}::1m` : modelId);
 			view?.updatePersonaLabel(this.deps.getActivePersona());
@@ -368,6 +377,8 @@ export class WorkflowExecutor {
 					is_background: false,
 					title: `Workflow: ${workflow.display_name}`,
 					use_extended_context: useExtendedContext,
+					thinking_level: thinkingLevel,
+					preset_name: selection.presetName,
 				}
 			);
 
@@ -377,6 +388,9 @@ export class WorkflowExecutor {
 			view?.updateModeDisplay(conversation.mode);
 			view?.updateWorkflowLabel(conversation);
 		}
+
+		// The panel now reflects the workflow's selection (header == active state).
+		this.deps.setActiveSelection(selection);
 
 		// Step 7: Store persona revert state for E-008. Only for the
 		// new-conversation path — a mid-conversation switch must not clobber the

@@ -16,6 +16,7 @@ import type { ApprovalCallback, InteractionCallback } from "./dispatcher";
 import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
 import type { NotorSettings } from "../settings";
 import { getPlanReviewController } from "../plans/plan-review-controller";
+import { readSelection, type ModelSelection } from "./model-selection";
 
 export type SessionStatus =
 	| "running"
@@ -52,6 +53,7 @@ export interface ConversationSessionOptions {
 	modelId: string;
 	useExtendedContext: boolean;
 	thinkingLevel: string | null;
+	presetName?: string | null;
 	workflowAssembly?: WorkflowAssemblyResult | null;
 	approvalCallback: ApprovalCallback;
 	interactionCallback?: InteractionCallback;
@@ -72,11 +74,16 @@ export class ConversationSession {
 
 	/** Snapshotted at session creation — immutable for the session's lifetime. */
 	readonly pinnedPersona: Persona | null;
-	readonly providerId: string;
-	readonly modelId: string;
-	readonly useExtendedContext: boolean;
-	readonly thinkingLevel: string | null;
 	readonly workflowAssembly: WorkflowAssemblyResult | null;
+
+	/**
+	 * Provider/model selection. NOT pinned: a Quick Settings change on the
+	 * panel pushes a new selection here via `setSelection()`, and the response
+	 * loop reads it once at the top of every iteration — so a mid-turn switch
+	 * applies from the next LLM call (next tool round). Sessions nobody pushes
+	 * to (background workflows) stay effectively pinned.
+	 */
+	private _selection: ModelSelection;
 
 	/** Per-session routing — bound to the correct panel's view. */
 	readonly approvalCallback: ApprovalCallback;
@@ -110,15 +117,45 @@ export class ConversationSession {
 		this.title = opts.title;
 		this.startedAt = Date.now();
 		this.pinnedPersona = opts.pinnedPersona;
-		this.providerId = opts.providerId;
-		this.modelId = opts.modelId;
-		this.useExtendedContext = opts.useExtendedContext;
-		this.thinkingLevel = opts.thinkingLevel;
+		this._selection = {
+			providerId: opts.providerId,
+			modelId: opts.modelId,
+			useExtendedContext: opts.useExtendedContext,
+			thinkingLevel: opts.thinkingLevel,
+			presetName: opts.presetName ?? null,
+		};
 		this.workflowAssembly = opts.workflowAssembly ?? null;
 		this.approvalCallback = opts.approvalCallback;
 		this.interactionCallback = opts.interactionCallback;
 		this.effectiveConfig = opts.initialConfig;
 		this.parsedConfigs = opts.initialParsedConfigs;
+	}
+
+	get selection(): ModelSelection {
+		return { ...this._selection };
+	}
+	get providerId(): string {
+		return this._selection.providerId;
+	}
+	get modelId(): string {
+		return this._selection.modelId;
+	}
+	get useExtendedContext(): boolean {
+		return this._selection.useExtendedContext;
+	}
+	get thinkingLevel(): string | null {
+		return this._selection.thinkingLevel;
+	}
+
+	/**
+	 * Replace the selection and mirror it (plus `persona_name`, when given)
+	 * onto the session's own conversation header, so every later
+	 * `onConversationChanged` header write from this session carries the new
+	 * values instead of reverting the JSONL.
+	 */
+	setSelection(sel: ModelSelection, personaName?: string | null): void {
+		this._selection = { ...sel };
+		this.conversationManager.setModelSelection(sel, personaName);
 	}
 
 	get status(): SessionStatus {
@@ -148,9 +185,9 @@ export class ConversationSession {
 	 * Build a ToolPolicyContext from this session's resolved state.
 	 *
 	 * Mode is read dynamically (not pinned) because users expect toggling
-	 * plan→act to take immediate effect mid-stream. Persona/provider are
-	 * pinned because changing them mid-stream would produce incoherent
-	 * instructions or break conversation format.
+	 * plan→act to take immediate effect mid-stream. Persona is pinned because
+	 * changing it mid-stream would produce incoherent instructions. (The model
+	 * selection is likewise live — see `selection`.)
 	 */
 	buildPolicyContext(
 		settings: NotorSettings,
@@ -179,6 +216,9 @@ export class ConversationSession {
  * skipped so we never clobber the now-active conversation. The session's
  * messages are still persisted to JSONL and re-loaded on switch-back.
  *
+ * The display header's model selection is kept: the display copy is what
+ * Quick Settings write, so the session's copy must never revert it.
+ *
  * Loaded `{ silent: true }` so `onConversationChanged` does not re-fire (no
  * mid-teardown header/token writes). This is the single canonical reconcile
  * point shared by the normal-message path and the manual-workflow path.
@@ -192,7 +232,9 @@ export function syncSessionToDisplay(
 		const finalConv = session.conversationManager.getActiveConversation();
 		const finalMessages = session.conversationManager.getMessages();
 		if (finalConv && finalMessages.length > 0) {
+			const displaySelection = readSelection(displayConv);
 			displayManager.loadConversation(finalConv, finalMessages, { silent: true });
+			displayManager.setModelSelection(displaySelection);
 		}
 	}
 }

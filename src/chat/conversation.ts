@@ -16,6 +16,7 @@ import { logger } from "../utils/logger";
 import type { ContentBlock } from "../media/types";
 import { getTextContent } from "../media/types";
 import { estimateConversationTokens } from "../context/compaction";
+import { writeSelection, type ModelSelection } from "./model-selection";
 
 const log = logger("ConversationManager");
 
@@ -401,6 +402,18 @@ export class ConversationManager {
 	}
 
 	/**
+	 * Set the model-selection header fields (and optionally `persona_name`) on
+	 * the live active conversation. `getActiveConversation()` returns a copy,
+	 * so mutating that copy never reaches the in-memory header — use this.
+	 * Does not fire `onConversationChanged`; callers persist the header.
+	 */
+	setModelSelection(sel: ModelSelection, personaName?: string | null): void {
+		if (!this.activeConversation) return;
+		writeSelection(this.activeConversation, sel);
+		if (personaName !== undefined) this.activeConversation.persona_name = personaName;
+	}
+
+	/**
 	 * Check if there is an active conversation.
 	 */
 	hasActiveConversation(): boolean {
@@ -439,6 +452,9 @@ export class ConversationManager {
 		input_tokens?: number | null;
 		output_tokens?: number | null;
 		cost_estimate?: number | null;
+		/** Provider/model that produced this message (assistant LLM turns only). */
+		provider_id?: string;
+		model_id?: string;
 		thinking?: string | null;
 		thinking_duration_ms?: number | null;
 		thinking_tokens?: number | null;
@@ -475,6 +491,8 @@ export class ConversationManager {
 			input_tokens: params.input_tokens ?? null,
 			output_tokens: params.output_tokens ?? null,
 			cost_estimate: params.cost_estimate ?? null,
+			...(params.provider_id !== undefined && { provider_id: params.provider_id }),
+			...(params.model_id !== undefined && { model_id: params.model_id }),
 			thinking: params.thinking ?? null,
 			thinking_duration_ms: params.thinking_duration_ms ?? null,
 			thinking_tokens: params.thinking_tokens ?? null,

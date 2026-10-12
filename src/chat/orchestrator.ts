@@ -23,6 +23,7 @@ import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./too
 import { toChatMessages, processStream, calculateCost } from "./message-pipeline";
 import { supportsThinking } from "../providers/model-metadata";
 import { resolveConversationModel } from "../presets/preset-resolver";
+import { normalizeSelection, readSelection, selectionsEqual, type ModelSelection } from "./model-selection";
 import { ConfigResolver } from "./config-resolver";
 import { HookDispatcher } from "./hook-dispatcher";
 import { CompactionManager } from "./compaction-manager";
@@ -333,6 +334,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 			getActiveProviderId: () => this.activeProviderId,
 			getActiveModelId: () => this.activeModelId,
 			getActiveUseExtendedContext: () => this.activeUseExtendedContext,
+			getActiveThinkingLevel: () => this.activeThinkingLevel,
+			getActivePresetName: () => this.activePresetName,
+			setActiveSelection: (sel) => this.setActiveSelection(sel),
 			getActivePersona: () => this.activePersona,
 			setActivePersona: (persona) => { this.activePersona = persona; },
 			getVaultRootPath: () => this.getVaultRootPath(),
@@ -1058,19 +1062,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 		sessionConvManager.loadConversation(snapshotConv, snapshotMessages);
 
-		// Snapshot persona, provider, model, extended context.
-		//
-		// Step 1f: Pin from the conversation header's stored values when available
-		// (restored conversation), so continuing an old conversation uses the same
-		// provider/model it was using before. Fall back to global state for new
-		// conversations or if the stored provider is no longer configured.
+		// Snapshot persona; resolve the model selection.
 		const pinnedPersona = this.activePersona;
 
-		// Resolve provider/model/extended/thinking through the SAME authority the
-		// reopen path uses (resolveConversationModel: preset > stored-header >
-		// default), so thinking level and model come from one source of truth and
-		// can never disagree with the selector. Falls back to per-orchestrator
-		// active state only when no configured preset resolution is possible.
+		// Resolve through the SAME authority the reopen path uses
+		// (resolveConversationModel: stored header > preset > default), so the
+		// session starts on exactly what the header records. Falls back to the
+		// panel's active state only when no resolution is possible at all.
 		const isProviderAccessible = (pid: string) =>
 			!!this.providerRegistry.getConfig(pid) || !!this.providerRegistry.resolveTypeToId(pid);
 		const resolution = resolveConversationModel(
@@ -1079,23 +1077,21 @@ export class ChatOrchestrator implements ToolSessionContext {
 			this.settings.default_preset,
 			isProviderAccessible,
 		);
-		// Normalize the resolved provider id to a concrete configured instance
-		// (the header/preset may carry a bare type for back-compat).
-		const resolvedProviderId = resolution
-			? (this.providerRegistry.getConfig(resolution.providerId)?.id
-				?? this.providerRegistry.resolveTypeToId(resolution.providerId)
-				?? resolution.providerId)
-			: this.activeProviderId;
-		const providerConfig = this.providerRegistry.getConfig(resolvedProviderId);
-		const providerId = resolvedProviderId;
-		const modelId = resolution
-			? (resolution.modelId || (providerConfig?.model_id ?? ""))
-			: this.activeModelId;
-		const useExtendedContext = resolution
-			? resolution.useExtendedContext
-			: this.activeUseExtendedContext;
-		const thinkingLevel = resolution ? resolution.thinkingLevel : this.activeThinkingLevel;
-		const presetName = resolution ? resolution.presetName : this.activePresetName;
+		let selection = normalizeSelection(
+			resolution
+				? {
+					providerId: resolution.providerId,
+					modelId: resolution.modelId,
+					useExtendedContext: resolution.useExtendedContext,
+					thinkingLevel: resolution.thinkingLevel,
+					presetName: resolution.presetName,
+				}
+				: this.getActiveSelection(),
+			this.providerRegistry,
+		);
+		if (!selection.modelId) {
+			selection = { ...selection, modelId: this.providerRegistry.getConfig(selection.providerId)?.model_id ?? "" };
+		}
 
 		// Re-hydrate workflow tool configs for follow-up turns. The transient
 		// WorkflowAssemblyResult only lives for the first execution session
@@ -1134,10 +1130,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			abortController: new AbortController(),
 			title: snapshotConv.title ?? "Untitled",
 			pinnedPersona,
-			providerId,
-			modelId,
-			useExtendedContext,
-			thinkingLevel,
+			...selection,
 			workflowAssembly,
 			approvalCallback,
 			interactionCallback,
@@ -1145,28 +1138,23 @@ export class ChatOrchestrator implements ToolSessionContext {
 			initialParsedConfigs,
 		});
 
-		// Step 1f-addendum (Trigger 1): Update conversation header if the
-		// pinned values differ from what's stored (e.g. user changed provider
-		// via picker since the conversation was last used).
-		const sessionConv = sessionConvManager.getActiveConversation()!;
+		// Step 1f-addendum (Trigger 1): if the resolved selection or persona
+		// differs from the header (stored provider gone, first turn), write it
+		// to BOTH the display copy and the session copy — and the panel's active
+		// state — so the header, popover and session agree. Writing only the
+		// session copy let the display header drift from what was sent.
+		const personaName = pinnedPersona?.name ?? null;
 		const headerDirty =
-			sessionConv.persona_name !== (pinnedPersona?.name ?? null) ||
-			sessionConv.provider_id !== providerId ||
-			sessionConv.model_id !== modelId ||
-			(sessionConv.use_extended_context ?? false) !== useExtendedContext ||
-			(sessionConv.thinking_level ?? null) !== (thinkingLevel ?? null) ||
-			(sessionConv.preset_name ?? null) !== (presetName ?? null);
+			(snapshotConv.persona_name ?? null) !== personaName ||
+			!selectionsEqual(readSelection(snapshotConv), selection);
 		if (headerDirty) {
-			// Write the FULL selection subset so the header always matches what
-			// this session will actually send (previously only persona/provider/
-			// model were written, letting extended/thinking/preset drift).
-			sessionConv.persona_name = pinnedPersona?.name ?? null;
-			sessionConv.provider_id = providerId;
-			sessionConv.model_id = modelId;
-			sessionConv.use_extended_context = useExtendedContext;
-			sessionConv.thinking_level = thinkingLevel;
-			sessionConv.preset_name = presetName;
-			await this.historyManager.updateConversationHeader(sessionConv);
+			this.conversationManager.setModelSelection(selection, personaName);
+			sessionConvManager.setModelSelection(selection, personaName);
+			if (!selectionsEqual(this.getActiveSelection(), selection)) {
+				this.setActiveSelection(selection);
+				this.view?.clearDisplayOverrides();
+			}
+			await this.historyManager.updateConversationHeader(sessionConvManager.getActiveConversation()!);
 		}
 
 		return session;
@@ -1308,6 +1296,11 @@ export class ChatOrchestrator implements ToolSessionContext {
 					? convManager.getMode()
 					: initialMode;
 
+				// Likewise re-read the model selection once per iteration (a Quick
+				// Settings switch mid-turn applies from this LLM call) and use this
+				// one snapshot for everything below so a single call stays coherent.
+				const sel = session.selection;
+
 				// 0. Phase 3 (COMP-005): Check compaction threshold before each LLM call
 				await this.compactionManager.checkAndPerformCompaction(session);
 
@@ -1369,8 +1362,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 				// 4. Assemble context window (truncate if needed)
 				const contextResult = this.contextManager.assembleContextWindow(
 					allMessages,
-					session.modelId,
-					session.useExtendedContext,
+					sel.modelId,
+					sel.useExtendedContext,
 				);
 
 				if (contextResult.wasTruncated) {
@@ -1388,7 +1381,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						maxDimension: this.settings.image_max_dimension,
 						compressionQuality: this.settings.image_compression_quality,
 					},
-					this.providerRegistry.getActiveType(),
+					this.providerRegistry.getConfig(sel.providerId)?.type ?? "local",
 					(warning) => this.getViewForSession(session)?.showError(`Attachment warning: ${warning}`),
 				);
 
@@ -1405,12 +1398,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 				// present even if the abort fires before any text_delta chunks arrive.
 				const eagerContentEl = view?.createAssistantMessagePlaceholder();
 
-				const provider = this.providerRegistry.getProvider(session.providerId);
+				const provider = this.providerRegistry.getProvider(sel.providerId);
 				const options: SendMessageOptions = {
-					model: session.modelId,
+					model: sel.modelId,
 					abort_signal: abortController.signal,
-					use_extended_context: session.useExtendedContext,
-					thinking_level: session.thinkingLevel,
+					use_extended_context: sel.useExtendedContext,
+					thinking_level: sel.thinkingLevel,
 				};
 
 				const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
@@ -1421,9 +1414,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 				// reasons server-side before any byte streams, so a purely
 				// signal-driven indicator would never appear in time.
 				const thinkingEnabled =
-					!!session.thinkingLevel &&
-					session.thinkingLevel !== "off" &&
-					supportsThinking(session.modelId);
+					!!sel.thinkingLevel &&
+					sel.thinkingLevel !== "off" &&
+					supportsThinking(sel.modelId);
 
 				// 7. Process stream (pass in the already-created placeholder + session-aware view resolver)
 				const result = await processStream(
@@ -1446,7 +1439,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 						thinking_tokens: result.thinkingTokens || null,
 						input_tokens: result.inputTokens,
 						output_tokens: result.outputTokens,
-						cost_estimate: calculateCost(result.inputTokens, result.outputTokens, session.modelId, this.settings),
+						cost_estimate: calculateCost(result.inputTokens, result.outputTokens, sel.modelId, this.settings),
+						provider_id: sel.providerId,
+						model_id: sel.modelId,
 					});
 
 					if (result.contentEl) {
@@ -1480,7 +1475,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 							thinking_tokens: result.thinkingTokens || null,
 							input_tokens: result.inputTokens,
 							output_tokens: result.outputTokens,
-							cost_estimate: calculateCost(result.inputTokens, result.outputTokens, session.modelId, this.settings),
+							cost_estimate: calculateCost(result.inputTokens, result.outputTokens, sel.modelId, this.settings),
+							provider_id: sel.providerId,
+							model_id: sel.modelId,
 						});
 
 						// Finalize the streaming placeholder so thinking block persists
@@ -2031,6 +2028,49 @@ export class ChatOrchestrator implements ToolSessionContext {
 	/** Set the per-orchestrator active preset name (null = Custom mode). */
 	setActivePresetName(presetName: string | null): void {
 		this.activePresetName = presetName;
+	}
+
+	/** The panel's active model selection as one value. */
+	private getActiveSelection(): ModelSelection {
+		return {
+			providerId: this.activeProviderId,
+			modelId: this.activeModelId,
+			useExtendedContext: this.activeUseExtendedContext,
+			thinkingLevel: this.activeThinkingLevel,
+			presetName: this.activePresetName,
+		};
+	}
+
+	private setActiveSelection(sel: ModelSelection): void {
+		this.activeProviderId = sel.providerId;
+		this.activeModelId = sel.modelId;
+		this.activeUseExtendedContext = sel.useExtendedContext;
+		this.activeThinkingLevel = sel.thinkingLevel;
+		this.activePresetName = sel.presetName;
+	}
+
+	/**
+	 * Commit the panel's active model selection (after a Quick Settings or
+	 * persona change; pass `personaName` for the latter) to the displayed
+	 * conversation: its header in memory and
+	 * JSONL, and — when a turn is running for it — the live session, so the
+	 * change applies from the next LLM call and the session's own header
+	 * writes can't revert it. Never touches global registry/settings state.
+	 *
+	 * @returns the normalized selection and whether a turn is running.
+	 */
+	commitModelSelection(opts?: { personaName?: string | null }): { selection: ModelSelection; running: boolean } {
+		const selection = normalizeSelection(this.getActiveSelection(), this.providerRegistry);
+		this.setActiveSelection(selection);
+		this.conversationManager.setModelSelection(selection, opts?.personaName);
+		const conv = this.conversationManager.getActiveConversation();
+		if (!conv) return { selection, running: false };
+		const session = this.sessionManager.getActiveSession(conv.id);
+		session?.setSelection(selection, opts?.personaName);
+		this.historyManager.updateConversationHeader(conv).catch((e) => {
+			log.error("Failed to persist model selection", { error: String(e) });
+		});
+		return { selection, running: !!session };
 	}
 
 

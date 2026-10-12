@@ -370,9 +370,8 @@ export class ConversationLifecycleManager {
 						presetName: resolution.presetName,
 					};
 					writeSelection(conversation, fallback);
-					const displayConv = convManager.getActiveConversation();
-					if (displayConv && displayConv !== conversation) writeSelection(displayConv, fallback);
-					await this.historyManager.updateConversationHeader(displayConv ?? conversation);
+					convManager.setModelSelection(fallback);
+					await this.historyManager.updateConversationHeader(convManager.getActiveConversation() ?? conversation);
 				}
 
 				if (resolution.source === "default") {
