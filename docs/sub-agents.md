@@ -132,7 +132,7 @@ Each sub-agent invocation is saved to its own JSONL file alongside the parent co
 
 ## Progress and cancellation
 
-While a sub-agent is running, the chat panel shows a spinner with status updates (e.g., "Searching vault... (turn 3/10)"). Clicking **Stop** cancels all active sub-agents — partial results (if any) are returned to the parent with a "[Cancelled]" marker.
+While a sub-agent is running, the chat panel shows a spinner with status updates (e.g., "Searching vault... (turn 3/10)"). If the provider connection drops, the sub-agent retries the turn automatically, and the status reads e.g. "Connection lost — retrying (2/6) in 4s…" (see [Unstable connections](getting-started.md#unstable-connections)). Retries don't count toward the iteration cap. For extension `runSubAgent` calls, time spent waiting to retry counts toward the call's `timeout`. Clicking **Stop** cancels all active sub-agents — partial results (if any) are returned to the parent with a "[Cancelled]" marker.
 
 ## Provider and model
 

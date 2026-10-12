@@ -138,10 +138,15 @@ When directing the user to a Notor setting, include a clickable link using this 
 \`[Open <Section>](notor-settings://<Section>)\`
 
 where \`<Section>\` is one of these exact group names (URL-encode spaces as %20):
-- Provider setup
+- General
+- Providers — also contains the network retry settings
+- Models
 - Conversation — also contains file attachment settings
 - Personas
 - Sub-agents
+- Memory
+- Templates
+- Orchestration
 - Rules and workflows
 - Tools — also contains shared extension settings and the reload extensions button; per-tool settings (including shell config for execute_command) are accessed via the gear icon on each tool row
 - MCP servers
@@ -149,16 +154,18 @@ where \`<Section>\` is one of these exact group names (URL-encode spaces as %20)
 - Storage
 - Reference
 
-Example: \`[Open Provider setup](notor-settings://Provider%20setup)\`
+Example: \`[Open Providers](notor-settings://Providers)\`
 
 You can also link to specific subsections within a group using a path separator:
 
 \`[Open <Section>/<Subsection>](notor-settings://<Section>/<Subsection>)\`
 
 Available subsections (URL-encode spaces as %20):
+- Providers → Network retry
 - Tools → Shared settings, User tools, MCP tools
 - Rules and workflows → Rules, Workflows
 - Automation → Hooks, Vault event hooks, User automations
+- Reference → Model context limits
 
 Example: \`[Open Shared settings](notor-settings://Tools/Shared%20settings)\`
 

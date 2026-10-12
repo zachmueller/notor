@@ -80,6 +80,8 @@ The body of a **conversation step** is its instructions (injected into the promp
 
 A conversation step runs one LLM turn driven by its persona. The engine **always** injects a must-publish rule: the step MUST call `emit_event` with exactly one of its `notor-step-publishes` topics — narrative text alone never counts. If the step ends its turn without emitting, the engine synthesizes its `notor-step-default-publishes` topic so the loop never stalls.
 
+If a step's provider stream fails, the engine emits `{step}.stream_error`. The payload is `{ step, stopReason, error }`. Before that happens, transient failures (network drops, rate limits, overloaded or 5xx responses) are retried automatically under the [network retry settings](getting-started.md#unstable-connections). Retries don't count toward the step's iteration cap. So `.stream_error` means the provider kept failing, or failed in a way that retrying can't fix. Route it to a recovery step, or let it fail the run.
+
 > **Conversation steps read/write Markdown only.** A conversation step has no `orchestration.scratchpad` helper — it touches the scratchpad through its normal note tools (`read_note` / `write_note`), which handle **Markdown (`.md`) only**. Non-Markdown coordination files (e.g. a `.json` manifest) are written and read by **code steps**; a conversation step receives whatever it needs from such a file via the **incoming event payload** — it must not `read_note` a `.json` (that errors). When a downstream conversation step needs structured state a code step produced, have the code step assemble it into the event payload (the reference flows and the `notor-usage-miner` example follow this pattern).
 
 ## Code steps

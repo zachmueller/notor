@@ -66,6 +66,27 @@ AWS Bedrock uses the Converse API with two authentication methods:
 
 Required IAM permissions: `bedrock:InvokeModelWithResponseStream` (for chat) and `bedrock:ListInferenceProfiles` (for model discovery).
 
+### Unstable connections
+
+Notor rides through short network drops (in-flight Wi-Fi, switching networks) and transient provider trouble (rate limits, "overloaded", 5xx errors). When a turn fails for one of these reasons, Notor re-sends it automatically. The delay starts at 1 second and doubles after each retry, up to a cap.
+
+- **During a retry:** a status line shows the countdown, e.g. "Connection lost — retrying (2/6) in 4s…". Any text that had already streamed stays visible but dimmed, and is replaced as soon as the retried response starts streaming.
+- **While your device is offline:** Notor shows "Waiting for network…" and waits for the connection to return without using up a retry. Then it retries right away.
+- **If every retry fails:** the error is shown with a **Retry** button. Select it to re-send the turn without retyping your message. Errors that retrying can't fix (bad credentials, an invalid request, a context-window overflow) fail right away and have no **Retry** button.
+- **Stopping:** select **Stop** to cancel at any time, including while Notor is waiting to retry.
+
+Automatic retry also covers sub-agents, orchestration steps, background workflows, context compaction, and extension `llmCall` requests. Each retry re-sends the full conversation, so it costs input tokens again. Prompt caching reduces this where your provider supports it.
+
+Configure retries in [Settings → Notor → Providers → Network retry](notor-settings://Providers/Network%20retry):
+
+| Setting | Default | Description |
+|---|---|---|
+| **Automatic retries** | 6 | Re-sends before an error is shown (0–10). Set to 0 to turn automatic retry off. |
+| **Maximum retry delay (seconds)** | 30 | Cap on the delay between retries (1–120). |
+| **Offline wait (minutes)** | 10 | How long to wait for the network while your device is offline before giving up (0–60). |
+
+For a local provider, Notor treats a refused connection as "the server isn't running": it fails right away instead of retrying.
+
 ## Command palette reference
 
 All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
