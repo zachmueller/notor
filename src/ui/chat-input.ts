@@ -353,6 +353,17 @@ export class ChatInput {
 		return this.textInputEl.textContent ?? "";
 	}
 
+	/**
+	 * Insert text at the start of the input without disturbing existing
+	 * attachment / workflow token spans (unlike {@link setInputText}, which
+	 * replaces all children).
+	 */
+	prependInputText(text: string): void {
+		const node = activeDocument.createTextNode(text);
+		this.textInputEl.insertBefore(node, this.textInputEl.firstChild);
+		this.recalcInputHeight();
+	}
+
 	triggerSend(): void {
 		void this.handleSend();
 	}

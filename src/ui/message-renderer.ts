@@ -126,6 +126,14 @@ export interface MessageRendererDeps {
 	 * affordance is omitted.
 	 */
 	openRunTree?: (root: { sessionId?: string; conversationId?: string }) => void;
+	/**
+	 * Post-render hook fired at the end of every assistant-message finalization
+	 * (live stream end, history re-render, active-session restore). The inline
+	 * comment layer uses it to re-apply highlights. History re-renders are
+	 * fire-and-forget, so `contentEl` may already be detached by the time this
+	 * fires — handlers must check `contentEl.isConnected`.
+	 */
+	onAssistantMessageRendered?: (messageId: string, contentEl: HTMLElement) => void;
 }
 
 export class MessageRenderer {
@@ -380,6 +388,12 @@ export class MessageRenderer {
 			if (message.input_tokens) parts.push(`↑${message.input_tokens}`);
 			if (message.output_tokens) parts.push(`↓${message.output_tokens}`);
 			tokenEl.textContent = parts.join(" · ");
+		}
+
+		try {
+			this.deps.onAssistantMessageRendered?.(message.id, contentEl);
+		} catch (e) {
+			log.warn("onAssistantMessageRendered hook failed", { error: String(e) });
 		}
 
 		this.deps.scrollToBottom();

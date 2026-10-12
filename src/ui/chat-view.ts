@@ -28,6 +28,9 @@ import type { ConversationSession } from "../chat/conversation-session";
 import type { Workflow } from "../types";
 import { McpStatusIndicator } from "./mcp-status-indicator";
 import { getTextContent } from "../media/types";
+import { CommentLayer } from "../comments/comment-layer";
+import { CommentSendBar } from "../comments/comment-send-bar";
+import type { AnchoredComment, CommentScope } from "../comments/types";
 import { FindInMessages } from "./find-in-messages";
 
 const log = logger("ChatView");
@@ -118,6 +121,15 @@ export class NotorChatView extends ItemView {
 
 	// Active conversation tracking
 	private activeConversationId: string | null = null;
+
+	/** Inline comment layer over assistant messages (contextmenu trigger). */
+	private commentLayer?: CommentLayer;
+	private commentSendBar?: CommentSendBar;
+	/** Persistence for pending comments — wired by `wireView()`. */
+	private pendingCommentsStorage?: {
+		load: () => AnchoredComment[];
+		save: (comments: AnchoredComment[]) => void;
+	};
 
 	// Header conversation title (displayed between "Notor" and action icons)
 	private headerTitleEl?: HTMLSpanElement;
@@ -274,6 +286,18 @@ export class NotorChatView extends ItemView {
 
 	getActiveConversationId(): string | null {
 		return this.activeConversationId;
+	}
+
+	/** Wire persistence for the inline comment layer (set by `wireView()`). */
+	setPendingCommentsStorage(storage: { load: () => AnchoredComment[]; save: (comments: AnchoredComment[]) => void }): void {
+		this.pendingCommentsStorage = storage;
+		this.commentLayer?.reset();
+		void this.commentLayer?.load().then(() => this.commentLayer?.reapply());
+	}
+
+	/** The chat panel's inline comment layer (exposed for E2E tests). */
+	getCommentLayer(): CommentLayer | undefined {
+		return this.commentLayer;
 	}
 
 	setOnSendMessage(callback: (content: string, attachments?: Attachment[]) => Promise<void>): void {
@@ -1017,6 +1041,12 @@ export class NotorChatView extends ItemView {
 			onOpenSettingsGroup: this.onOpenSettingsGroup,
 			// POL-003 / FR-179: the inline peek card's "Open run tree" affordance.
 			openRunTree: (root) => void this.plugin.openRunTreeView(root),
+			onAssistantMessageRendered: (messageId, contentEl) => {
+				// History finalization is fire-and-forget: a fast conversation
+				// switch can finalize an element that was already cleared.
+				if (!contentEl.isConnected || !this.messageListEl.contains(contentEl)) return;
+				void this.commentLayer?.reapply(messageId);
+			},
 		});
 
 		// Initialize ChatInput
@@ -1042,6 +1072,8 @@ export class NotorChatView extends ItemView {
 			onForkToNewPanel: this.onForkToNewPanel,
 		});
 		this.chatInput.build();
+
+		this.initCommentLayer();
 
 		this.findInMessages = new FindInMessages(container, this.messageListEl, {
 			onClose: () => {},
@@ -1084,6 +1116,11 @@ export class NotorChatView extends ItemView {
 
 		this.findInMessages?.destroy();
 		this.findInMessages = undefined;
+
+		this.commentLayer?.destroy();
+		this.commentLayer = undefined;
+		this.commentSendBar?.destroy();
+		this.commentSendBar = undefined;
 
 		this.settingsPopover?.destroy();
 		this.settingsPopover = undefined;
@@ -1417,6 +1454,79 @@ export class NotorChatView extends ItemView {
 		});
 	}
 
+	/** Subtrees inside an assistant message that are never part of its commentable text. */
+	private static readonly COMMENT_SKIP_SELECTOR =
+		".notor-thinking-block, .notor-message-tokens, .notor-copy-btn, .copy-code-button";
+
+	/** Resolve the finalized assistant message body containing `node`, if any. */
+	private resolveCommentScope(node: Node): CommentScope | null {
+		const el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+		const msgEl = el?.closest<HTMLElement>(".notor-message-assistant[data-message-id]");
+		if (!msgEl || !this.messageListEl.contains(msgEl)) return null;
+		const contentEl = msgEl.querySelector<HTMLElement>(":scope > .notor-message-content");
+		if (!contentEl || !contentEl.contains(node)) return null;
+		if (el?.closest(NotorChatView.COMMENT_SKIP_SELECTOR)) return null;
+		return { scopeId: msgEl.dataset.messageId!, el: contentEl };
+	}
+
+	private listCommentScopes(): CommentScope[] {
+		const scopes: CommentScope[] = [];
+		for (const msgEl of Array.from(this.messageListEl.querySelectorAll<HTMLElement>(".notor-message-assistant[data-message-id]"))) {
+			const contentEl = msgEl.querySelector<HTMLElement>(":scope > .notor-message-content");
+			if (contentEl) scopes.push({ scopeId: msgEl.dataset.messageId!, el: contentEl });
+		}
+		return scopes;
+	}
+
+	private initCommentLayer(): void {
+		this.commentLayer = new CommentLayer({
+			root: this.messageListEl,
+			trigger: "contextmenu",
+			resolveScope: (node) => this.resolveCommentScope(node),
+			getScopeEl: (id) =>
+				this.messageListEl.querySelector<HTMLElement>(
+					`.notor-message-assistant[data-message-id="${id.replace(/["\\]/g, "")}"] > .notor-message-content`,
+				),
+			listScopes: () => this.listCommentScopes(),
+			skip: (el) => el.matches(NotorChatView.COMMENT_SKIP_SELECTOR),
+			storage: {
+				load: () => this.pendingCommentsStorage?.load() ?? [],
+				save: (comments) => this.pendingCommentsStorage?.save(comments),
+			},
+			onChange: (comments) => this.commentSendBar?.update(comments.length),
+			onHighlightsApplied: () => this.findInMessages?.refresh(),
+			scopeLabel: (id) => {
+				const idx = this.listCommentScopes().findIndex((s) => s.scopeId === id);
+				return idx >= 0 ? `On response ${idx + 1}` : "On an earlier response";
+			},
+			compileIntro: (multi) =>
+				multi ? "Comments on your previous responses:" : "Comments on your previous response:",
+		});
+
+		const inputArea = this.chatInput.getInputAreaEl();
+		this.commentSendBar = new CommentSendBar(inputArea, inputArea.querySelector(".notor-input-wrapper"), {
+			onSend: () => this.sendPendingComments(),
+			onClear: () => void this.commentLayer?.clear(),
+		});
+		this.commentSendBar.setResponding(this.isResponding);
+	}
+
+	/**
+	 * Send the compiled comment batch through the normal send path. Any text
+	 * already typed in the input follows the batch as a general note;
+	 * attachments and workflow tokens in the input are preserved.
+	 */
+	private sendPendingComments(): void {
+		const layer = this.commentLayer;
+		if (!layer || layer.count === 0 || this.isResponding) return;
+		const batch = layer.compile();
+		if (!batch) return;
+		const existing = this.chatInput.getInputText().trim();
+		this.chatInput.prependInputText(existing ? `${batch}\n\n` : batch);
+		this.chatInput.triggerSend();
+		void layer.clear();
+	}
+
 	private buildMessageList(container: HTMLElement): void {
 		this.messageListEl = container.createDiv({ cls: "notor-message-list" });
 
@@ -1431,7 +1541,14 @@ export class NotorChatView extends ItemView {
 		this.messageListEl.addEventListener("contextmenu", (evt: MouseEvent) => {
 			const target = (evt.target as HTMLElement).closest<HTMLElement>("[data-message-id]");
 			const messageId = target?.dataset.messageId ?? null;
-			const selectedText = window.getSelection()?.toString().trim() ?? "";
+			const selection = window.getSelection();
+			const selectedText = selection?.toString().trim() ?? "";
+			// Clone the range now: clicking a menu item collapses the selection
+			// before its onClick fires.
+			const selectionRange = selectedText && selection && selection.rangeCount > 0
+				? selection.getRangeAt(0).cloneRange()
+				: null;
+			const commentScope = selectionRange ? this.resolveCommentScope(selectionRange.startContainer) : null;
 			const menu = new Menu();
 			let hasItems = false;
 
@@ -1459,6 +1576,20 @@ export class NotorChatView extends ItemView {
 							void navigator.clipboard.writeText(selectedText).then(() => {
 								new Notice("Copied");
 							});
+						});
+				});
+				hasItems = true;
+			}
+
+			if (selectionRange && commentScope && this.commentLayer) {
+				const layer = this.commentLayer;
+				menu.addItem((item) => {
+					item.setTitle("Comment on selection")
+						.setIcon("message-square-plus")
+						.onClick(() => {
+							if (!layer.addFromRange(selectionRange, selectedText)) {
+								new Notice("Select text inside a single response to comment on it");
+							}
 						});
 				});
 				hasItems = true;
@@ -1554,6 +1685,7 @@ export class NotorChatView extends ItemView {
 	setRespondingState(responding: boolean): void {
 		this.isResponding = responding;
 		this.chatInput.setRespondingState(responding);
+		this.commentSendBar?.setResponding(responding);
 	}
 
 	updateModeDisplay(mode: ConversationMode): void {
@@ -1739,6 +1871,11 @@ export class NotorChatView extends ItemView {
 	clearMessages(): void {
 		this.findInMessages?.close();
 		this.messageRenderer.clearMessages();
+		// Callers load the next conversation into the display manager before
+		// clearing, so reload pending comments for it right away (drives the
+		// send bar even when no assistant message re-renders).
+		this.commentLayer?.reset();
+		void this.commentLayer?.load();
 		this.taskPanelEl?.addClass("notor-hidden");
 		this.taskPanelEl?.empty();
 		this.taskPanelCollapsed = false;

@@ -4,6 +4,7 @@
  * All entity definitions sourced from specs/01-mvp/data-model.md.
  */
 
+import type { AnchoredComment } from "./comments/types";
 import type { ContentBlock } from "./media/types";
 
 // ---------------------------------------------------------------------------
@@ -140,6 +141,13 @@ export interface Conversation {
 	 * null/undefined means no draft is saved.
 	 */
 	draft_text?: string | null;
+	/**
+	 * Inline comments the user has attached to passages of assistant messages
+	 * but not yet sent. Persisted in the JSONL header so they survive
+	 * conversation switches and reloads; cleared when the batch is sent.
+	 * Not copied on fork (message ids are regenerated, so anchors would orphan).
+	 */
+	pending_comments?: AnchoredComment[] | null;
 	/**
 	 * Structured task list maintained by the AI via the update_tasks tool.
 	 * Persisted in the JSONL header. null/undefined = no tasks set.

@@ -9,6 +9,7 @@
  * @see specs/01-mvp/spec.md — FR-4, FR-14, FR-19
  */
 
+import type { AnchoredComment } from "../comments/types";
 import type { Conversation, ConversationMode, Message, MessageRole, TaskItem, ToolCall, ToolResult } from "../types";
 import { readChildRunMetadata } from "../types";
 import { logger } from "../utils/logger";
@@ -656,6 +657,17 @@ export class ConversationManager {
 			this.activeConversation.mode = mode;
 			void this.onConversationChanged?.(this.activeConversation);
 			log.info("Mode changed", { mode, conversationId: this.activeConversation.id });
+		}
+	}
+
+	/**
+	 * Replace the pending inline comments on the active conversation and
+	 * persist them via the conversation-changed callback (header rewrite).
+	 */
+	setPendingComments(comments: AnchoredComment[] | null): void {
+		if (this.activeConversation) {
+			this.activeConversation.pending_comments = comments && comments.length > 0 ? comments : null;
+			void this.onConversationChanged?.(this.activeConversation);
 		}
 	}
 

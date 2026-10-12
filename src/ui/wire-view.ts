@@ -444,6 +444,21 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		}
 	});
 
+	// Inline comments: persist on the conversation header. Dual-write the
+	// display manager and the live session's manager (same as the mode toggle)
+	// so the session's end-of-run sync doesn't clobber the field.
+	view.setPendingCommentsStorage({
+		load: () => orchestrator.getConversationManager().getActiveConversation()?.pending_comments ?? [],
+		save: (comments) => {
+			const convManager = orchestrator.getConversationManager();
+			convManager.setPendingComments(comments);
+			const displayedConvId = convManager.getActiveConversation()?.id;
+			if (displayedConvId) {
+				orchestrator.getActiveSession(displayedConvId)?.conversationManager.setPendingComments(comments);
+			}
+		},
+	});
+
 	// Mode toggle
 	view.setOnModeToggle((mode) => {
 		const convManager = orchestrator.getConversationManager();
