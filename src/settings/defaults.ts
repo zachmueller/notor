@@ -219,6 +219,11 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	sub_agent_iteration_cap: 20,
 	sub_agent_token_limit: 0,
 
+	// Network retry
+	network_retry_max_retries: 6,
+	network_retry_max_delay_ms: 30_000,
+	network_offline_wait_max_ms: 600_000,
+
 	// Phase 5: User-defined extensions
 	user_extension_settings: {},
 	user_shared_settings: {},

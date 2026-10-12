@@ -82,14 +82,7 @@ export function isRetryableProviderFailure(failure: { code?: ProviderErrorCode; 
  * it looks like a transient network failure.
  */
 export function isRetryableError(e: unknown): boolean {
-	if (e instanceof ProviderError) return isRetryableProviderFailure(e);
-	if (e && typeof e === "object") {
-		const tagged = e as { providerCode?: ProviderErrorCode; retryable?: boolean };
-		if (tagged.providerCode !== undefined || tagged.retryable !== undefined) {
-			return isRetryableProviderFailure({ code: tagged.providerCode, retryable: tagged.retryable });
-		}
-	}
-	return isTransientNetworkError(e);
+	return retryableCodeOfError(e) !== null;
 }
 
 /**
@@ -146,4 +139,25 @@ export async function* catchStreamFailures(
 		onFailure?.(e);
 		yield streamFailureChunk(e);
 	}
+}
+
+/**
+ * The code to report for a retryable failure, or null when it must not be
+ * retried. Used as the `classify` callback of `withStreamRetry`.
+ */
+export function retryableCodeOfFailure(failure: { code?: ProviderErrorCode; retryable?: boolean }): ProviderErrorCode | null {
+	if (!isRetryableProviderFailure(failure)) return null;
+	return failure.code ?? "CONNECTION_FAILED";
+}
+
+/** `retryableCodeOfFailure` for anything thrown out of a provider stream. */
+export function retryableCodeOfError(e: unknown): ProviderErrorCode | null {
+	if (e instanceof ProviderError) return retryableCodeOfFailure(e);
+	if (e && typeof e === "object") {
+		const tagged = e as { providerCode?: ProviderErrorCode; retryable?: boolean };
+		if (tagged.providerCode !== undefined || tagged.retryable !== undefined) {
+			return retryableCodeOfFailure({ code: tagged.providerCode, retryable: tagged.retryable });
+		}
+	}
+	return isTransientNetworkError(e) ? "CONNECTION_FAILED" : null;
 }

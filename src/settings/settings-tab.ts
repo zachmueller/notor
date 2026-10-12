@@ -18,6 +18,7 @@ import { renderAnthropicProviderSection } from "./sections/provider-anthropic";
 import { renderOpenAIProviderSection } from "./sections/provider-openai";
 import { renderBedrockProviderSection } from "./sections/provider-bedrock";
 import { renderAddProviderButton } from "./sections/provider-add";
+import { renderNetworkRetrySection } from "./sections/network-retry";
 import { renderAutoContextSection } from "./sections/auto-context";
 import { renderHooksSection } from "./sections/hooks";
 import { renderVaultEventHooksSection } from "./sections/vault-event-hooks";
@@ -187,6 +188,7 @@ export class NotorSettingTab extends PluginSettingTab {
 			}
 		}
 		renderAddProviderButton(providerGroup, ctx);
+		renderNetworkRetrySection(providerGroup, ctx);
 
 		// --- Models (expanded by default) ---
 		const modelsGroup = createSettingsGroup(containerEl, "Models", true, persisted, onToggle);

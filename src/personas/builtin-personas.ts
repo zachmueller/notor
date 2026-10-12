@@ -81,6 +81,7 @@ Example: \`[Open Providers](notor-settings://Providers)\`
 Subsection syntax: \`[Open <Section>/<Subsection>](notor-settings://<Section>/<Subsection>)\`
 
 Available subsections:
+- Providers → Network retry
 - Tools → Shared settings, User tools, MCP tools
 - Rules and workflows → Rules, Workflows
 - Automation → Hooks, Vault event hooks

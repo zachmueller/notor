@@ -418,6 +418,27 @@ export interface NotorSettings {
 	sub_agent_token_limit: number;
 
 	// -------------------------------------------------------------------
+	// Network retry
+	// -------------------------------------------------------------------
+
+	/**
+	 * Automatic retries after a transient provider failure (network drop,
+	 * throttling, overloaded/5xx) before a turn fails. 0 disables
+	 * automatic retry. Applies to chat, sub-agents, orchestration steps,
+	 * background workflows, compaction and extension llmCall.
+	 */
+	network_retry_max_retries: number;
+
+	/** Cap on the exponential backoff delay between retries, in ms. */
+	network_retry_max_delay_ms: number;
+
+	/**
+	 * Longest time to wait for the network to come back while the device
+	 * reports offline, in ms. Offline waiting doesn't spend retries.
+	 */
+	network_offline_wait_max_ms: number;
+
+	// -------------------------------------------------------------------
 	// Model presets
 	// -------------------------------------------------------------------
 
