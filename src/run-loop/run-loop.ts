@@ -28,6 +28,8 @@
 import type { ProviderErrorCode, SendMessageOptions, StreamChunk } from "../providers/provider";
 import type { ChatMessage } from "../providers/provider";
 import { parseStreamEvents } from "../chat/stream-utils";
+import { DEFAULT_RETRY_POLICY, formatRetryStatus, retryPolicyFromSettings, withStreamRetry, type RetryPolicy } from "../providers/stream-retry";
+import { retryableCodeOfError, retryableCodeOfFailure } from "../providers/network-errors";
 import {
 	partitionToolCalls,
 	executeToolBatches,
@@ -54,6 +56,7 @@ export class RunLoop {
 	private readonly iterationCap: number;
 	private readonly tokenLimit: number;
 	private readonly thinkingLevel: string | null;
+	private readonly retryPolicy: RetryPolicy;
 
 	/**
 	 * Own abort controller for this run. Linked to `runContext.abort` so a parent
@@ -70,6 +73,8 @@ export class RunLoop {
 		this.iterationCap = options.iterationCap ?? SUB_AGENT_ITERATION_CAP;
 		this.tokenLimit = options.tokenLimit ?? SUB_AGENT_TOKEN_LIMIT;
 		this.thinkingLevel = options.thinkingLevel ?? null;
+		this.retryPolicy = options.retryPolicy
+			?? (options.settings ? retryPolicyFromSettings(options.settings) : DEFAULT_RETRY_POLICY);
 
 		// --- Abort propagation: own controller linked to runContext.abort. ---
 		this.abortController = new AbortController();
@@ -203,14 +208,41 @@ export class RunLoop {
 					thinking_level: this.thinkingLevel,
 				};
 
-				const stream = this.options.provider.sendMessage(
-					messages,
-					this.options.toolDefinitions,
-					sendOptions,
+				// --- Send + parse stream, retrying transient failures ---
+				// Re-sending the same messages is safe: tools only run after a
+				// stream completes. Tokens reported by failed attempts still count.
+				let failedAttemptTokens = { input: 0, output: 0 };
+				streamResult = await withStreamRetry<ConsumedStreamResult>(
+					() => this.consumeStream(this.options.provider.sendMessage(
+						messages,
+						this.options.toolDefinitions,
+						sendOptions,
+					)),
+					{
+						policy: this.retryPolicy,
+						signal: this.abortController.signal,
+						label: this.options.model,
+						classify: ({ result, error }) => {
+							if (result === undefined) return retryableCodeOfError(error);
+							return result.type === "error" ? retryableCodeOfFailure(result) : null;
+						},
+						onFailedAttempt: ({ result }) => {
+							if (result) {
+								failedAttemptTokens = {
+									input: failedAttemptTokens.input + result.inputTokens,
+									output: failedAttemptTokens.output + result.outputTokens,
+								};
+							}
+						},
+						onStatus: (status) => this.reportProgress(formatRetryStatus(status)),
+						onAbort: () => ({ type: "cancelled", text: "", toolCalls: [], inputTokens: 0, outputTokens: 0 }),
+					},
 				);
-
-				// --- Parse stream ---
-				streamResult = await this.consumeStream(stream);
+				streamResult = {
+					...streamResult,
+					inputTokens: streamResult.inputTokens + failedAttemptTokens.input,
+					outputTokens: streamResult.outputTokens + failedAttemptTokens.output,
+				};
 
 				// Accumulate tokens.
 				tokenUsage.input += streamResult.inputTokens;

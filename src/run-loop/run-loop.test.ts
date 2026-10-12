@@ -464,3 +464,60 @@ describe("RunLoop — budget accounting", () => {
 		expect(ctx.budget.costRemainingUsd).toBe(Infinity);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Transient-failure retry
+// ---------------------------------------------------------------------------
+
+describe("RunLoop — transient failure retry", () => {
+	const fastRetry = { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 1, offlineWaitMaxMs: 0 };
+
+	it("re-sends the turn after a retryable stream error without spending an iteration", async () => {
+		const progress: string[] = [];
+		const provider = mockProvider(
+			[{ type: "text_delta", text: "partial" }, { type: "error", error: "socket hang up", code: "CONNECTION_FAILED" }],
+			textStream("Recovered answer."),
+		);
+		const result = await new RunLoop(buildOptions({
+			provider,
+			retryPolicy: fastRetry,
+			onProgress: (s) => progress.push(s),
+		})).run("go");
+		expect(result.stopReason).toBe("completed");
+		expect(result.text).toBe("Recovered answer.");
+		expect(result.iterationCount).toBe(1);
+		expect(provider.sendMessage).toHaveBeenCalledTimes(2);
+		expect(progress.some((s) => s.startsWith("Connection lost — retrying (1/2)"))).toBe(true);
+	});
+
+	it("retries a thrown transient error", async () => {
+		let calls = 0;
+		const provider = {
+			...mockProvider(),
+			sendMessage: vi.fn((): AsyncIterable<StreamChunk> => (async function* () {
+				calls++;
+				if (calls === 1) throw new TypeError("Failed to fetch");
+				yield* textStream("ok");
+			})()),
+		} as unknown as LLMProvider;
+		const result = await new RunLoop(buildOptions({ provider, retryPolicy: fastRetry })).run("go");
+		expect(result.stopReason).toBe("completed");
+		expect(calls).toBe(2);
+	});
+
+	it("maps exhausted retries to stopReason 'error'", async () => {
+		const failing: StreamChunk[] = [{ type: "error", error: "Overloaded", code: "SERVICE_UNAVAILABLE" }];
+		const provider = mockProvider(failing, failing, failing);
+		const result = await new RunLoop(buildOptions({ provider, retryPolicy: fastRetry })).run("go");
+		expect(result.stopReason).toBe("error");
+		expect(result.errorMessage).toBe("Overloaded");
+		expect(provider.sendMessage).toHaveBeenCalledTimes(3);
+	});
+
+	it("does not retry a non-retryable stream error", async () => {
+		const provider = mockProvider([{ type: "error", error: "Malformed input", code: "INVALID_REQUEST" }], textStream("unused"));
+		const result = await new RunLoop(buildOptions({ provider, retryPolicy: fastRetry })).run("go");
+		expect(result.stopReason).toBe("error");
+		expect(provider.sendMessage).toHaveBeenCalledTimes(1);
+	});
+});

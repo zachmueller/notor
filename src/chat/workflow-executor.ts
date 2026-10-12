@@ -53,6 +53,8 @@ import { resolvePersonaProviderConfig } from "../personas/provider-config-resolv
 import { writeSelection, type ModelSelection } from "./model-selection";
 import { logger } from "../utils/logger";
 import { resolveNote } from "../utils/resolve-note";
+import { retryPolicyFromSettings, withStreamRetry } from "../providers/stream-retry";
+import { errorFromChunk, retryableCodeOfError } from "../providers/network-errors";
 
 const log = logger("WorkflowExecutor");
 
@@ -1038,57 +1040,84 @@ export class WorkflowExecutor {
 				systemPrompt
 			);
 
-			// 5. Send to LLM
+			// 5. Send to LLM, retrying transient failures (network drop,
+			// throttling, overloaded). Unattended runs have no one to click
+			// Retry, so this is where automatic retry pays off most.
 			const abortController = new AbortController();
 			// Register liveness for this stream iteration so the sleep/wake
 			// reconciler can tell a frozen socket apart from a busy tool call.
 			concurrencyManager.markStreaming(execution.id, abortController);
 			const provider = this.deps.providerRegistry.getProvider(session.providerId);
-			const stream = provider.sendMessage(chatMessages, toolDefinitions, {
-				model: session.modelId,
-				abort_signal: abortController.signal,
-				use_extended_context: session.useExtendedContext,
-			});
 
 			// 6. Process stream (background — no UI rendering)
-			let textContent = "";
-			let inputTokens = 0;
-			let outputTokens = 0;
-			let toolCallId = "";
-			let toolName = "";
-			let parameters: Record<string, unknown> = {};
-			let hasToolCall = false;
-
-			for await (const event of parseStreamEvents(stream, abortController.signal, {
-				onPartialToolCall: this.deps.dispatcher.makePartialToolCallHandler(),
-			})) {
-				// Every event proves the stream socket is alive — stamp it so a
-				// post-sleep reconciliation doesn't clear an actively-streaming run.
-				concurrencyManager.touchStreamActivity(execution.id);
-				switch (event.type) {
-					case "text_delta":
-						textContent = event.text;
-						break;
-					case "tool_call":
-						hasToolCall = true;
-						toolCallId = event.id;
-						toolName = event.name;
-						parameters = event.parameters;
-						// Background loop handles one tool call at a time
-						break;
-					case "message_end":
-						inputTokens = event.inputTokens;
-						outputTokens = event.outputTokens;
-						break;
-					case "error":
-						throw new Error(event.message);
-					case "cancelled":
-						// Abort — exit the loop
-						break;
-				}
-				// Background loop breaks after the first tool call
-				if (hasToolCall) break;
-			}
+			const streamed = await withStreamRetry(
+				async () => {
+					const stream = provider.sendMessage(chatMessages, toolDefinitions, {
+						model: session.modelId,
+						abort_signal: abortController.signal,
+						use_extended_context: session.useExtendedContext,
+					});
+					const turn = {
+						textContent: "",
+						inputTokens: 0,
+						outputTokens: 0,
+						toolCallId: "",
+						toolName: "",
+						parameters: {} as Record<string, unknown>,
+						hasToolCall: false,
+					};
+					for await (const event of parseStreamEvents(stream, abortController.signal, {
+						onPartialToolCall: this.deps.dispatcher.makePartialToolCallHandler(),
+					})) {
+						// Every event proves the stream socket is alive — stamp it so a
+						// post-sleep reconciliation doesn't clear an actively-streaming run.
+						concurrencyManager.touchStreamActivity(execution.id);
+						switch (event.type) {
+							case "text_delta":
+								turn.textContent = event.text;
+								break;
+							case "tool_call":
+								turn.hasToolCall = true;
+								turn.toolCallId = event.id;
+								turn.toolName = event.name;
+								turn.parameters = event.parameters;
+								// Background loop handles one tool call at a time
+								break;
+							case "message_end":
+								turn.inputTokens = event.inputTokens;
+								turn.outputTokens = event.outputTokens;
+								break;
+							case "error":
+								throw errorFromChunk(event.message, event);
+							case "cancelled":
+								// Abort — exit the loop
+								break;
+						}
+						// Background loop breaks after the first tool call
+						if (turn.hasToolCall) break;
+					}
+					return turn;
+				},
+				{
+					policy: retryPolicyFromSettings(this.deps.getSettings()),
+					signal: abortController.signal,
+					label: `workflow:${execution.id}`,
+					classify: ({ error }) => (error === undefined ? null : retryableCodeOfError(error)),
+					// Waiting is still a live run — keep the reconciler from
+					// mistaking a backing-off execution for a frozen socket.
+					onStatus: () => concurrencyManager.touchStreamActivity(execution.id),
+					onAbort: () => ({
+						textContent: "",
+						inputTokens: 0,
+						outputTokens: 0,
+						toolCallId: "",
+						toolName: "",
+						parameters: {},
+						hasToolCall: false,
+					}),
+				},
+			);
+			const { textContent, inputTokens, outputTokens, toolCallId, toolName, parameters, hasToolCall } = streamed;
 
 			if (hasToolCall) {
 				// Add tool call message

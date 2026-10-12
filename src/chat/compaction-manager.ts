@@ -123,7 +123,8 @@ export class CompactionManager {
 				modelId,
 				conv.id,
 				"automatic",
-				useExtendedContext
+				useExtendedContext,
+				session?.abortController.signal
 			);
 
 			if (result.success && result.newMessages && result.record) {

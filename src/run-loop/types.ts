@@ -21,6 +21,7 @@ import type { ConversationMode } from "../types";
 import type { ToolDispatcher } from "../chat/dispatcher";
 import type { ToolPolicyContext } from "../chat/tool-policy";
 import type { NotorSettings } from "../settings/types";
+import type { RetryPolicy } from "../providers/stream-retry";
 
 // ---------------------------------------------------------------------------
 // Aggregate budget — the SHARED tree-wide cell
@@ -403,6 +404,14 @@ export interface RunLoopOptions {
 	hooks?: RunLoopHooks;
 	/** Optional progress callback (status string). */
 	onProgress?: (status: string) => void;
+	/**
+	 * Transient-failure retry policy for each turn's provider stream. When
+	 * omitted it comes from `settings` (if given) or `DEFAULT_RETRY_POLICY`.
+	 * Retries don't count as iterations; while waiting the loop reports
+	 * "Connection lost — retrying…" through `onProgress`, which doubles as
+	 * the orchestration liveness heartbeat.
+	 */
+	retryPolicy?: RetryPolicy;
 	/**
 	 * Per-run tool-policy context (F2). Threaded into every tool dispatch so the
 	 * pure `evaluateToolPolicy()` engine gates the run — command patterns, path

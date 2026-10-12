@@ -202,6 +202,25 @@ describe("WorkflowExecutor.runWorkflowHeadless (INT-031)", () => {
 		expect(result.text).toBe("Direct answer.");
 	});
 
+	it("re-sends a turn after a transient stream failure", async () => {
+		vi.useFakeTimers();
+		try {
+			const provider = mockProvider(
+				[{ type: "error", error: "socket hang up", code: "CONNECTION_FAILED" }],
+				TEXT("Recovered."),
+			);
+			const { deps } = makeDeps(provider, vi.fn());
+			const executor = new WorkflowExecutor(deps);
+			const done = executor.runWorkflowHeadless(makeWorkflow(), "summarize");
+			await vi.advanceTimersByTimeAsync(2_000); // first backoff is ~1s
+			const result = await done;
+			expect(provider.sendMessage).toHaveBeenCalledTimes(2);
+			expect(result.text).toBe("Recovered.");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("throws when the workflow assembles to no prompt content", async () => {
 		const wfMod = await import("../workflows/workflow-executor");
 		(wfMod.assembleWorkflowPrompt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);

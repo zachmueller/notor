@@ -17,6 +17,8 @@ import { estimateTokens, estimateContentTokens, estimateAttachmentSnapshotTokens
 import { getTextContent } from "../media/types";
 import { getContextWindow } from "../providers/model-metadata";
 import { logger } from "../utils/logger";
+import { retryPolicyFromSettings, withStreamRetry } from "../providers/stream-retry";
+import { errorFromChunk, retryableCodeOfError } from "../providers/network-errors";
 
 const log = logger("Compaction");
 
@@ -258,7 +260,8 @@ export async function performCompaction(
 	modelId: string,
 	conversationId: string,
 	trigger: "automatic" | "manual",
-	useExtendedContext?: boolean
+	useExtendedContext?: boolean,
+	abortSignal?: AbortSignal
 ): Promise<CompactionResult> {
 	const compactionPrompt = getCompactionPrompt(settings);
 	const contextWindow = getContextWindow(modelId, useExtendedContext);
@@ -339,27 +342,39 @@ export async function performCompaction(
 		const options: SendMessageOptions = {
 			model: modelId,
 			use_extended_context: useExtendedContext,
+			abort_signal: abortSignal,
 		};
 
-		// Stream the summarization response
-		const stream = provider.sendMessage(chatMessages, [], options);
-		let summaryText = "";
-		let inputTokens = 0;
-		let outputTokens = 0;
-
-		for await (const chunk of stream) {
-			switch (chunk.type) {
-				case "text_delta":
-					summaryText += chunk.text;
-					break;
-				case "message_end":
-					inputTokens = chunk.input_tokens;
-					outputTokens = chunk.output_tokens;
-					break;
-				case "error":
-					throw new Error(`LLM error during compaction: ${chunk.error}`);
-			}
-		}
+		// Stream the summarization response, retrying transient failures —
+		// a failed summarize call would otherwise break the turn that needed it.
+		const summary = await withStreamRetry(
+			async () => {
+				const stream = provider.sendMessage(chatMessages, [], options);
+				const attempt = { summaryText: "", inputTokens: 0, outputTokens: 0 };
+				for await (const chunk of stream) {
+					switch (chunk.type) {
+						case "text_delta":
+							attempt.summaryText += chunk.text;
+							break;
+						case "message_end":
+							attempt.inputTokens = chunk.input_tokens;
+							attempt.outputTokens = chunk.output_tokens;
+							break;
+						case "error":
+							throw errorFromChunk(`LLM error during compaction: ${chunk.error}`, chunk);
+					}
+				}
+				return attempt;
+			},
+			{
+				policy: retryPolicyFromSettings(settings),
+				signal: abortSignal,
+				label: "compaction",
+				classify: ({ error }) => (error === undefined ? null : retryableCodeOfError(error)),
+				onAbort: () => ({ summaryText: "", inputTokens: 0, outputTokens: 0 }),
+			},
+		);
+		const { summaryText, inputTokens, outputTokens } = summary;
 
 		if (!summaryText.trim()) {
 			throw new Error("Compaction produced empty summary");

@@ -29,6 +29,7 @@ import type { ToolPolicyContext } from "./tool-policy";
 import { RunLoop } from "../run-loop/run-loop";
 import { newRootBudget, deriveChildContext } from "../run-loop/budget";
 import type { RunContext } from "../run-loop/types";
+import type { RetryPolicy } from "../providers/stream-retry";
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -91,6 +92,8 @@ export interface SubAgentRunnerOptions {
 	thinkingLevel?: string | null;
 	/** Optional progress callback (Section 9.5). */
 	onProgress?: (status: string) => void;
+	/** Transient-failure retry policy for each turn (from the network retry settings). */
+	retryPolicy?: RetryPolicy;
 	/**
 	 * Parent run's {@link RunContext}, when this sub-agent is spawned from inside
 	 * another run tree (a flow dispatching `use_subagent` at `maxDepth ≥ 1`). When
@@ -166,6 +169,7 @@ export class SubAgentRunner {
 			orchestrationContext: undefined,
 			policyCtx: this.options.policyCtx,
 			onProgress: this.options.onProgress,
+			retryPolicy: this.options.retryPolicy,
 		});
 
 		const result = await runLoop.run(taskPrompt);

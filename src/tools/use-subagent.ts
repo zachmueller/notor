@@ -28,6 +28,7 @@ import { ToolDispatcher } from "../chat/dispatcher";
 import { SubAgentRunner } from "../chat/sub-agent-runner";
 import { intersectToolConfig } from "../tool-config/merger";
 import { SUB_AGENT_PREAMBLE } from "../sub-agents/preamble";
+import { retryPolicyFromSettings } from "../providers/stream-retry";
 import { ASK_USER } from "../extensions/builtin-tool-scaffolds/ask-user";
 import {
 	USE_SUBAGENT_TOOL_NAME,
@@ -439,6 +440,7 @@ export class UseSubagentTool implements Tool {
 			tokenLimit: this.settings.sub_agent_token_limit ?? SUB_AGENT_TOKEN_LIMIT,
 			mode,
 			onProgress: options?.onProgress,
+			retryPolicy: retryPolicyFromSettings(this.settings),
 			// When this sub-agent was itself dispatched from inside a run tree (a
 			// flow at maxDepth ≥ 1), inherit the parent's shared budget cell and
 			// depth. Absent (foreground chat), the runner seeds a fresh root context.

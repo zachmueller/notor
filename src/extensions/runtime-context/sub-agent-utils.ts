@@ -5,6 +5,7 @@ import { ToolDispatcher } from "../../chat/dispatcher";
 import { intersectToolConfig } from "../../tool-config/merger";
 import { SUB_AGENT_PREAMBLE } from "../../sub-agents/preamble";
 import { SUB_AGENT_ITERATION_CAP, SUB_AGENT_TOKEN_LIMIT } from "../../sub-agents/constants";
+import { retryPolicyFromSettings } from "../../providers/stream-retry";
 import { resolvePreset } from "../../presets/preset-resolver";
 import { resolveNote } from "../../utils/resolve-note";
 import { logger } from "../../utils/logger";
@@ -165,6 +166,8 @@ export function buildSubAgentUtils(ctx: BuilderContext): Pick<ExtensionUtils, "r
 					iterationCap: opts.iterationCap ?? profile.iteration_cap ?? plugin.settings.sub_agent_iteration_cap ?? SUB_AGENT_ITERATION_CAP,
 					tokenLimit: SUB_AGENT_TOKEN_LIMIT,
 					mode: "act",
+					// Retry waits count against `timeout` — the timeout abort ends them.
+					retryPolicy: retryPolicyFromSettings(plugin.settings),
 					// F2: gate this sub-agent's tool calls through the pure policy engine
 					// (command patterns / paths / plan-mode / denylist), built from the
 					// intersected effective config. domainDenylist comes from the tool's
