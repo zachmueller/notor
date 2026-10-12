@@ -27,6 +27,7 @@ import { resolveAnthropicThinking } from "./thinking-config";
 import { supportsThinking } from "./model-metadata";
 import { contextOverflowMessage, noteContextOverflow } from "./context-overflow";
 import { recordApiModelLimits } from "./model-limits";
+import { sanitizeToolCallId } from "./tool-call-id";
 
 const log = logger("AnthropicProvider");
 
@@ -117,7 +118,7 @@ function toAnthropicMessages(
 			for (const tc of msg.tool_calls) {
 				content.push({
 					type: "tool_use",
-					id: tc.id,
+					id: sanitizeToolCallId(tc.id),
 					name: tc.tool_name,
 					input: tc.parameters,
 				});
@@ -141,14 +142,14 @@ function toAnthropicMessages(
 						}
 						return {
 							type: "tool_result",
-							tool_use_id: tr.tool_call_id,
+							tool_use_id: sanitizeToolCallId(tr.tool_call_id),
 							content: parts,
 							is_error: tr.is_error,
 						};
 					}
 					return {
 						type: "tool_result",
-						tool_use_id: tr.tool_call_id,
+						tool_use_id: sanitizeToolCallId(tr.tool_call_id),
 						content: tr.result,
 						is_error: tr.is_error,
 					};

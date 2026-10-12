@@ -65,6 +65,7 @@ import {
 	type ListInferenceProfilesCommandOutput,
 } from "@aws-sdk/client-bedrock";
 import { fromIni } from "@aws-sdk/credential-providers";
+import { sanitizeToolCallId } from "./tool-call-id";
 
 const log = logger("BedrockProvider");
 
@@ -143,7 +144,7 @@ function toBedrockMessages(
 			for (const tc of msg.tool_calls) {
 				content.push({
 					toolUse: {
-						toolUseId: tc.id,
+						toolUseId: sanitizeToolCallId(tc.id),
 						name: tc.tool_name,
 						input: tc.parameters as unknown as DocumentType,
 					},
@@ -168,7 +169,7 @@ function toBedrockMessages(
 					}
 					return {
 						toolResult: {
-							toolUseId: tr.tool_call_id,
+							toolUseId: sanitizeToolCallId(tr.tool_call_id),
 							content: trContent,
 							status: tr.is_error ? ("error" as const) : ("success" as const),
 						},

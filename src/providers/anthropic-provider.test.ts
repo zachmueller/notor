@@ -179,3 +179,34 @@ describe("AnthropicProvider — thinking request body", () => {
 		expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 16384 });
 	});
 });
+
+describe("AnthropicProvider — cross-provider tool-call ids", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	// History from another provider (e.g. an OpenAI-compatible server) can carry
+	// ids Anthropic rejects; they must be rewritten identically on both sides.
+	it("sanitizes foreign tool_use / tool_result ids consistently", async () => {
+		let body: { messages: Array<{ content: Array<Record<string, unknown>> }> } = { messages: [] };
+		vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: string }) => {
+			body = JSON.parse(init.body) as typeof body;
+			return { ok: false, status: 400, text: async () => "{}" };
+		}));
+		const app = { secretStorage: { getSecret: () => "sk-test" } } as unknown as App;
+		const provider = new AnthropicProvider({ id: "test", endpoint: "https://api.example.com" } as never, app);
+		try {
+			for await (const _chunk of provider.sendMessage([
+				{ role: "user", content: "hi" },
+				{ role: "tool_call", content: "", tool_calls: [{ id: "call:1.a", tool_name: "read_note", parameters: {} }] },
+				{ role: "tool_result", content: "", tool_results: [{ tool_call_id: "call:1.a", tool_name: "read_note", result: "ok", is_error: false }] },
+			], [], { model: "claude-opus-5-5" })) {
+				// drain
+			}
+		} catch {
+			// expected — the stubbed response is an error
+		}
+		const useId = body.messages[1]!.content.find((b) => b.type === "tool_use")!.id as string;
+		const resultId = body.messages[2]!.content[0]!.tool_use_id as string;
+		expect(useId).toMatch(/^[a-zA-Z0-9_-]+$/);
+		expect(resultId).toBe(useId);
+	});
+});
