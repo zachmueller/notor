@@ -120,19 +120,24 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 2: No persona label by default ─────────────────────────────
-	console.log("\nTest 2: No persona label by default (no active persona)");
+	// ── Test 2: Default persona chip when no persona is active ──────────
+	console.log("\nTest 2: Default persona chip (no active persona)");
 	{
 		const label = await page.$(".notor-persona-label");
 		if (!label) {
-			ctx.pass("No persona label by default", "Label element not present or not yet created");
+			const shot = await ctx.screenshot("02-no-persona-label");
+			ctx.fail("Default persona chip", "No .notor-persona-label element found", shot);
 		} else {
-			const isHidden = await label.evaluate((el) => el.classList.contains("notor-hidden"));
+			const isDefault = await label.evaluate((el) => el.classList.contains("notor-persona-label--default"));
+			// Chip must sit in the toolbar right after the mode-toggle group, not after the send buttons
+			const placed = await label.evaluate((el) =>
+				el.previousElementSibling?.classList.contains("notor-input-toolbar-left") === true
+			);
 			const text = await label.textContent();
-			if (isHidden || !text?.trim()) {
-				ctx.pass("No persona label by default", `Label exists but hidden=${isHidden}, text="${text?.trim()}"`);
+			if (isDefault && placed && text?.trim() === "🎭 default") {
+				ctx.pass("Default persona chip", `Label "${text.trim()}" placed after the mode toggle`);
 			} else {
-				ctx.fail("No persona label by default", `Label visible with text "${text?.trim()}" — expected hidden`);
+				ctx.fail("Default persona chip", `default=${isDefault}, placed=${placed}, text="${text?.trim()}"`);
 			}
 		}
 	}

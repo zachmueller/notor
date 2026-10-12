@@ -32,6 +32,7 @@ import { CommentLayer } from "../comments/comment-layer";
 import { CommentSendBar } from "../comments/comment-send-bar";
 import type { AnchoredComment, CommentScope } from "../comments/types";
 import { FindInMessages } from "./find-in-messages";
+import { insertToolbarChipAfter } from "./toolbar-chips";
 
 const log = logger("ChatView");
 
@@ -784,11 +785,8 @@ export class NotorChatView extends ItemView {
 				this.personaLabelEl = toolbar.createDiv({
 					cls: "notor-persona-label",
 				});
-				// Place after the mode toggle (second child of toolbar)
-				const modeToggle = toolbar.querySelector(".notor-mode-toggle");
-				if (modeToggle?.nextSibling) {
-					toolbar.insertBefore(this.personaLabelEl, modeToggle.nextSibling);
-				}
+				// Place right after the toolbar group holding the mode toggle
+				insertToolbarChipAfter(toolbar, this.personaLabelEl, toolbar.querySelector(".notor-mode-toggle"));
 				// Click to open persona context menu
 				this.personaLabelEl.addEventListener("click", (evt) => {
 					if (!this.personaManager) return;
@@ -897,10 +895,11 @@ export class NotorChatView extends ItemView {
 					cls: "notor-workflow-label",
 				});
 				// Place after the persona label when present, else after the mode toggle.
-				const anchor = this.personaLabelEl ?? toolbar.querySelector(".notor-mode-toggle");
-				if (anchor?.nextSibling) {
-					toolbar.insertBefore(this.workflowLabelEl, anchor.nextSibling);
-				}
+				insertToolbarChipAfter(
+					toolbar,
+					this.workflowLabelEl,
+					this.personaLabelEl ?? toolbar.querySelector(".notor-mode-toggle"),
+				);
 				// Click to open the workflow context menu.
 				this.workflowLabelEl.addEventListener("click", (evt) => {
 					this.showWorkflowContextMenu(evt);
