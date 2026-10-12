@@ -44,6 +44,14 @@ Click the gear icon in the chat panel header to open the settings popover. The *
 
 Selecting a preset sets the provider and model for subsequent messages. The current preset is marked with a checkmark.
 
+Quick settings changes are scoped to the chat panel and its conversation:
+
+- A notice confirms the switch, e.g. **Model: AWS Bedrock · global.anthropic.claude-opus-4-8 · 1M (large)**.
+- Switching while a response is in progress applies from the next model call (the next tool round) — the notice adds "applies from next step".
+- The choice is saved to the conversation immediately. Reopening the conversation restores exactly what it recorded, even if the preset's definition has changed since; the preset's current definition is only used if the recorded provider is no longer configured.
+- Global defaults — the default provider and each provider's default model — change only from **Settings → Notor**. Other open chat panels are unaffected.
+- A new chat in the same panel starts with the panel's current selection; a newly opened panel starts from the defaults.
+
 ### Custom escape hatch
 
 Select **Custom...** to bypass presets entirely and pick a provider and model directly. Custom selections are not saved as a preset — the conversation stores `preset_name: null` and falls back to the concrete provider and model.

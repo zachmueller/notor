@@ -12,8 +12,8 @@ Personas are stored as directories under `notor/personas/{persona-name}/`, each 
 |---|---|---|
 | `notor-persona-prompt-mode` | `"append"` (default) or `"replace"` | `append` adds the persona prompt after the global system prompt. `replace` uses only the persona's prompt as the base. Vault-level rule injections always apply regardless of this setting. |
 | `notor-preferred-preset` | preset name string | Automatically resolves to the preset's provider and model when this persona is active. See [model-presets.md](model-presets.md). |
-| `notor-preferred-provider` | provider identifier string | Automatically switches to this provider when the persona is active. |
-| `notor-preferred-model` | model identifier string | Automatically switches to this model when the persona is active. |
+| `notor-preferred-provider` | provider identifier string | Switches the chat panel (or background workflow run) to this provider when the persona is selected. |
+| `notor-preferred-model` | model identifier string | Switches the chat panel (or background workflow run) to this model when the persona is selected. |
 
 **Model resolution priority** (highest to lowest): `notor-preferred-preset` → `notor-preferred-provider` + `notor-preferred-model` → global default preset. If a preset is specified but doesn't exist or isn't configured, a notice is shown and resolution falls through to the legacy provider/model overrides.
 
