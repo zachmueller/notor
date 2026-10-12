@@ -21,6 +21,7 @@ import type {
 	ToolDefinition,
 } from "./provider";
 import { ProviderError } from "./provider";
+import { catchStreamFailures } from "./network-errors";
 import type { OpenAIStreamChunk, OpenAIModelsResponse } from "./openai-wire";
 import { parseSSEStream } from "./sse";
 import { getSecret, secretIdForApiKey } from "../utils/secrets";
@@ -207,7 +208,19 @@ export class LocalProvider implements LLMProvider {
 		}
 	}
 
-	async *sendMessage(
+	sendMessage(
+		messages: ChatMessage[],
+		tools: ToolDefinition[],
+		options: SendMessageOptions
+	): AsyncIterable<StreamChunk> {
+		return catchStreamFailures(
+			this.streamMessage(messages, tools, options),
+			options.abort_signal,
+			(e) => log.warn("Local stream failed mid-response", { error: String(e) }),
+		);
+	}
+
+	private async *streamMessage(
 		messages: ChatMessage[],
 		tools: ToolDefinition[],
 		options: SendMessageOptions
@@ -262,7 +275,9 @@ export class LocalProvider implements LLMProvider {
 				e instanceof TypeError && e.message.includes("fetch")
 					? `Could not connect to local LLM at ${this.endpoint}. Is the server running?`
 					: `Connection failed: ${e instanceof Error ? e.message : String(e)}`;
-			throw new ProviderError(message, "local", "CONNECTION_FAILED", e instanceof Error ? e : undefined);
+			// A local server that refuses the connection is almost always not
+			// running — fail fast instead of burning the network-retry budget.
+			throw new ProviderError(message, "local", "CONNECTION_FAILED", e instanceof Error ? e : undefined, undefined, false);
 		}
 
 		if (!response.ok) {
@@ -302,7 +317,9 @@ export class LocalProvider implements LLMProvider {
 			throw new ProviderError(
 				`Local LLM error (${response.status}): ${errorText}`,
 				"local",
-				"PROVIDER_ERROR"
+				// Local servers return 500 for assorted non-transient faults; only a
+				// 503 (e.g. model still loading) is worth retrying.
+				response.status === 503 ? "SERVICE_UNAVAILABLE" : "PROVIDER_ERROR"
 			);
 		}
 

@@ -31,6 +31,8 @@ import type {
 	ToolDefinition,
 } from "./provider";
 import { ProviderError } from "./provider";
+import type { ProviderErrorCode } from "./provider";
+import { isTransientNetworkError } from "./network-errors";
 import { getSecret, secretIdForAccessKeyId, secretIdForSecretAccessKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
 import type { ContentBlock as MediaContentBlock } from "../media/types";
@@ -68,6 +70,13 @@ import { fromIni } from "@aws-sdk/credential-providers";
 import { sanitizeToolCallId } from "./tool-call-id";
 
 const log = logger("BedrockProvider");
+
+/** Bedrock exception names that indicate a transient server-side failure. */
+const TRANSIENT_SERVER_EXCEPTIONS = new Set([
+	"InternalServerException",
+	"ServiceUnavailableException",
+	"ModelStreamErrorException",
+]);
 
 /**
  * Per-request stream state. `stopReason` is stashed from messageStop so it can
@@ -311,21 +320,41 @@ export class BedrockProvider implements LLMProvider {
 	 * refresh themselves on a fresh client, so the second attempt succeeds with
 	 * no user action. Static keys can't self-refresh, so the retry is skipped
 	 * and the original error surfaces for the caller to translate.
+	 *
+	 * `abortSignal` is forwarded to the SDK so a user Stop also cancels the
+	 * SDK's own internal retries of the initial request.
 	 */
 	private async sendWithCredentialRetry<T>(
-		getClient: () => { send: (command: unknown) => Promise<unknown> },
-		makeCommand: () => unknown
+		getClient: () => { send: (command: unknown, options?: { abortSignal?: AbortSignal }) => Promise<unknown> },
+		makeCommand: () => unknown,
+		abortSignal?: AbortSignal
 	): Promise<T> {
+		const sendOptions = abortSignal ? { abortSignal } : undefined;
 		try {
-			return (await getClient().send(makeCommand())) as T;
+			return (await getClient().send(makeCommand(), sendOptions)) as T;
 		} catch (e) {
 			if (this.isExpiredCredentialError(e) && this.authMethod !== "keys") {
 				// Drop cached clients so the next getClient() re-resolves creds.
 				this.clearCachedClients();
-				return (await getClient().send(makeCommand())) as T;
+				return (await getClient().send(makeCommand(), sendOptions)) as T;
 			}
 			throw e;
 		}
+	}
+
+	/**
+	 * Classify a failure that surfaced mid-stream. Network failures also drop
+	 * the cached clients so a retry doesn't reuse a dead HTTP/2 session.
+	 */
+	private classifyStreamFailure(e: unknown): ProviderErrorCode {
+		const name = e instanceof Error ? e.name : "";
+		if (isTransientNetworkError(e)) {
+			this.clearCachedClients();
+			return "CONNECTION_FAILED";
+		}
+		if (name === "ThrottlingException") return "RATE_LIMITED";
+		if (TRANSIENT_SERVER_EXCEPTIONS.has(name)) return "SERVICE_UNAVAILABLE";
+		return "PROVIDER_ERROR";
 	}
 
 	/**
@@ -476,7 +505,8 @@ export class BedrockProvider implements LLMProvider {
 		try {
 			response = await this.sendWithCredentialRetry<ConverseStreamCommandOutput>(
 				() => this.getRuntimeClient(),
-				() => new ConverseStreamCommand(input)
+				() => new ConverseStreamCommand(input),
+				options.abort_signal
 			);
 		} catch (e: unknown) {
 			if (options.abort_signal?.aborted) {
@@ -597,11 +627,22 @@ export class BedrockProvider implements LLMProvider {
 					e instanceof Error ? e : undefined
 				);
 			}
-			if (errMsg.includes("ECONNREFUSED") || errMsg.includes("network")) {
+			if (isTransientNetworkError(e)) {
+				// Drop the cached client so a retry doesn't reuse a dead HTTP/2 session.
+				this.clearCachedClients();
 				throw new ProviderError(
-					`Could not connect to AWS Bedrock in region ${this.region}: ${errMsg}`,
+					`Network connection to AWS Bedrock (${this.region}) failed: ${errMsg}`,
 					"bedrock",
 					"CONNECTION_FAILED",
+					e instanceof Error ? e : undefined,
+					errDetails
+				);
+			}
+			if (TRANSIENT_SERVER_EXCEPTIONS.has(errName)) {
+				throw new ProviderError(
+					`AWS Bedrock is temporarily unavailable: ${errMsg}`,
+					"bedrock",
+					"SERVICE_UNAVAILABLE",
 					e instanceof Error ? e : undefined,
 					errDetails
 				);
@@ -639,6 +680,7 @@ export class BedrockProvider implements LLMProvider {
 			yield {
 				type: "error",
 				error: e instanceof Error ? e.message : String(e),
+				code: this.classifyStreamFailure(e),
 				details: {
 					name: e instanceof Error ? e.name : undefined,
 					rawMessage: e instanceof Error ? e.message : String(e),
@@ -769,6 +811,7 @@ export class BedrockProvider implements LLMProvider {
 				error:
 					event.internalServerException.message ??
 					"Internal server error",
+				code: "SERVICE_UNAVAILABLE",
 			};
 		}
 
@@ -778,6 +821,17 @@ export class BedrockProvider implements LLMProvider {
 				error:
 					event.modelStreamErrorException.message ??
 					"Model stream error",
+				code: "SERVICE_UNAVAILABLE",
+			};
+		}
+
+		if (event.serviceUnavailableException) {
+			yield {
+				type: "error",
+				error:
+					event.serviceUnavailableException.message ??
+					"Bedrock service unavailable",
+				code: "SERVICE_UNAVAILABLE",
 			};
 		}
 
@@ -787,6 +841,7 @@ export class BedrockProvider implements LLMProvider {
 				error:
 					event.throttlingException.message ??
 					"Bedrock rate limited",
+				code: "RATE_LIMITED",
 			};
 		}
 

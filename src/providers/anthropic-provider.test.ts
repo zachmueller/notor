@@ -210,3 +210,61 @@ describe("AnthropicProvider — cross-provider tool-call ids", () => {
 		expect(resultId).toBe(useId);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Transient network / server failures
+// ---------------------------------------------------------------------------
+
+describe("AnthropicProvider — transient failure classification", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	function makeKeyedProvider(): AnthropicProvider {
+		const app = { secretStorage: { getSecret: () => "sk-test" } } as unknown as App;
+		return new AnthropicProvider({ id: "test", endpoint: "https://api.example.com" } as never, app);
+	}
+
+	async function collect(): Promise<{ chunks: StreamChunk[]; thrown?: unknown }> {
+		const chunks: StreamChunk[] = [];
+		try {
+			for await (const chunk of makeKeyedProvider().sendMessage([{ role: "user", content: "hi" }], [], { model: "claude-opus-5-5" })) {
+				chunks.push(chunk);
+			}
+			return { chunks };
+		} catch (thrown) {
+			return { chunks, thrown };
+		}
+	}
+
+	it("yields a CONNECTION_FAILED error chunk when the body drops mid-stream", async () => {
+		const encoder = new TextEncoder();
+		let sent = false;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (!sent) {
+					sent = true;
+					controller.enqueue(encoder.encode(
+						'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}\n\n',
+					));
+					return;
+				}
+				controller.error(new TypeError("network error"));
+			},
+		});
+		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, body })));
+
+		const { chunks, thrown } = await collect();
+		expect(thrown).toBeUndefined();
+		expect(chunks[0]).toEqual({ type: "text_delta", text: "partial" });
+		expect(chunks.at(-1)).toMatchObject({ type: "error", code: "CONNECTION_FAILED" });
+	});
+
+	it("maps 529 overloaded to SERVICE_UNAVAILABLE", async () => {
+		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 529, text: async () => "overloaded" })));
+		expect((await collect()).thrown).toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+	});
+
+	it("tags an SSE overloaded_error event as SERVICE_UNAVAILABLE", () => {
+		const chunks = handleEvent(makeProvider(), "error", { type: "error", error: { type: "overloaded_error", message: "Overloaded" } });
+		expect(chunks).toEqual([{ type: "error", error: "Overloaded", code: "SERVICE_UNAVAILABLE" }]);
+	});
+});

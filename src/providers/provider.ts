@@ -114,7 +114,18 @@ export type StreamChunk =
 			 */
 			stop_reason?: string;
 	  }
-	| { type: "error"; error: string; details?: ProviderErrorDetails };
+	| {
+			type: "error";
+			error: string;
+			details?: ProviderErrorDetails;
+			/** Categorized failure code, when the provider could classify it. */
+			code?: ProviderErrorCode;
+			/**
+			 * Explicit retry decision; overrides the code-based default in
+			 * `isRetryableProviderFailure` (see network-errors.ts).
+			 */
+			retryable?: boolean;
+	  };
 
 // ---------------------------------------------------------------------------
 // ProviderError
@@ -129,6 +140,8 @@ export type ProviderErrorCode =
 	| "INVALID_REQUEST"
 	| "CONTEXT_LENGTH_EXCEEDED"
 	| "PROVIDER_ERROR"
+	/** Transient server-side failure (5xx, overloaded, Bedrock internal/stream errors). */
+	| "SERVICE_UNAVAILABLE"
 	| "UNKNOWN";
 
 /**
@@ -156,7 +169,9 @@ export class ProviderError extends Error {
 		public readonly provider: string,
 		public readonly code: ProviderErrorCode,
 		public readonly cause?: Error,
-		public readonly details?: ProviderErrorDetails
+		public readonly details?: ProviderErrorDetails,
+		/** Explicit retry decision; overrides the code-based default. */
+		public readonly retryable?: boolean
 	) {
 		super(message);
 		this.name = "ProviderError";

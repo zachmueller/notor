@@ -317,3 +317,91 @@ describe("BedrockProvider — thinking request fields", () => {
 		expect(fieldsOf(input)?.thinking).toEqual({ type: "enabled", budget_tokens: 16384 });
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Transient network / server failures
+// ---------------------------------------------------------------------------
+
+describe("BedrockProvider — transient failure classification", () => {
+	/** Run sendMessage with the SDK call replaced by `send`; collect chunks or the throw. */
+	async function runStream(
+		send: () => Promise<unknown>,
+	): Promise<{ chunks: StreamChunk[]; thrown?: unknown; provider: BedrockProvider }> {
+		const provider = makeProvider();
+		(provider as unknown as { sendWithCredentialRetry: unknown }).sendWithCredentialRetry = send;
+		const chunks: StreamChunk[] = [];
+		try {
+			for await (const chunk of provider.sendMessage([{ role: "user", content: "hi" }], [], { model: "us.anthropic.claude-opus-5-5" })) {
+				chunks.push(chunk);
+			}
+			return { chunks, provider };
+		} catch (thrown) {
+			return { chunks, thrown, provider };
+		}
+	}
+
+	function cachedClient(provider: BedrockProvider): unknown {
+		return (provider as unknown as { runtimeClient: unknown }).runtimeClient;
+	}
+
+	it("maps a pre-stream ENOTFOUND to CONNECTION_FAILED and drops the cached client", async () => {
+		const provider = makeProvider();
+		(provider as unknown as { runtimeClient: unknown }).runtimeClient = { stale: true };
+		(provider as unknown as { sendWithCredentialRetry: unknown }).sendWithCredentialRetry = async () => {
+			throw new Error("The pending stream has been canceled (caused by: getaddrinfo ENOTFOUND bedrock-runtime.us-west-2.amazonaws.com)");
+		};
+		let thrown: unknown;
+		try {
+			for await (const _chunk of provider.sendMessage([{ role: "user", content: "hi" }], [], { model: "m" })) {
+				// drain
+			}
+		} catch (e) {
+			thrown = e;
+		}
+		expect(thrown).toMatchObject({ code: "CONNECTION_FAILED" });
+		expect((thrown as Error).message).toMatch(/^Network connection to AWS Bedrock/);
+		expect(cachedClient(provider)).toBeNull();
+	});
+
+	it("maps pre-stream InternalServerException to SERVICE_UNAVAILABLE", async () => {
+		const { thrown } = await runStream(async () => {
+			throw awsError("InternalServerException", "Internal failure");
+		});
+		expect(thrown).toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+	});
+
+	it("tags a mid-stream network drop with CONNECTION_FAILED", async () => {
+		const { chunks } = await runStream(async () => ({
+			stream: (async function* () {
+				yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: "partial" } } };
+				throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+			})(),
+		}));
+		expect(chunks.at(-1)).toMatchObject({ type: "error", code: "CONNECTION_FAILED" });
+	});
+
+	it("tags in-stream throttling and server exceptions", () => {
+		const handler = getHandler(makeProvider());
+		const codeOf = (event: unknown) => [...handler(event, new Map(), {})][0];
+		expect(codeOf({ throttlingException: { message: "slow down" } })).toMatchObject({ code: "RATE_LIMITED" });
+		expect(codeOf({ internalServerException: { message: "oops" } })).toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+		expect(codeOf({ modelStreamErrorException: { message: "oops" } })).toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+		expect(codeOf({ serviceUnavailableException: { message: "oops" } })).toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+		expect(codeOf({ validationException: { message: "bad" } })).not.toHaveProperty("code");
+	});
+
+	it("forwards the abort signal to the SDK send", async () => {
+		const controller = new AbortController();
+		let seen: unknown;
+		const provider = makeProvider();
+		await (provider as unknown as {
+			sendWithCredentialRetry: (g: unknown, m: unknown, s?: AbortSignal) => Promise<unknown>;
+		}).sendWithCredentialRetry.call(
+			provider,
+			() => ({ send: (_c: unknown, opts?: { abortSignal?: AbortSignal }) => { seen = opts?.abortSignal; return Promise.resolve("ok"); } }),
+			() => ({}),
+			controller.signal,
+		);
+		expect(seen).toBe(controller.signal);
+	});
+});

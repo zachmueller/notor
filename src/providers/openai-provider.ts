@@ -21,6 +21,7 @@ import type {
 	ToolDefinition,
 } from "./provider";
 import { ProviderError } from "./provider";
+import { catchStreamFailures, isTransientHttpStatus } from "./network-errors";
 import type { OpenAIStreamChunk, OpenAIModelsResponse } from "./openai-wire";
 import { parseSSEStream } from "./sse";
 import { getSecret, secretIdForApiKey } from "../utils/secrets";
@@ -182,7 +183,19 @@ export class OpenAIProvider implements LLMProvider {
 		return key;
 	}
 
-	async *sendMessage(
+	sendMessage(
+		messages: ChatMessage[],
+		tools: ToolDefinition[],
+		options: SendMessageOptions
+	): AsyncIterable<StreamChunk> {
+		return catchStreamFailures(
+			this.streamMessage(messages, tools, options),
+			options.abort_signal,
+			(e) => log.warn("OpenAI stream failed mid-response", { error: String(e) }),
+		);
+	}
+
+	private async *streamMessage(
 		messages: ChatMessage[],
 		tools: ToolDefinition[],
 		options: SendMessageOptions
@@ -280,7 +293,7 @@ export class OpenAIProvider implements LLMProvider {
 			throw new ProviderError(
 				`OpenAI API error (${response.status}): ${errorText}`,
 				"openai",
-				"PROVIDER_ERROR"
+				isTransientHttpStatus(response.status) ? "SERVICE_UNAVAILABLE" : "PROVIDER_ERROR"
 			);
 		}
 

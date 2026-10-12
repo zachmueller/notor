@@ -19,6 +19,7 @@ import type {
 	ToolDefinition,
 } from "./provider";
 import { ProviderError } from "./provider";
+import { catchStreamFailures, isTransientHttpStatus } from "./network-errors";
 import type { ContentBlock as MediaContentBlock } from "../media/types";
 import { getSecret, secretIdForApiKey } from "../utils/secrets";
 import { estimateTokenCount } from "../utils/tokens";
@@ -40,7 +41,7 @@ interface AnthropicEventData {
 	message?: { usage?: { input_tokens?: number } };
 	/** Stop reason on the message_delta event (e.g. "end_turn", "max_tokens"). */
 	stop_reason?: string | null;
-	error?: { message?: string };
+	error?: { type?: string; message?: string };
 }
 
 /** One entry in the Anthropic `/v1/models` listing. */
@@ -225,7 +226,19 @@ export class AnthropicProvider implements LLMProvider {
 		return key;
 	}
 
-	async *sendMessage(
+	sendMessage(
+		messages: ChatMessage[],
+		tools: ToolDefinition[],
+		options: SendMessageOptions
+	): AsyncIterable<StreamChunk> {
+		return catchStreamFailures(
+			this.streamMessage(messages, tools, options),
+			options.abort_signal,
+			(e) => log.warn("Anthropic stream failed mid-response", { error: String(e) }),
+		);
+	}
+
+	private async *streamMessage(
 		messages: ChatMessage[],
 		tools: ToolDefinition[],
 		options: SendMessageOptions
@@ -339,7 +352,7 @@ export class AnthropicProvider implements LLMProvider {
 			throw new ProviderError(
 				`Anthropic API error (${response.status}): ${errorText}`,
 				"anthropic",
-				"PROVIDER_ERROR"
+				isTransientHttpStatus(response.status) ? "SERVICE_UNAVAILABLE" : "PROVIDER_ERROR"
 			);
 		}
 
@@ -504,9 +517,16 @@ export class AnthropicProvider implements LLMProvider {
 				break;
 
 			case "error": {
+				const errorType = data.error?.type;
 				yield {
 					type: "error",
 					error: data.error?.message ?? "Unknown Anthropic error",
+					code:
+						errorType === "overloaded_error" || errorType === "api_error"
+							? "SERVICE_UNAVAILABLE"
+							: errorType === "rate_limit_error"
+								? "RATE_LIMITED"
+								: "PROVIDER_ERROR",
 				};
 				break;
 			}

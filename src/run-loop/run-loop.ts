@@ -25,7 +25,7 @@
  * @see specs/ZZ-misc/orchestration/tasks/phase-0-runloop.md — ARCH-002
  */
 
-import type { SendMessageOptions, StreamChunk } from "../providers/provider";
+import type { ProviderErrorCode, SendMessageOptions, StreamChunk } from "../providers/provider";
 import type { ChatMessage } from "../providers/provider";
 import { parseStreamEvents } from "../chat/stream-utils";
 import {
@@ -598,7 +598,7 @@ export class RunLoop {
 					break;
 
 				case "error":
-					return { type: "error", text, toolCalls: [], inputTokens, outputTokens, error: event.message };
+					return { type: "error", text, toolCalls: [], inputTokens, outputTokens, error: event.message, code: event.code, retryable: event.retryable };
 
 				case "cancelled":
 					return { type: "cancelled", text: event.text, toolCalls: [], inputTokens, outputTokens };
@@ -615,7 +615,7 @@ export class RunLoop {
 
 type ConsumedStreamResult =
 	| { type: "complete"; text: string; toolCalls: ToolCallInfo[]; inputTokens: number; outputTokens: number }
-	| { type: "error"; text: string; toolCalls: []; inputTokens: number; outputTokens: number; error: string }
+	| { type: "error"; text: string; toolCalls: []; inputTokens: number; outputTokens: number; error: string; code?: ProviderErrorCode; retryable?: boolean }
 	| { type: "cancelled"; text: string; toolCalls: []; inputTokens: number; outputTokens: number };
 
 // Re-export RunStopReason for adapters that map RunResult → narrower result types.

@@ -9,7 +9,7 @@
  * @see specs/ZZ-misc/sub-agents-design.md — Section 9.1
  */
 
-import type { ProviderErrorDetails, StreamChunk } from "../providers/provider";
+import type { ProviderErrorCode, ProviderErrorDetails, StreamChunk } from "../providers/provider";
 import { logger } from "../utils/logger";
 
 const log = logger("stream-utils");
@@ -28,7 +28,7 @@ export type ParsedStreamEvent =
 	| { type: "tool_call_started"; id: string; name: string }
 	| { type: "tool_call"; id: string; name: string; parameters: Record<string, unknown> }
 	| { type: "message_end"; inputTokens: number; outputTokens: number }
-	| { type: "error"; message: string; details?: ProviderErrorDetails }
+	| { type: "error"; message: string; details?: ProviderErrorDetails; code?: ProviderErrorCode; retryable?: boolean }
 	| { type: "cancelled"; text: string };
 
 /** Why an in-flight tool call's accumulated JSON could not be finalized. */
@@ -306,7 +306,7 @@ export async function* parseStreamEvents(
 					break;
 
 				case "error":
-					yield { type: "error", message: chunk.error, details: chunk.details };
+					yield { type: "error", message: chunk.error, details: chunk.details, code: chunk.code, retryable: chunk.retryable };
 					return;
 			}
 		}

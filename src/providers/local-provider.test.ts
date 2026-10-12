@@ -144,3 +144,46 @@ describe("LocalProvider — context overflow", () => {
 		expect(getLearnedContextWindow("qwen3:32b")).toBe(8_192);
 	});
 });
+
+describe("LocalProvider — transient failure classification", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	function makeLocal(): LocalProvider {
+		return new LocalProvider(
+			{ id: "local", type: "local", endpoint: "http://localhost:11434/v1" } as LLMProviderConfig,
+			makeApp()
+		);
+	}
+
+	it("fails fast (non-retryable) when the server refuses the connection", async () => {
+		vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+		const consume = async () => {
+			for await (const _chunk of makeLocal().sendMessage([{ role: "user", content: "hi" }], [], { model: "llama3" })) {
+				// drain
+			}
+		};
+		await expect(consume()).rejects.toMatchObject({ code: "CONNECTION_FAILED", retryable: false });
+	});
+
+	it("yields a CONNECTION_FAILED error chunk when the body drops mid-stream", async () => {
+		const encoder = new TextEncoder();
+		let sent = false;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (!sent) {
+					sent = true;
+					controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
+					return;
+				}
+				controller.error(new TypeError("network error"));
+			},
+		});
+		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, body })));
+		const chunks = [];
+		for await (const chunk of makeLocal().sendMessage([{ role: "user", content: "hi" }], [], { model: "llama3" })) {
+			chunks.push(chunk);
+		}
+		expect(chunks[0]).toEqual({ type: "text_delta", text: "partial" });
+		expect(chunks.at(-1)).toMatchObject({ type: "error", code: "CONNECTION_FAILED" });
+	});
+});
