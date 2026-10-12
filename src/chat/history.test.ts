@@ -320,3 +320,37 @@ describe("HistoryManager — append conversion (B.1)", () => {
 		expect(header.schema_version).toBeUndefined();
 	});
 });
+
+describe("HistoryManager.deleteConversationFile — plan sidecar cleanup", () => {
+	it("removes the conversation's .plan.json alongside the JSONL", async () => {
+		const id = "11111111-2222-3333-4444-555555555555";
+		const jsonl = `${HISTORY}20261011_120000_${id}.jsonl`;
+		const plan = `${HISTORY}${id}.plan.json`;
+		const files = new Set([jsonl, plan, `${HISTORY}other.plan.json`]);
+		const adapter = {
+			exists: async (p: string) => files.has(p),
+			remove: async (p: string) => {
+				files.delete(p);
+			},
+		};
+		const hm = new HistoryManager({ adapter } as unknown as Vault, HISTORY, 100, 30);
+		await hm.deleteConversationFile(`20261011_120000_${id}.jsonl`);
+		expect(files.has(jsonl)).toBe(false);
+		expect(files.has(plan)).toBe(false);
+		expect(files.has(`${HISTORY}other.plan.json`)).toBe(true);
+	});
+
+	it("is a no-op for the sidecar when none exists", async () => {
+		const id = "11111111-2222-3333-4444-555555555555";
+		const removed: string[] = [];
+		const adapter = {
+			exists: async () => false,
+			remove: async (p: string) => {
+				removed.push(p);
+			},
+		};
+		const hm = new HistoryManager({ adapter } as unknown as Vault, HISTORY, 100, 30);
+		await hm.deleteConversationFile(`20261011_120000_${id}.jsonl`);
+		expect(removed).toEqual([`${HISTORY}20261011_120000_${id}.jsonl`]);
+	});
+});

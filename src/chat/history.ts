@@ -54,6 +54,7 @@
  * @see specs/01-mvp/spec.md — FR-19
  */
 
+import { planSidecarPath } from "../plans/plan-store";
 import { normalizePath, type Vault } from "obsidian";
 import type { Conversation, Message } from "../types";
 import type { CompactionRecord } from "../context/compaction";
@@ -998,7 +999,10 @@ export class HistoryManager {
 		}
 	}
 
-	/** Delete a conversation file. */
+	/**
+	 * Delete a conversation file and its conversation-owned sidecars (the
+	 * plan document). Used by both user deletion and retention pruning.
+	 */
 	async deleteConversationFile(filename: string): Promise<void> {
 		const path = this.getFilePath(filename);
 		try {
@@ -1009,6 +1013,22 @@ export class HistoryManager {
 				path,
 				error: String(e),
 			});
+		}
+		await this.deleteSidecars(filename);
+	}
+
+	/** Remove `{id}.plan.json` for the conversation named by `filename`, if present. */
+	private async deleteSidecars(filename: string): Promise<void> {
+		const match = /_([0-9a-f-]{36})\.jsonl$/i.exec(filename);
+		if (!match) return;
+		const planPath = planSidecarPath(this.historyPath, match[1]!);
+		try {
+			if (await this.vault.adapter.exists(planPath)) {
+				await this.vault.adapter.remove(planPath);
+				log.info("Deleted plan sidecar", { path: planPath });
+			}
+		} catch (e) {
+			log.warn("Failed to delete plan sidecar", { path: planPath, error: String(e) });
 		}
 	}
 }
