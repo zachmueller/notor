@@ -41,6 +41,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `apply_template` | Create a note by applying a template with auto-answered prompts | Act only |
 | `webview` | Interact with Obsidian's Web Viewer tab (read, navigate, click) | Act only |
 | `ask_user` | Pause and ask the user a question mid-conversation, with optional suggested-answer options | Plan & Act |
+| `submit_plan` | Hand a complete step-by-step plan to you for review in a dedicated tab; approving switches to Act mode (see [Plan review](#plan-review)) | Plan & Act |
 | `read_notor_settings` | Read the current Notor plugin settings as JSON | Plan & Act |
 | `edit_notor_settings` | Change a single Notor plugin setting by key path | Act only |
 
@@ -498,6 +499,18 @@ Writes under `ai/` proceed silently; writes anywhere else render a normal approv
 - **Group names are internal.** `vault-write` and friends name the four `namespace × access` buckets rules are projected into; a `<notor_tool_config>` block keys on tool names, so narrow writes by listing the tools (`write_note`, `replace_in_note`, `move_note`, …).
 - **Restricted reads also filter results.** Gating a call's own arguments would still let a listing tool report paths from anywhere, so `search_vault`, `list_vault`, `get_backlinks`, `get_outlinks`, and `read_note`'s backlink snippets filter their output against the `vault-read` lists. Withheld entries are **counted, not hidden** — the result says e.g. `3 notes hidden by path restrictions`, so the AI knows something exists that it cannot see rather than telling you it found nothing.
 - **Distinct from the *expansion* settings.** "Additional file-system paths" (Shared settings) and "Additional working directories" (execute_command) *grant* access outside the vault. The lists here *restrict*.
+
+## Plan review
+
+In Plan mode the AI finishes its read-only research by calling `submit_plan` with a title and the complete plan as Markdown, instead of leaving the plan in a chat message.
+
+- **The plan opens in its own tab.** The plan is stored with the conversation in the plugin's history folder (`{history_path}{conversation id}.plan.json`), not as a vault note, so writing it needs no vault access in Plan mode. Only the latest revision is kept, and the file is deleted with the conversation.
+- **Comment inline.** Select any text in the plan and click **Comment** to attach a comment. Commented passages are highlighted and listed under the plan; comments survive reloads until sent.
+- **Hand it back.** **Send comments** returns your comments to the AI in quoted-text form, together with the optional **Overall feedback** note. You can also just type a reply in the chat input while the review is pending; it is sent as feedback on the plan. The AI revises and calls `submit_plan` again.
+- **Decide.** **Approve** switches the conversation to Act mode and the AI executes the plan. **Approve & auto-accept edits** also auto-approves the built-in note and file editing tools until that response finishes (see [safety.md](safety.md#approve--auto-accept-edits)). **Reject** keeps the conversation in Plan mode. The same buttons appear on the tool-call card in the chat.
+- **Re-read it any time.** The plan card in the chat history has an **Open plan** button, and **Notor: Open plan for current conversation** opens it from the command palette. After a decision the tab is read-only and shows the plan's status.
+
+`submit_plan` is auto-approved by default, is not available to sub-agents or background workflows, and can be disabled in **Settings → Notor → Tools**. When it is disabled, Plan mode falls back to asking the AI to suggest switching to Act mode.
 
 ## Task tracking
 

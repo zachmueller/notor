@@ -9,7 +9,19 @@ A visible **Plan / Act** toggle sits in the chat input area.
 - **Plan mode** (default for new users) restricts the AI to read-only tools. Write tools are blocked at the dispatch level — the AI simply cannot invoke them, even if it tries. In the system prompt, write tools are annotated with an `[Act mode only]` suffix so the AI understands which tools are unavailable.
 - **Act mode** enables write tools. Write operations still require approval by default (see below).
 
-Switching modes takes effect immediately for subsequent messages.
+Switching modes takes effect immediately, including mid-response: the next step of a running response uses the new mode's system prompt and tool gate.
+
+### Plan review
+
+When the `submit_plan` tool is enabled, the AI ends Plan-mode research by submitting a plan for you to review, comment on, and approve or reject. Approving switches the conversation to Act mode. See [Plan review](vault-tools.md#plan-review).
+
+### Approve & auto-accept edits
+
+**Approve & auto-accept edits** on a submitted plan switches to Act mode and auto-approves the built-in note and file editing tools (`write_note`, `replace_in_note`, `update_frontmatter`, `manage_tags`, `move_note`, `apply_template`, `write_file`, `replace_in_file`, `write_docx`, `write_xlsx`) **until that response finishes**. An **Auto-accepting edits** badge next to the mode toggle shows while it is active.
+
+- It never covers `execute_command`, `delete_note`, `edit_notor_settings`, import tools, MCP tools, or user-defined write tools — those keep their normal approval.
+- Path rules still apply: **never auto-approve** paths still prompt, and blocked or out-of-scope paths are still refused.
+- Checkpoints are still taken before every write, so each change remains restorable.
 
 ## Diff preview
 

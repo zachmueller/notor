@@ -84,6 +84,7 @@ All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
 | **Notor: Launch active note workflow** | Opens a picker filtered to workflows with `notor-active-note-prompt`, runs against the active note |
 | **Notor: Open new chat panel** | Opens an additional chat panel in a new tab |
 | **Notor: Find in messages** | Opens the find bar in the chat panel to search across message content |
+| **Notor: Open plan for current conversation** | Opens the plan review tab for the conversation's latest submitted plan |
 | **Notor: Switch persona** | Opens a picker to switch the active persona for the current chat |
 | **Notor: /btw — Open side conversation** | Forks the current conversation at the last message and opens it in a new tab |
 | **Notor: Open memory approval panel** | Opens the pending memory approval queue (visible only when memory is enabled with manual approval mode) |
