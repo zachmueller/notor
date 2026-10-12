@@ -87,6 +87,9 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	// it falls through to the generic Approve/Reject gate and a Reject returns a
 	// blank result, so the questions never render.
 	ask_user: true,
+	// submit_plan is read-only and suspends on its own plan-review prompt;
+	// a separate approval gate would only double-prompt.
+	submit_plan: true,
 };
 
 /** Default empty hook configuration. */

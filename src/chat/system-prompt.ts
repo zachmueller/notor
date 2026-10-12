@@ -10,6 +10,7 @@
  * @see design/architecture.md — system prompt assembly
  */
 
+import { SUBMIT_PLAN_TOOL_NAME } from "../tools/submit-plan";
 import type { MetadataCache, Vault } from "obsidian";
 import { parseYaml } from "obsidian";
 import type { ConversationMode, Persona, TaskItem, VaultRule } from "../types";
@@ -257,7 +258,10 @@ export class SystemPromptBuilder {
 		const toolSection = toolDefinitions.length > 0
 			? this.buildToolDefinitionsSection(toolDefinitions, mode)
 			: "";
-		const modeSection = this.buildModeSection(mode);
+		const modeSection = this.buildModeSection(
+			mode,
+			toolDefinitions.some((t) => t.name === SUBMIT_PLAN_TOOL_NAME),
+		);
 
 		let rulesSection = "";
 		if (useCache && this.cachedStrippedRuleContents !== null) {
@@ -567,7 +571,21 @@ ${DEFAULT_SYSTEM_PROMPT}
 	/**
 	 * Build mode-aware instructions section.
 	 */
-	private buildModeSection(mode: ConversationMode): string {
+	private buildModeSection(mode: ConversationMode, hasSubmitPlan = false): string {
+		if (mode === "plan" && hasSubmitPlan) {
+			return `## Current mode: Plan (read-only)
+
+You are in **Plan mode**. You can read notes, search the vault, and list files, but you cannot create or modify notes. Use this mode to research, analyze, and propose changes without risk.
+
+When the task requires changes to the vault:
+1. Do your research with read-only tools first.
+2. When you are ready, call \`submit_plan\` with a short title and the complete step-by-step plan in Markdown (what will change, which notes/files, in what order, and how to verify). Do not also paste the plan into your reply.
+3. The user reviews the plan in a dedicated tab. If they request changes, revise the plan to address every comment and call \`submit_plan\` again with the full updated plan.
+4. If they approve, the conversation switches to Act mode — then execute the plan.
+
+Do not call \`submit_plan\` for questions or tasks that need no vault changes; just answer them.`;
+		}
+
 		if (mode === "plan") {
 			return `## Current mode: Plan (read-only)
 

@@ -9,6 +9,7 @@
  * @see specs/ZZ-misc/sub-agents-implementation-plan.md — Phase 5.3
  */
 
+import { SUBMIT_PLAN_TOOL_NAME } from "./submit-plan";
 import { Notice } from "obsidian";
 import type { Tool, JSONSchema, ToolExecuteOptions, ToolResult } from "./tool";
 import type { ToolDefinition as ProviderToolDefinition } from "../providers/provider";
@@ -357,14 +358,14 @@ export class UseSubagentTool implements Tool {
 		}
 
 		// Step 7: Build sub-agent tool definitions and dispatcher.
-		// ask_user is excluded: sub-agents have no UI surface, so its interaction
+		// ask_user and submit_plan are excluded: sub-agents have no UI surface, so their interaction
 		// channel can't be wired — offering it would only let the model call a
 		// tool that errors out. Filter it from both the tool defs the model sees
 		// and the sub-dispatcher so it can't be dispatched even if hallucinated.
 		const enabledToolNames = Object.entries(intersectedConfig.tools)
 			.filter(([, entry]) => entry.enabled)
 			.map(([name]) => name)
-			.filter((name) => name !== ASK_USER.name);
+			.filter((name) => name !== ASK_USER.name && name !== SUBMIT_PLAN_TOOL_NAME);
 
 		const toolDefs: ProviderToolDefinition[] = enabledToolNames
 			.map((name) => this.toolRegistry.get(name))

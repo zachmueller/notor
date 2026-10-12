@@ -160,6 +160,11 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "List the worksheet names in an .xlsx file with row and column counts (desktop only).",
 		isWrite: false,
 	},
+	submit_plan: {
+		name: "Submit plan",
+		desc: "Hand a step-by-step plan to you for review in a dedicated tab (Plan mode). Approving switches to Act mode.",
+		isWrite: false,
+	},
 	use_subagent: {
 		name: "Use sub-agent",
 		desc: "Spawn a sub-agent to handle a delegated task.",

@@ -429,3 +429,40 @@ describe("SystemPromptBuilder.assemble() — Plan mode write-tool annotation", (
 		expect(result).not.toContain("[Act mode only]");
 	});
 });
+
+describe("SystemPromptBuilder.assemble() — Plan mode submit_plan instructions", () => {
+	const READ_NOTE: ToolDefinition = {
+		name: "read_note",
+		description: "Read a note from the vault.",
+		input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+		mode: "read",
+	};
+	const SUBMIT_PLAN: ToolDefinition = {
+		name: "submit_plan",
+		description: "Submit a plan.",
+		input_schema: { type: "object", properties: { title: { type: "string" }, plan: { type: "string" } }, required: ["title", "plan"] },
+		mode: "read",
+	};
+
+	it("tells the model to submit a plan when submit_plan is available", async () => {
+		const builder = new SystemPromptBuilder(createMockVault(), "notor", undefined, createRegistry());
+		const result = await builder.assemble("plan", [READ_NOTE, SUBMIT_PLAN]);
+		expect(result).toContain("call `submit_plan` with a short title and the complete step-by-step plan");
+		expect(result).toContain("call `submit_plan` again with the full updated plan");
+		expect(result).not.toContain("suggest switching to Act mode");
+	});
+
+	it("keeps the legacy wording when submit_plan is disabled", async () => {
+		const builder = new SystemPromptBuilder(createMockVault(), "notor", undefined, createRegistry());
+		const result = await builder.assemble("plan", [READ_NOTE]);
+		expect(result).toContain("suggest switching to Act mode");
+		expect(result).not.toContain("call `submit_plan`");
+	});
+
+	it("does not add plan instructions in Act mode", async () => {
+		const builder = new SystemPromptBuilder(createMockVault(), "notor", undefined, createRegistry());
+		const result = await builder.assemble("act", [READ_NOTE, SUBMIT_PLAN]);
+		expect(result).toContain("## Current mode: Act (full access)");
+		expect(result).not.toContain("call `submit_plan` with a short title");
+	});
+});
