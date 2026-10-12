@@ -15,7 +15,7 @@
  * @see specs/04-mcp/contracts/mcp-tool-dispatch.md — Tool Name Parsing
  */
 
-import type { Tool, JSONSchema } from "../tools/tool";
+import type { Tool, JSONSchema, ToolExecuteOptions } from "../tools/tool";
 import type { ToolResult } from "../types";
 import type { McpDiscoveredTool, McpServerConfig } from "./mcp-types";
 import type { McpHub } from "./mcp-hub";
@@ -158,13 +158,15 @@ export class McpRegisteredTool implements Tool {
 	 * Obtains the current conversation mode from the mode accessor callback
 	 * so the correct `_meta.notor_mode` is sent with each invocation.
 	 */
-	async execute(params: Record<string, unknown>): Promise<ToolResult> {
+	async execute(params: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult> {
 		const currentMode = this.getModeCallback();
 		return this.mcpHub.callTool(
 			this.serverName,
 			this.discoveredTool.name,
 			params,
-			currentMode
+			currentMode,
+			// Image support depends on the provider the calling turn uses.
+			options?.sessionContext?.getSessionModelSelection?.().providerId,
 		);
 	}
 

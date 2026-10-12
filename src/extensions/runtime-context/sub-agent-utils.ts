@@ -59,11 +59,15 @@ export function buildSubAgentUtils(ctx: BuilderContext): Pick<ExtensionUtils, "r
 						preset: profile.preferred_preset,
 					});
 				}
+				// Fall back to the active panel's provider/model, else the settings
+				// default — an instance id, never a provider type.
+				const panel = profile.preferred_provider ? undefined : plugin.getActiveOrchestrator?.();
 				providerId = profile.preferred_provider
-					? profile.preferred_provider
-					: providerRegistry.getActiveType();
-				const providerConfig = providerRegistry.getConfig(providerId);
-				model = profile.preferred_model ?? providerConfig?.model_id ?? "";
+					|| panel?.getActiveProviderId()
+					|| providerRegistry.getActiveId();
+				model = profile.preferred_model
+					|| panel?.getActiveModelId()
+					|| (providerRegistry.getConfig(providerId)?.model_id ?? "");
 			}
 
 			try {

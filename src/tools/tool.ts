@@ -11,6 +11,7 @@
 import type { Conversation, ConversationMode, TaskItem, ToolResult } from "../types";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
+import type { ModelSelection } from "../chat/model-selection";
 
 // Re-export ToolResult for tool implementations
 export type { ToolResult };
@@ -54,6 +55,11 @@ export interface ToolSessionContext {
 	 * response loop ("Approve & auto-accept edits"). Reset when the loop ends.
 	 */
 	setAutoAcceptWrites?(on: boolean): void;
+	/**
+	 * The dispatching session's live model selection (provider instance id,
+	 * model, …) — what the parent turn is actually using right now.
+	 */
+	getSessionModelSelection?(): ModelSelection;
 }
 
 export interface ToolExecuteOptions {

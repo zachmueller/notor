@@ -36,6 +36,7 @@ export class CompactionManager {
 		private readonly getViewForSession: (session: ConversationSession) => NotorChatView | undefined,
 		private readonly getActiveModelId: () => string,
 		private readonly getActiveUseExtendedContext: () => boolean,
+		private readonly getActiveProviderId: () => string,
 	) {}
 
 	/**
@@ -44,7 +45,7 @@ export class CompactionManager {
 	 * blocks are rebuilt too but compaction omits them with a placeholder note.
 	 * Never persisted — the hydrated copies feed `performCompaction` only.
 	 */
-	private async hydrateForSummary(messages: Message[]): Promise<Message[]> {
+	private async hydrateForSummary(messages: Message[], providerId: string): Promise<Message[]> {
 		const settings = this.getSettings();
 		return hydrateMessagesForDispatch(
 			this.app,
@@ -53,7 +54,7 @@ export class CompactionManager {
 				maxDimension: settings.image_max_dimension,
 				compressionQuality: settings.image_compression_quality,
 			},
-			this.providerRegistry.getActiveType(),
+			this.providerRegistry.getConfig(providerId)?.type ?? "local",
 		);
 	}
 
@@ -71,6 +72,9 @@ export class CompactionManager {
 
 		const settings = this.getSettings();
 		const messages = convManager.getMessages();
+		// The session's (or panel's) provider + model together — never the global
+		// active provider, which another panel may have changed.
+		const providerId = session?.providerId ?? this.getActiveProviderId();
 		const modelId = session?.modelId ?? this.getActiveModelId();
 		const useExtendedContext = session?.useExtendedContext ?? this.getActiveUseExtendedContext();
 
@@ -110,10 +114,8 @@ export class CompactionManager {
 		});
 
 		try {
-			const provider = session
-				? this.providerRegistry.getProvider(session.providerId)
-				: this.providerRegistry.getActiveProvider();
-			const hydratedCompleted = await this.hydrateForSummary(completedMessages);
+			const provider = this.providerRegistry.getProvider(providerId);
+			const hydratedCompleted = await this.hydrateForSummary(completedMessages, providerId);
 			const result = await performCompaction(
 				hydratedCompleted,
 				provider,
@@ -227,6 +229,8 @@ export class CompactionManager {
 			return;
 		}
 
+		// The panel's provider + model (mirrors the conversation header).
+		const providerId = this.getActiveProviderId();
 		const modelId = this.getActiveModelId();
 		const useExtendedContext = this.getActiveUseExtendedContext();
 
@@ -243,8 +247,8 @@ export class CompactionManager {
 		}
 
 		try {
-			const provider = this.providerRegistry.getActiveProvider();
-			const hydratedCompleted = await this.hydrateForSummary(completedMessages);
+			const provider = this.providerRegistry.getProvider(providerId);
+			const hydratedCompleted = await this.hydrateForSummary(completedMessages, providerId);
 			const result = await performCompaction(
 				hydratedCompleted,
 				provider,

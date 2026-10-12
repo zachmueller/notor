@@ -139,8 +139,6 @@ export class ConversationLifecycleManager {
 
 		const convManager = this.getConversationManager();
 		const settings = this.getSettings();
-		const providerId = this.getActiveProviderId();
-		const modelId = this.getActiveModelId();
 		const view = this.viewRouter.getView();
 
 		// Save any unsent draft from the current conversation before leaving
@@ -179,6 +177,11 @@ export class ConversationLifecycleManager {
 			? convManager.getMode()
 			: settings.mode;
 
+		// Read the selection AFTER the default-persona reset above, so the new
+		// header is one consistent selection (provider/model used to be read
+		// before it, pairing the old model with the new preset name).
+		const providerId = this.getActiveProviderId();
+		const modelId = this.getActiveModelId();
 		const presetName = this.getActivePresetName();
 		const useExtendedContext = this.getActiveUseExtendedContext();
 		const thinkingLevel = this.getActiveThinkingLevel();
@@ -190,11 +193,11 @@ export class ConversationLifecycleManager {
 				...(useExtendedContext && { use_extended_context: true }),
 				...(presetName !== undefined && { preset_name: presetName }),
 				...(thinkingLevel != null && { thinking_level: thinkingLevel }),
+				// Per-panel active persona (passed in so it reaches the live
+				// header, not just the returned copy).
+				persona_name: this.getActivePersona()?.name ?? null,
 			},
 		);
-
-		// Capture per-panel active persona into header
-		conversation.persona_name = this.getActivePersona()?.name ?? null;
 
 		await this.historyManager.createConversationFile(conversation);
 		if (signal?.aborted) return;

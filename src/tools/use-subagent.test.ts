@@ -117,6 +117,7 @@ function makeMockProviderRegistry(
 	return {
 		getActiveProvider: vi.fn(() => provider),
 		getActiveType: vi.fn(() => "anthropic" as const),
+		getActiveId: vi.fn(() => "anthropic-work"),
 		getProvider: vi.fn(() => provider),
 		getConfig: vi.fn(() => ({
 			type: "anthropic",
@@ -507,6 +508,43 @@ describe("UseSubagentTool", () => {
 
 			const ctorCall = (SubAgentRunner as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 			expect(ctorCall.model).toBe("claude-sonnet-fallback");
+		});
+
+		// No profile override → the parent turn's live provider/model (the
+		// Quick Settings selection), never the global active provider.
+		it("profile without overrides runs on the parent session's provider + model", async () => {
+			const providerRegistry = makeMockProviderRegistry();
+			const tool = createTool({ manager: makeMockSubAgentManager([makeProfile()]), providerRegistry });
+
+			await tool.execute({ profile: "search-vault", task: "Search" }, {
+				sessionContext: {
+					getEffectiveToolConfig: () => makeParentConfig(),
+					getActiveConversation: () => null,
+					getSessionModelSelection: () => ({
+						providerId: "bedrock-work",
+						modelId: "parent-model",
+						useExtendedContext: false,
+						thinkingLevel: null,
+						presetName: null,
+					}),
+				},
+			});
+
+			const ctorCall = (SubAgentRunner as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+			expect(ctorCall.model).toBe("parent-model");
+			expect(providerRegistry.getProvider).toHaveBeenCalledWith("bedrock-work");
+		});
+
+		// Regression: the fallback used getActiveType() (a provider TYPE) as the
+		// instance id, which breaks multi-instance configs whose id != type.
+		it("profile without overrides and no session uses the active provider INSTANCE id", async () => {
+			const providerRegistry = makeMockProviderRegistry();
+			const tool = createTool({ manager: makeMockSubAgentManager([makeProfile()]), providerRegistry });
+
+			await tool.execute({ profile: "search-vault", task: "Search" });
+
+			expect(providerRegistry.getProvider).toHaveBeenCalledWith("anthropic-work");
+			expect(providerRegistry.getConfig).toHaveBeenCalledWith("anthropic-work");
 		});
 
 		it("preset takes precedence over preferred_provider/preferred_model", async () => {

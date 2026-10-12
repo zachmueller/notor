@@ -287,6 +287,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			(session) => this.getViewForSession(session),
 			() => this.activeModelId,
 			() => this.activeUseExtendedContext,
+			() => this.activeProviderId,
 		);
 		this.lifecycle = new ConversationLifecycleManager(
 			() => this.settings,
@@ -644,6 +645,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			getSessionConversationId: () => session.conversationId,
 			setConversationMode: (mode) => this.setSessionMode(session, mode),
 			setAutoAcceptWrites: (on) => this.setSessionAutoAcceptWrites(session, on),
+			getSessionModelSelection: () => session.selection,
 		};
 	}
 
@@ -900,7 +902,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 				const resolved = await resolveAttachment(this.app, att, {
 					maxDimension: this.settings.image_max_dimension,
 					compressionQuality: this.settings.image_compression_quality,
-				}, this.providerRegistry.getActiveType());
+				}, this.providerRegistry.getConfig(this.activeProviderId)?.type ?? "local");
 				resolvedAttachments.push(resolved);
 
 				// Surface inline warnings for failed resolutions

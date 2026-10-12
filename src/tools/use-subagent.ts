@@ -292,10 +292,24 @@ export class UseSubagentTool implements Tool {
 			const providerConfig = this.providerRegistry.getConfig(providerId);
 			model = profile.preferred_model ?? providerConfig?.model_id ?? "";
 		} else {
-			providerId = this.providerRegistry.getActiveType();
-			provider = this.providerRegistry.getActiveProvider();
-			const providerConfig = this.providerRegistry.getConfig(providerId);
-			model = profile.preferred_model ?? providerConfig?.model_id ?? "";
+			// No profile override: run on the parent turn's provider/model, else
+			// the settings default. (Was getActiveType() — a provider TYPE used as
+			// an instance id, which failed for multi-instance configs.)
+			const parent = options?.sessionContext?.getSessionModelSelection?.();
+			providerId = parent?.providerId ?? this.providerRegistry.getActiveId();
+			try {
+				provider = this.providerRegistry.getProvider(providerId);
+			} catch {
+				return {
+					tool_name: USE_SUBAGENT_TOOL_NAME,
+					success: false,
+					result: "",
+					error: `Provider '${providerId}' is not configured for sub-agent '${profile.name}'.`,
+				};
+			}
+			model = profile.preferred_model
+				|| parent?.modelId
+				|| (this.providerRegistry.getConfig(providerId)?.model_id ?? "");
 		}
 		if (!model) {
 			return {

@@ -493,7 +493,9 @@ export class McpHub {
 		serverName: string,
 		toolName: string,
 		toolArguments: Record<string, unknown> | undefined,
-		mode: "plan" | "act"
+		mode: "plan" | "act",
+		/** Provider instance of the calling turn (decides image support); defaults to the settings default. */
+		providerId?: string,
 	): Promise<ToolResult> {
 		// Validation checks run outside the queue — fast-fail without
 		// waiting for other tool calls in the lane.
@@ -526,7 +528,7 @@ export class McpHub {
 			};
 		}
 
-		const execute = () => this.executeCallTool(serverName, toolName, toolArguments, mode, connection);
+		const execute = () => this.executeCallTool(serverName, toolName, toolArguments, mode, connection, providerId);
 
 		return this.taskQueue
 			? this.taskQueue.enqueue(`mcp:${serverName}`, execute, 0)
@@ -544,6 +546,7 @@ export class McpHub {
 		toolArguments: Record<string, unknown> | undefined,
 		mode: "plan" | "act",
 		connection: McpConnection,
+		providerId?: string,
 	): Promise<ToolResult> {
 		const namespacedName = `${serverName}__${toolName}`;
 		const timeoutMs = (connection.config.timeout ?? DEFAULT_TIMEOUT_SECONDS) * 1000;
@@ -573,7 +576,7 @@ export class McpHub {
 				{ timeout: timeoutMs }
 			);
 
-			return this.extractToolResult(namespacedName, result);
+			return this.extractToolResult(namespacedName, result, providerId);
 		} catch (e) {
 			const errorMsg = e instanceof Error ? e.message : String(e);
 
@@ -612,13 +615,14 @@ export class McpHub {
 			[key: string]: unknown;
 			content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 			isError?: boolean;
-		}
+		},
+		providerId?: string,
 	): ToolResult {
 		const textParts: string[] = [];
 		const contentBlocks: ContentBlock[] = [];
 		let omittedResources = 0;
 
-		const activeId = this.settings?.active_provider ?? "local";
+		const activeId = providerId ?? this.settings?.active_provider ?? "local";
 		const providerType = this.settings?.providers.find((p) => p.id === activeId)?.type ?? "local";
 		const capabilities = getMediaCapabilities(providerType);
 
