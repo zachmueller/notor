@@ -1,4 +1,5 @@
 import { setIcon } from "obsidian";
+import { buildFlatText, collectTextNodes, unwrapMarks, wrapRange } from "./highlight-ranges";
 
 interface FindCallbacks {
 	onClose: () => void;
@@ -50,6 +51,15 @@ export class FindInMessages {
 		this.inputEl.value = "";
 		this.countEl.textContent = "";
 		this.callbacks.onClose();
+	}
+
+	/**
+	 * Re-run the current search against the live DOM. Called after another
+	 * feature (e.g. the comment layer) re-wraps text so match marks stay valid.
+	 */
+	refresh(): void {
+		if (!this._isOpen || !this.inputEl.value) return;
+		this.performSearch();
 	}
 
 	destroy(): void {
@@ -175,24 +185,11 @@ export class FindInMessages {
 	}
 
 	private highlightInContainer(container: HTMLElement): void {
-		const textNodes: Text[] = [];
-		const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-		let node: Text | null;
-		while ((node = walker.nextNode() as Text | null)) {
-			if (node.nodeValue && node.nodeValue.length > 0) {
-				textNodes.push(node);
-			}
-		}
-
+		const textNodes = collectTextNodes(container);
 		if (textNodes.length === 0) return;
 
 		// Build flat string and offset map
-		let flatStr = "";
-		const nodeOffsets: { node: Text; start: number }[] = [];
-		for (const tn of textNodes) {
-			nodeOffsets.push({ node: tn, start: flatStr.length });
-			flatStr += tn.nodeValue!;
-		}
+		const { text: flatStr, offsets: nodeOffsets } = buildFlatText(textNodes);
 		const flatLower = flatStr.toLowerCase();
 
 		// Find all match positions in the flat string
@@ -211,66 +208,16 @@ export class FindInMessages {
 		// to avoid invalidating earlier offsets
 		for (let i = matchPositions.length - 1; i >= 0; i--) {
 			const pos = matchPositions[i]!;
-			const marks = this.wrapRange(nodeOffsets, pos.start, pos.end);
+			const marks = wrapRange(nodeOffsets, pos.start, pos.end, { className: "notor-find-highlight" });
 			// Prepend so that after reversing we get document order
 			this.highlightMarks.unshift(...marks);
 		}
 	}
 
-	private wrapRange(
-		nodeOffsets: { node: Text; start: number }[],
-		matchStart: number,
-		matchEnd: number,
-	): HTMLElement[] {
-		const marks: HTMLElement[] = [];
-
-		for (let i = nodeOffsets.length - 1; i >= 0; i--) {
-			const entry = nodeOffsets[i]!;
-			const { node, start: nodeStart } = entry;
-			const nodeEnd = nodeStart + node.length;
-
-			// Skip nodes entirely outside the match
-			if (nodeEnd <= matchStart || nodeStart >= matchEnd) continue;
-
-			const overlapStart = Math.max(matchStart, nodeStart) - nodeStart;
-			const overlapEnd = Math.min(matchEnd, nodeEnd) - nodeStart;
-
-			// Split the text node to isolate the matched portion
-			let targetNode = node;
-			if (overlapEnd < targetNode.length) {
-				targetNode.splitText(overlapEnd);
-			}
-			if (overlapStart > 0) {
-				targetNode = targetNode.splitText(overlapStart);
-			}
-
-			const mark = document.createElement("mark");
-			mark.className = "notor-find-highlight";
-			targetNode.parentNode!.insertBefore(mark, targetNode);
-			mark.appendChild(targetNode);
-			marks.unshift(mark);
-		}
-
-		return marks;
-	}
-
 	// -- Highlight cleanup ------------------------------------------------------
 
 	private clearHighlights(): void {
-		const parents = new Set<Node>();
-		for (const mark of this.highlightMarks) {
-			const parent = mark.parentNode;
-			if (parent) {
-				while (mark.firstChild) {
-					parent.insertBefore(mark.firstChild, mark);
-				}
-				parent.removeChild(mark);
-				parents.add(parent);
-			}
-		}
-		for (const parent of parents) {
-			parent.normalize();
-		}
+		unwrapMarks(this.highlightMarks);
 		this.highlightMarks = [];
 		this.currentIndex = -1;
 	}
