@@ -47,11 +47,15 @@ export interface ConversationModelResolution {
 }
 
 /**
- * Resolve the model configuration for an existing conversation using a
- * three-level fallback chain:
- *   1. Trust the stored preset name (use its CURRENT resolution)
- *   2. Fall back to stored provider/model if the preset is unavailable
- *   3. Fall back to the user's default preset if stored provider is inaccessible
+ * Resolve the model configuration for an existing conversation. The JSONL
+ * header is the authority, so the stored values win:
+ *   1. Stored provider/model/extended/thinking when the provider is still
+ *      accessible. `preset_name` is carried through as a label only — later
+ *      edits to the preset's definition never change a conversation's model.
+ *   2. The stored preset's CURRENT definition, only if the stored provider
+ *      is gone (or the header has no model)
+ *   3. The user's default preset
+ *   4. Any configured preset
  *
  * Returns null only if no resolution is possible (no configured presets at all).
  */
@@ -61,7 +65,19 @@ export function resolveConversationModel(
 	defaultPresetName: string,
 	isProviderAccessible: (providerId: string) => boolean,
 ): ConversationModelResolution | null {
-	// Step 1: Trust the preset name if it still exists and is configured
+	// Step 1: The stored selection, when its provider is still accessible.
+	if (conversation.model_id && isProviderAccessible(conversation.provider_id)) {
+		return {
+			presetName: conversation.preset_name ?? null,
+			providerId: conversation.provider_id,
+			modelId: conversation.model_id,
+			useExtendedContext: conversation.use_extended_context ?? false,
+			thinkingLevel: conversation.thinking_level ?? null,
+			source: "stored",
+		};
+	}
+
+	// Step 2: The stored preset's current definition (stored provider gone).
 	if (conversation.preset_name) {
 		const resolved = resolvePreset(conversation.preset_name, presets);
 		if (resolved) {
@@ -74,20 +90,6 @@ export function resolveConversationModel(
 				source: "preset",
 			};
 		}
-	}
-
-	// Step 2: Fall back to stored provider/model if provider is still accessible.
-	// Carry the conversation's persisted thinking_level so reopening a preset-less
-	// conversation preserves its thinking level instead of silently zeroing it.
-	if (isProviderAccessible(conversation.provider_id)) {
-		return {
-			presetName: null,
-			providerId: conversation.provider_id,
-			modelId: conversation.model_id,
-			useExtendedContext: conversation.use_extended_context ?? false,
-			thinkingLevel: conversation.thinking_level ?? null,
-			source: "stored",
-		};
 	}
 
 	// Step 3: Fall back to the user's default preset

@@ -13,6 +13,7 @@ import { Notice } from "obsidian";
 import type { Conversation, Persona } from "../types";
 import { buildOptionValue } from "../providers/model-grouping";
 import { resolveConversationModel, resolvePreset } from "../presets/preset-resolver";
+import { writeSelection } from "./model-selection";
 import type { ConversationManager, ForkMode } from "./conversation";
 import { HistoryManager } from "./history";
 import { conversationFilename } from "./history";
@@ -333,7 +334,9 @@ export class ConversationLifecycleManager {
 			// Display-restore the active-workflow chip from the conversation header
 			view?.updateWorkflowLabel(conversation);
 
-			// Resolve model configuration via preset-first fallback chain
+			// Resolve model configuration — the stored header is the authority
+			const storedPresetName = conversation.preset_name ?? null;
+			const storedProviderId = conversation.provider_id;
 			const resolution = resolveConversationModel(
 				conversation,
 				this.getSettings().model_presets,
@@ -356,20 +359,26 @@ export class ConversationLifecycleManager {
 				this.setActiveUseExtendedContext(resolution.useExtendedContext);
 				this.setActiveThinkingLevel(resolution.thinkingLevel);
 
-				// Update in-memory conversation so handleUserMessage() pins correctly
+				// The stored selection was unusable (provider gone): persist the
+				// fallback to the display copy (what the next turn reads) and JSONL.
 				if (resolution.source !== "stored") {
-					conversation.provider_id = resolution.providerId;
-					conversation.model_id = resolution.modelId;
-					conversation.use_extended_context = resolution.useExtendedContext;
-					conversation.thinking_level = resolution.thinkingLevel;
-					if (resolution.source === "default") {
-						conversation.preset_name = resolution.presetName;
-					}
-					await this.historyManager.updateConversationHeader(conversation);
+					const fallback = {
+						providerId: resolution.providerId,
+						modelId: resolution.modelId,
+						useExtendedContext: resolution.useExtendedContext,
+						thinkingLevel: resolution.thinkingLevel,
+						presetName: resolution.presetName,
+					};
+					writeSelection(conversation, fallback);
+					const displayConv = convManager.getActiveConversation();
+					if (displayConv && displayConv !== conversation) writeSelection(displayConv, fallback);
+					await this.historyManager.updateConversationHeader(displayConv ?? conversation);
 				}
 
 				if (resolution.source === "default") {
-					new Notice(`Preset "${conversation.preset_name}" unavailable. Using default preset.`);
+					new Notice(storedPresetName
+						? `Preset "${storedPresetName}" unavailable. Using default preset "${resolution.presetName}".`
+						: `Provider "${storedProviderId}" unavailable. Using default preset "${resolution.presetName}".`);
 				}
 			} else {
 				view?.updatePresetDisplay(null);

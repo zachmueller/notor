@@ -11,12 +11,14 @@ const allAccessible = () => true;
 
 describe("resolveConversationModel", () => {
 	describe("preset source", () => {
-		it("resolves a stored preset name to its current definition (incl. thinking level)", () => {
+		// The preset's current definition is only used when the stored provider
+		// is gone — never to override what the header recorded.
+		it("falls back to the stored preset's current definition when the stored provider is gone", () => {
 			const res = resolveConversationModel(
-				{ preset_name: "large", provider_id: "bedrock", model_id: "stale-model", use_extended_context: false },
+				{ preset_name: "large", provider_id: "removed-provider", model_id: "stale-model", use_extended_context: false },
 				presets,
 				"small",
-				allAccessible,
+				(pid) => pid === "bedrock",
 			);
 			expect(res).toEqual({
 				presetName: "large",
@@ -27,9 +29,40 @@ describe("resolveConversationModel", () => {
 				source: "preset",
 			});
 		});
+
+		it("falls back to the preset when the header has no model id", () => {
+			const res = resolveConversationModel(
+				{ preset_name: "small", provider_id: "bedrock", model_id: "" },
+				presets,
+				"large",
+				allAccessible,
+			);
+			expect(res).toMatchObject({ presetName: "small", source: "preset" });
+		});
 	});
 
 	describe("stored source", () => {
+		// Regression (Quick Settings robustness): the JSONL header is the
+		// authority. A preset whose definition drifted after the conversation
+		// was saved — or a manual thinking tweak made under a preset — must not
+		// change the model on reopen/next turn. The preset name is kept as a label.
+		it("prefers the stored values over the preset's current definition and keeps the preset label", () => {
+			const res = resolveConversationModel(
+				{ preset_name: "large", provider_id: "bedrock", model_id: "stale-model", use_extended_context: false, thinking_level: "low" },
+				presets,
+				"small",
+				allAccessible,
+			);
+			expect(res).toEqual({
+				presetName: "large",
+				providerId: "bedrock",
+				modelId: "stale-model",
+				useExtendedContext: false,
+				thinkingLevel: "low",
+				source: "stored",
+			});
+		});
+
 		// Regression: reopening a preset-less conversation must PRESERVE its
 		// persisted thinking_level, not zero it (the old branch hardcoded null).
 		it("carries the conversation's persisted thinking_level", () => {
