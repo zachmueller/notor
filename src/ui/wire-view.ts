@@ -186,6 +186,11 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		await orchestrator.handleUserMessage(content, attachments);
 	});
 
+	// Retry the turn that failed with the trailing (retryable) error
+	view.setOnRetryLastTurn(async () => {
+		await orchestrator.retryLastTurn();
+	});
+
 	// Stop response
 	view.setOnStopResponse(() => {
 		const displayedConvId = orchestrator.getConversationManager().getActiveConversation()?.id;

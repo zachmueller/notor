@@ -236,6 +236,7 @@ export class NotorChatView extends ItemView {
 	// Fork callbacks
 	private onForkConversation?: (messageId: string) => Promise<void>;
 	private onForkConversationRerun?: (messageId: string) => Promise<void>;
+	private onRetryLastTurn?: () => Promise<void>;
 	private onForkToNewPanel?: (messageId: string | undefined, initialText?: string) => Promise<void>;
 
 	// Favorite callback
@@ -509,6 +510,10 @@ export class NotorChatView extends ItemView {
 
 	setOnForkConversationRerun(callback: (messageId: string) => Promise<void>): void {
 		this.onForkConversationRerun = callback;
+	}
+
+	setOnRetryLastTurn(callback: () => Promise<void>): void {
+		this.onRetryLastTurn = callback;
 	}
 
 	setOnForkToNewPanel(callback: (messageId: string | undefined, initialText?: string) => Promise<void>): void {
@@ -1053,6 +1058,7 @@ export class NotorChatView extends ItemView {
 			onOpenSettingsGroup: this.onOpenSettingsGroup,
 			// POL-003 / FR-179: the inline peek card's "Open run tree" affordance.
 			openRunTree: (root) => void this.plugin.openRunTreeView(root),
+			onRetryLastTurn: () => void this.onRetryLastTurn?.(),
 			onAssistantMessageRendered: (messageId, contentEl) => {
 				// History finalization is fire-and-forget: a fast conversation
 				// switch can finalize an element that was already cleared.
@@ -1184,6 +1190,7 @@ export class NotorChatView extends ItemView {
 		this.onGetCurrentContent = undefined;
 		this.onForkConversation = undefined;
 		this.onForkConversationRerun = undefined;
+		this.onRetryLastTurn = undefined;
 		this.onForkToNewPanel = undefined;
 		this.onOpenInNewTab = undefined;
 		this.onOpenSettingsGroup = undefined;
@@ -1883,8 +1890,8 @@ export class NotorChatView extends ItemView {
 		this.messageRenderer.showTruncationWarning(truncatedCount);
 	}
 
-	showError(error: string): void {
-		this.messageRenderer.showError(error);
+	showError(error: string, opts?: { retryable?: boolean }): void {
+		this.messageRenderer.showError(error, opts);
 	}
 
 	private openInternalLink(href: string): void {

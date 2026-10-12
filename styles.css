@@ -1760,6 +1760,16 @@
 	color: var(--color-red, #c0392b);
 }
 
+.notor-chat-error-retry {
+	margin-left: 8px;
+	font-size: var(--font-ui-smaller);
+}
+
+/* Only the conversation's trailing error offers Retry. */
+.notor-chat-error:not(:last-child) .notor-chat-error-retry {
+	display: none;
+}
+
 /* Transient "Connection lost — retrying (2/6) in 4s…" line shown while a
    failed turn is retried automatically. */
 .notor-chat-retry-status {

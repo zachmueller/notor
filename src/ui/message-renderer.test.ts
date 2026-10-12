@@ -370,3 +370,60 @@ describe("MessageRenderer — thinking indicator", () => {
 		expect(contentEl.querySelector(".notor-thinking-content")?.textContent).toBe("abcdefgh");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Network retry: error Retry button, interrupted placeholder, status line
+// ---------------------------------------------------------------------------
+
+describe("MessageRenderer — network retry affordances", () => {
+	function rendererWithRetry(onRetryLastTurn: () => void): MessageRenderer {
+		return new MessageRenderer({
+			getMessageListEl: () => listEl,
+			getTokenFooterEl: () => document.createElement("div"),
+			scrollToBottom: () => {},
+			onRetryLastTurn,
+		} as unknown as MessageRendererDeps);
+	}
+
+	it("adds a Retry button only to retryable errors and removes it on click", () => {
+		let retried = 0;
+		const r = rendererWithRetry(() => retried++);
+		r.showError("Request failed");
+		expect(listEl.querySelector(".notor-chat-error-retry")).toBeNull();
+
+		r.showError("Network connection lost", { retryable: true });
+		const btn = listEl.querySelector<HTMLButtonElement>(".notor-chat-error-retry");
+		expect(btn?.textContent).toBe("Retry");
+		btn!.click();
+		expect(retried).toBe(1);
+		expect(listEl.querySelector(".notor-chat-error-retry")).toBeNull();
+	});
+
+	it("omits the Retry button when no retry handler is wired", () => {
+		renderer.showError("Network connection lost", { retryable: true });
+		expect(listEl.querySelector(".notor-chat-error-retry")).toBeNull();
+	});
+
+	it("marks, detects and removes interrupted placeholders", () => {
+		const empty = renderer.createAssistantMessagePlaceholder();
+		expect(renderer.hasStreamedContent(empty)).toBe(false);
+		renderer.removeAssistantPlaceholder(empty);
+		expect(listEl.querySelector(".notor-message-assistant")).toBeNull();
+
+		const partial = renderer.createAssistantMessagePlaceholder();
+		partial.setAttribute("data-raw", "partial text");
+		expect(renderer.hasStreamedContent(partial)).toBe(true);
+		renderer.markAssistantInterrupted(partial);
+		expect(partial.parentElement?.classList.contains("notor-message-interrupted")).toBe(true);
+	});
+
+	it("shows, updates and clears a single retry status line", () => {
+		renderer.showRetryStatus("Connection lost — retrying (1/6) in 1s…");
+		renderer.showRetryStatus("Connection lost — retrying (1/6) in 0s…");
+		const lines = listEl.querySelectorAll(".notor-chat-retry-status");
+		expect(lines).toHaveLength(1);
+		expect(lines[0]!.textContent).toBe("Connection lost — retrying (1/6) in 0s…");
+		renderer.showRetryStatus(null);
+		expect(listEl.querySelector(".notor-chat-retry-status")).toBeNull();
+	});
+});

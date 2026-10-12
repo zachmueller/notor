@@ -782,6 +782,35 @@ export class ChatOrchestrator implements ToolSessionContext {
 		});
 	}
 
+	/**
+	 * Re-run the turn that failed with the conversation's trailing error
+	 * (the error block's Retry button). Re-sends the current message list
+	 * without adding a user message; error records are never replayed to
+	 * the LLM, so no history surgery is needed. No-ops with a Notice when
+	 * the conversation isn't waiting on an assistant reply.
+	 */
+	async retryLastTurn(): Promise<void> {
+		const conv = this.conversationManager.getActiveConversation();
+		if (!conv) return;
+
+		const blocked = this.sessionManager.checkSessionGuards(conv.id);
+		if (blocked) {
+			new Notice(blocked);
+			return;
+		}
+
+		const messages = this.conversationManager.getMessages();
+		const last = [...messages].reverse().find((m) => m.role !== "error");
+		if (!last || (last.role !== "user" && last.role !== "tool_result")) {
+			new Notice("Nothing to retry");
+			return;
+		}
+
+		const mode = this.conversationManager.getMode();
+		const session = await this.createSessionFromDisplay(mode);
+		await this.runSession(session, mode);
+	}
+
 	async switchConversation(filename: string, opts?: { signal?: AbortSignal }): Promise<void> {
 		return this.lifecycle.switchConversation(filename, opts);
 	}
@@ -1637,7 +1666,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 						this.providerTypeOf(sel.providerId),
 						result.retries,
 					);
-					this.getViewForSession(session)?.showError(errStr + overflowSuggestion + transientSuggestion);
+					this.getViewForSession(session)?.showError(errStr + overflowSuggestion + transientSuggestion, { retryable });
 				}
 			}
 		} finally {
@@ -2061,7 +2090,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					suggestion = "";
 			}
 
-			this.view?.showError(`${e.message}${suggestion}`);
+			this.view?.showError(`${e.message}${suggestion}`, { retryable: isRetryableError(e) });
 			log.error("Provider error", {
 				provider: e.provider,
 				code: e.code,
@@ -2074,7 +2103,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			const hint = isRetryableError(e)
 				? transientFailureSuggestion("CONNECTION_FAILED", undefined, retriesAttemptedOf(e))
 				: "";
-			this.view?.showError(`An error occurred: ${message}${hint}`);
+			this.view?.showError(`An error occurred: ${message}${hint}`, { retryable: hint !== "" });
 			log.error("Unexpected error in chat loop", { error: message });
 		}
 	}

@@ -78,6 +78,7 @@ export class ViewRouter {
 			case "error":
 				this.view?.showError(
 					typeof message.content === "string" ? message.content : "Provider error",
+					{ retryable: message.error?.retryable === true },
 				);
 				break;
 			default:

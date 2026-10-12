@@ -154,6 +154,12 @@ export interface MessageRendererDeps {
 	 * fires — handlers must check `contentEl.isConnected`.
 	 */
 	onAssistantMessageRendered?: (messageId: string, contentEl: HTMLElement) => void;
+	/**
+	 * Re-run the turn that failed with the trailing error (the Retry button
+	 * on retryable error blocks). Optional — when unwired the button is
+	 * omitted.
+	 */
+	onRetryLastTurn?: () => void;
 }
 
 export class MessageRenderer {
@@ -925,10 +931,23 @@ export class MessageRenderer {
 		this.deps.scrollToBottom();
 	}
 
-	showError(error: string): void {
+	/**
+	 * Render an error block. Retryable errors (transient network/server
+	 * failures) get a Retry button; CSS hides it once anything renders
+	 * after the block, so only the conversation's trailing error offers it.
+	 */
+	showError(error: string, opts?: { retryable?: boolean }): void {
 		const messageListEl = this.deps.getMessageListEl();
 		const errorEl = messageListEl.createDiv({ cls: "notor-chat-error" });
-		errorEl.textContent = `⚠ ${error}`;
+		errorEl.createSpan({ text: `⚠ ${error}` });
+		const onRetry = this.deps.onRetryLastTurn;
+		if (opts?.retryable && onRetry) {
+			const btn = errorEl.createEl("button", { text: "Retry", cls: "notor-chat-error-retry" });
+			btn.addEventListener("click", () => {
+				btn.remove();
+				onRetry();
+			});
+		}
 		this.deps.scrollToBottom();
 	}
 
