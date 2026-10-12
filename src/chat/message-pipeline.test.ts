@@ -474,7 +474,7 @@ describe("processStream — thinking indicator", () => {
 		expect(view.startThinkingIndicator).toHaveBeenCalledTimes(1);
 		expect(view.startThinkingIndicator).toHaveBeenCalledWith(contentEl);
 		expect(view.stopThinkingIndicator).toHaveBeenCalledTimes(1);
-		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 3_000);
+		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 3_000, 0);
 		expect(result.type).toBe("text");
 		if (result.type === "text") {
 			expect(result.thinkingDurationMs).toBe(3_000);
@@ -522,7 +522,7 @@ describe("processStream — thinking indicator", () => {
 
 		// stopThinking fires once after the loop ends.
 		expect(view.stopThinkingIndicator).toHaveBeenCalledTimes(1);
-		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 2_000);
+		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 2_000, 0);
 		expect(result.type).toBe("text");
 		if (result.type === "text") {
 			expect(result.thinking).toBe("");
@@ -571,6 +571,66 @@ describe("processStream — thinking indicator", () => {
 		}
 	});
 
+	// --- estimated reasoning-token count ------------------------------------
+
+	it("counts estimated tokens on the cumulative thinking text and passes them to the view", async () => {
+		vi.spyOn(Date, "now").mockReturnValue(1_000);
+		const { view, contentEl } = makeFakeView();
+
+		const result = await processStream(
+			streamOf([
+				{ type: "thinking_delta", text: "abcdef" }, // 6 chars → 2
+				{ type: "thinking_delta", text: "ghij" }, // 10 chars → 3 (not 2 + 1)
+				{ type: "thinking_delta", text: "klmnopqrstuvwxyz" }, // 26 chars → 7
+				{ type: "text_delta", text: "answer" },
+				{ type: "message_end", input_tokens: 1, output_tokens: 1 },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+		);
+
+		expect(view.appendThinkingChunk.mock.calls.map((c) => c[2])).toEqual([2, 3, 7]);
+		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 0, 7);
+		expect(result.type).toBe("text");
+		if (result.type === "text") expect(result.thinkingTokens).toBe(7);
+	});
+
+	it("reports zero tokens for signature-only (hidden) thinking", async () => {
+		vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(2_000);
+		const { view, contentEl } = makeFakeView();
+
+		const result = await processStream(
+			streamOf([
+				{ type: "thinking_start" },
+				{ type: "text_delta", text: "answer" },
+				{ type: "message_end", input_tokens: 1, output_tokens: 1 },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+		);
+
+		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 1_000, 0);
+		if (result.type === "text") expect(result.thinkingTokens).toBe(0);
+	});
+
+	it("starts each processStream call from a zero token count", async () => {
+		vi.spyOn(Date, "now").mockReturnValue(1_000);
+		const run = () => processStream(
+			streamOf([
+				{ type: "thinking_delta", text: "abcdefgh" },
+				{ type: "message_end", input_tokens: 1, output_tokens: 1 },
+			]),
+			new AbortController(),
+		);
+
+		const first = await run();
+		const second = await run();
+		if (first.type === "text") expect(first.thinkingTokens).toBe(2);
+		if (second.type === "text") expect(second.thinkingTokens).toBe(2);
+	});
+
 	// --- optimistic-start (pre-first-token) behavior -----------------------
 
 	it("optimistically starts the indicator when thinking is enabled, before any event", async () => {
@@ -595,7 +655,7 @@ describe("processStream — thinking indicator", () => {
 		expect(view.stopThinkingIndicator).toHaveBeenCalledTimes(1);
 		expect(view.cancelThinkingIndicator).not.toHaveBeenCalled();
 		// Duration spans the full optimistic window (request → first token), ~7s.
-		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 7_000);
+		expect(view.stopThinkingIndicator).toHaveBeenCalledWith(contentEl, 7_000, 0);
 		if (result.type === "text") expect(result.thinkingDurationMs).toBe(7_000);
 	});
 

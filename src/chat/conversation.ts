@@ -441,6 +441,7 @@ export class ConversationManager {
 		cost_estimate?: number | null;
 		thinking?: string | null;
 		thinking_duration_ms?: number | null;
+		thinking_tokens?: number | null;
 		tool_call?: ToolCall | null;
 		tool_result?: ToolResult | null;
 		/** Provider/turn error diagnostics (error role only). */
@@ -476,6 +477,7 @@ export class ConversationManager {
 			cost_estimate: params.cost_estimate ?? null,
 			thinking: params.thinking ?? null,
 			thinking_duration_ms: params.thinking_duration_ms ?? null,
+			thinking_tokens: params.thinking_tokens ?? null,
 			// Clone tool_call so the persisted message is decoupled from the
 			// caller's object. The dispatcher passes the same `parameters` object to
 			// both the approval UI and tool.execute, and the approval UI mutates it

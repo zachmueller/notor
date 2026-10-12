@@ -21,6 +21,7 @@ import type { ToolCallInfo } from "./tool-orchestration";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings, ModelPricing } from "../settings";
 import { logger } from "../utils/logger";
+import { estimateTokenCount } from "../utils/tokens";
 
 const log = logger("MessagePipeline");
 
@@ -74,9 +75,9 @@ export function getWireText(
 
 /** Result type for stream processing. */
 export type StreamResult =
-	| { type: "text"; text: string; thinking: string; thinkingDurationMs: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; thinking: string; thinkingDurationMs: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "cancelled"; text: string; thinking: string; thinkingDurationMs: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "text"; text: string; thinking: string; thinkingDurationMs: number; thinkingTokens: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; thinking: string; thinkingDurationMs: number; thinkingTokens: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "cancelled"; text: string; thinking: string; thinkingDurationMs: number; thinkingTokens: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "error"; error: string; details?: ProviderErrorDetails; text: string; inputTokens: number; outputTokens: number };
 
 /**
@@ -104,9 +105,9 @@ export async function processStream(
 
 	const resolveView = viewResolver ?? (() => undefined);
 
-	// Thinking timer state. The pipeline owns the authoritative elapsed time
-	// (Date.now() deltas survive mid-stream view navigation); the renderer's
-	// interval is purely cosmetic.
+	// Thinking state. The pipeline owns the authoritative elapsed time
+	// (Date.now() deltas survive mid-stream view navigation) and the estimated
+	// reasoning-token count the live indicator displays.
 	//
 	// Detection is optimistic-then-confirmed: when thinking is enabled for the
 	// turn we start the indicator immediately (the model reasons server-side
@@ -119,6 +120,7 @@ export async function processStream(
 	let thinkingDurationMs = 0;
 	let thinkingConfirmed = false;
 	let thinkingStopped = false;
+	let thinkingTokens = 0;
 
 	const startThinking = () => {
 		if (thinkingStartTime !== null) return; // already running (optimistic or confirmed)
@@ -134,7 +136,7 @@ export async function processStream(
 		const view = resolveView();
 		if (thinkingConfirmed) {
 			thinkingDurationMs = Date.now() - thinkingStartTime;
-			if (contentEl) view?.stopThinkingIndicator(contentEl, thinkingDurationMs);
+			if (contentEl) view?.stopThinkingIndicator(contentEl, thinkingDurationMs, thinkingTokens);
 		} else {
 			// Optimistically started but never confirmed — the model didn't think.
 			// Retract the indicator entirely and record no duration.
@@ -164,9 +166,12 @@ export async function processStream(
 				thinkingConfirmed = true;
 				startThinking();
 				thinkingContent += event.delta;
+				// Estimate on the cumulative text so per-delta ceil() rounding
+				// doesn't drift the count.
+				thinkingTokens = estimateTokenCount(thinkingContent);
 				const view = resolveView();
 				if (contentEl) {
-					view?.appendThinkingChunk(contentEl, event.delta);
+					view?.appendThinkingChunk(contentEl, event.delta, thinkingTokens);
 				}
 				break;
 			}
@@ -236,6 +241,7 @@ export async function processStream(
 					text: event.text,
 					thinking: thinkingContent,
 					thinkingDurationMs,
+					thinkingTokens,
 					inputTokens,
 					outputTokens,
 					contentEl,
@@ -255,6 +261,7 @@ export async function processStream(
 			text: textContent,
 			thinking: thinkingContent,
 			thinkingDurationMs,
+			thinkingTokens,
 			inputTokens,
 			outputTokens,
 			contentEl,
@@ -266,6 +273,7 @@ export async function processStream(
 		text: textContent,
 		thinking: thinkingContent,
 		thinkingDurationMs,
+		thinkingTokens,
 		inputTokens,
 		outputTokens,
 		contentEl,

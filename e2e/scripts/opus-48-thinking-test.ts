@@ -21,16 +21,15 @@
  * is covered by unit tests in src/providers/thinking-config.test.ts — it is not
  * inspectable from the renderer. This test verifies the live behavior instead.
  *
- * Observed: in adaptive mode Opus 4.8 returns its reasoning as a *signed
- * (encrypted) reasoningContent block* with no plaintext text deltas, so no
- * thinking block renders in the UI even though the model genuinely reasoned.
- * That is why Test 2 asserts a substantive answer rather than a rendered
- * thinking block. (Opus 4.6 returns plaintext reasoning, which does render.)
+ * Adaptive thinking defaults to `display: "omitted"` on Opus 4.7+ (a signed
+ * reasoningContent block with no plaintext), so Notor requests
+ * `display: "summarized"`. Test 1b asserts that summarized reasoning text now
+ * actually renders for Opus 4.8 and that the finalized summary carries a token
+ * count. (Opus 4.6 streams plaintext reasoning via enabled+budget.)
  *
- * Thinking indicator: Test 1 observes the live "Thinking Ns" indicator
- * concurrently with the send, but only logs it (the signed-reasoning case above
- * may emit no wire boundary on Bedrock). Test 4 deterministically asserts the
- * Opus 4.6 thinking block's summary finalizes to "Thought for Ns".
+ * Thinking indicator: Test 1 observes the live "Thinking" / "Thinking ~N tokens"
+ * indicator concurrently with the send. Test 4 deterministically asserts the
+ * Opus 4.6 thinking block's summary finalizes to "Thought for Ns · ~N tokens".
  *
  * @see src/providers/thinking-config.ts — resolveAnthropicThinking
  * @see src/providers/bedrock-provider.ts — output_config injection
@@ -72,7 +71,7 @@ const THINKING_ACTIVE_SELECTOR = ".notor-thinking-active";
 const THINKING_SUMMARY_SELECTOR = ".notor-thinking-block > summary";
 
 // Live thinking-indicator summary observed during Test 1's in-flight send
-// (e.g. "Thinking 4s"), asserted by testOpus48LiveThinkingIndicator. null if
+// (e.g. "Thinking ~120 tokens"), asserted by testOpus48LiveThinkingIndicator. null if
 // the indicator never appeared.
 let observedLiveThinking: string | null = null;
 
@@ -87,7 +86,7 @@ async function getChatErrorTexts(ctx: TestContext): Promise<string[]> {
  * Poll for the live "thinking" indicator (`.notor-thinking-active`) for up to
  * `timeoutMs`. Used concurrently with an in-flight send to catch the transient
  * active state before the response finalizes. Returns the summary text seen
- * while active (e.g. "Thinking 2s"), or null if never observed.
+ * while active (e.g. "Thinking" or "Thinking ~40 tokens"), or null if never observed.
  */
 async function pollForActiveThinking(
 	ctx: TestContext,
@@ -188,9 +187,9 @@ async function testOpus48NoRejectionError(ctx: TestContext): Promise<void> {
 	// Observe the live thinking indicator concurrently with the in-flight send —
 	// the active state is transient and gone by the time the response finalizes.
 	// The indicator is started optimistically when thinking is enabled, so it
-	// must appear during the (multi-second) pre-first-token window even though
-	// Bedrock's adaptive Opus 4.8 reasoning is signed/encrypted with no
-	// streamed text. See src/chat/message-pipeline.ts (optimistic start).
+	// must appear during the (multi-second) pre-first-token window, before any
+	// summarized reasoning text streams. See src/chat/message-pipeline.ts
+	// (optimistic start).
 	const livePromise = pollForActiveThinking(ctx, 30_000);
 	const responded = await sendMessage(page, prompt);
 	const liveSummary = await livePromise;
@@ -246,9 +245,9 @@ async function testOpus48LiveThinkingIndicator(ctx: TestContext): Promise<void> 
 	const { page } = ctx;
 
 	// Uses the observation captured during Test 1's send. The indicator is
-	// started optimistically when thinking is enabled, so it must show even
-	// though Opus 4.8 adaptive reasoning is signed (no streamed thinking text)
-	// and arrives only as a single wire signal ~2ms before the answer.
+	// started optimistically when thinking is enabled, so it must show during
+	// the pre-first-token window (plain "Thinking") or, once summarized
+	// reasoning streams, as a running token count.
 	if (observedLiveThinking === null) {
 		ctx.fail(
 			"Opus 4.8 live thinking indicator",
@@ -257,26 +256,38 @@ async function testOpus48LiveThinkingIndicator(ctx: TestContext): Promise<void> 
 		return;
 	}
 
-	if (!/^Thinking \d+s$/.test(observedLiveThinking)) {
+	if (!/^Thinking( ~[\d.]+k? tokens?)?$/.test(observedLiveThinking)) {
 		ctx.fail(
 			"Opus 4.8 live thinking indicator",
-			`Indicator appeared but summary was not a live timer: "${observedLiveThinking}"`,
+			`Indicator appeared but summary was not a live token counter: "${observedLiveThinking}"`,
 		);
 		return;
 	}
 
-	// After the response finalized (Test 1 awaited it), the signed-reasoning
-	// signal confirmed thinking, so the indicator must leave a persisted
-	// "Thought for Ns" trace even though no reasoning text was rendered.
+	// After the response finalized (Test 1 awaited it), display:"summarized"
+	// must have streamed reasoning text, so the summary carries a token count.
 	const finalizedSummary = (await page.evaluate((sel: string) => {
 		const el = document.querySelector(".notor-message-assistant:last-child " + sel);
 		return el ? (el.textContent ?? "").trim() : null;
 	}, THINKING_SUMMARY_SELECTOR)) ?? "";
 
-	if (!/^Thought for \d+m?\s?\d*s?$/.test(finalizedSummary)) {
+	if (!/^Thought for \d+m?\s?\d*s? · ~[\d.]+k? tokens?$/.test(finalizedSummary)) {
 		ctx.fail(
 			"Opus 4.8 live thinking indicator",
-			`Live indicator shown ("${observedLiveThinking}") but did not finalize to "Thought for Ns" (got "${finalizedSummary}")`,
+			`Live indicator shown ("${observedLiveThinking}") but did not finalize to "Thought for Ns · ~N tokens" (got "${finalizedSummary}")`,
+		);
+		return;
+	}
+
+	// Summarized reasoning must actually render in the expandable body.
+	const thinkingText = (await page.evaluate(() => {
+		const el = document.querySelector(".notor-message-assistant:last-child .notor-thinking-content");
+		return el ? (el.textContent ?? "").trim() : "";
+	}));
+	if (thinkingText.length === 0) {
+		ctx.fail(
+			"Opus 4.8 live thinking indicator",
+			"Thinking block body is empty — display:\"summarized\" reasoning text did not render",
 		);
 		return;
 	}
@@ -295,10 +306,8 @@ async function testOpus48ProducesSubstantiveAnswer(ctx: TestContext): Promise<vo
 	// answer proves the adaptive+effort request was accepted AND fully processed —
 	// i.e. the model actually did the reasoning work, not just opened a stream.
 	//
-	// In adaptive mode Opus 4.8 returns its reasoning as a signed (encrypted)
-	// reasoningContent block with no plaintext text deltas — so no reasoning
-	// *text* renders, but the thinking *indicator* (live timer → "Thought for Ns")
-	// is covered by Test 1b. This test focuses on answer substance.
+	// The thinking indicator and summarized reasoning text are covered by
+	// Test 1b. This test focuses on answer substance.
 	const answer = (await page.evaluate(() => {
 		const msgs = document.querySelectorAll(
 			".notor-message-assistant .notor-message-content",
@@ -426,17 +435,18 @@ async function testOpus46Regression(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// The response has finalized, so the summary should read "Thought for Ns"
-	// (driven by the persisted thinking_duration_ms) rather than the live timer.
+	// The response has finalized, so the summary should read "Thought for Ns ·
+	// ~N tokens" (persisted thinking_duration_ms / thinking_tokens) rather than
+	// the live counter.
 	const summaryText = (await page.evaluate((sel: string) => {
 		const el = document.querySelector(".notor-message-assistant:last-child " + sel);
 		return el ? (el.textContent ?? "").trim() : null;
 	}, THINKING_SUMMARY_SELECTOR)) ?? "";
 
-	if (!/^Thought for \d+m?\s?\d*s?$/.test(summaryText)) {
+	if (!/^Thought for \d+m?\s?\d*s? · ~[\d.]+k? tokens?$/.test(summaryText)) {
 		ctx.fail(
 			"Opus 4.6 regression",
-			`Thinking block summary did not finalize to "Thought for Ns" (got "${summaryText}")`,
+			`Thinking block summary did not finalize to "Thought for Ns · ~N tokens" (got "${summaryText}")`,
 			screenshot,
 		);
 		return;

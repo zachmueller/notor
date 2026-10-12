@@ -296,6 +296,11 @@ export interface Message {
 	thinking?: string | null;
 	/** Elapsed wall-clock time the model spent thinking, in ms (null if none). */
 	thinking_duration_ms?: number | null;
+	/**
+	 * Estimated tokens of streamed reasoning text (~4 chars/token; null if none).
+	 * Summarized thinking undercounts the reasoning actually billed.
+	 */
+	thinking_tokens?: number | null;
 	/** Tool call details (for tool_call role only). */
 	tool_call?: ToolCall | null;
 	/** Tool result details (for tool_result role only). */

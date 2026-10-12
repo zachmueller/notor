@@ -1742,16 +1742,16 @@ export class NotorChatView extends ItemView {
 		this.messageRenderer.appendStreamChunk(contentEl, text);
 	}
 
-	appendThinkingChunk(contentEl: HTMLElement, text: string): void {
-		this.messageRenderer.appendThinkingChunk(contentEl, text);
+	appendThinkingChunk(contentEl: HTMLElement, text: string, tokens: number): void {
+		this.messageRenderer.appendThinkingChunk(contentEl, text, tokens);
 	}
 
 	startThinkingIndicator(contentEl: HTMLElement): void {
 		this.messageRenderer.startThinkingIndicator(contentEl);
 	}
 
-	stopThinkingIndicator(contentEl: HTMLElement, durationMs: number): void {
-		this.messageRenderer.stopThinkingIndicator(contentEl, durationMs);
+	stopThinkingIndicator(contentEl: HTMLElement, durationMs: number, tokens: number): void {
+		this.messageRenderer.stopThinkingIndicator(contentEl, durationMs, tokens);
 	}
 
 	cancelThinkingIndicator(contentEl: HTMLElement): void {

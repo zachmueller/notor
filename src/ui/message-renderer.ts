@@ -46,6 +46,26 @@ function formatThinkingDuration(ms: number): string {
 	return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
+/** Format an estimated reasoning-token count (e.g. ~640, ~1.2k, ~12k). */
+function formatThinkingTokens(tokens: number): string {
+	if (tokens < 1000) return `~${tokens}`;
+	if (tokens < 10_000) return `~${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+	return `~${Math.round(tokens / 1000)}k`;
+}
+
+/**
+ * Thinking block summary text. Live: "Thinking" → "Thinking ~640 tokens".
+ * Done: "Thought for 8s · ~640 tokens", dropping the token part when no
+ * reasoning text streamed (hidden/redacted thinking).
+ */
+export function thinkingSummaryText(durationMs: number | null, tokens: number, done: boolean): string {
+	const tokenPart = tokens > 0 ? `${formatThinkingTokens(tokens)} ${tokens === 1 ? "token" : "tokens"}` : null;
+	if (!done) return tokenPart ? `Thinking ${tokenPart}` : "Thinking";
+	if (!durationMs) return "Thinking";
+	const durationPart = `Thought for ${formatThinkingDuration(durationMs)}`;
+	return tokenPart ? `${durationPart} · ${tokenPart}` : durationPart;
+}
+
 function extractAttachmentsBlock(content: string): { attachmentsXml: string | null; remainder: string } {
 	const ATTACHMENTS_RE = /<attachments>([\s\S]*?)<\/attachments>/;
 	const match = ATTACHMENTS_RE.exec(content);
@@ -146,8 +166,6 @@ export class MessageRenderer {
 	private renderedMessages = new Map<string, Message>();
 	private streamRenderTimer: ReturnType<typeof setTimeout> | null = null;
 	private pendingStreamRender: { contentEl: HTMLElement; raw: string } | null = null;
-	private thinkingTimer: ReturnType<typeof setInterval> | null = null;
-	private thinkingStartMs: number | null = null;
 
 	constructor(public deps: MessageRendererDeps) {}
 
@@ -236,29 +254,22 @@ export class MessageRenderer {
 		return detailsEl;
 	}
 
-	/** Set the thinking block's summary line ("Thinking 3s" / "Thought for 4s"). */
-	private updateThinkingSummary(detailsEl: HTMLElement, elapsedMs: number, done: boolean): void {
+	/** Set the thinking block's summary line ("Thinking ~640 tokens" / "Thought for 4s · ~640 tokens"). */
+	private updateThinkingSummary(detailsEl: HTMLElement, durationMs: number | null, tokens: number, done: boolean): void {
 		const summary = detailsEl.querySelector<HTMLElement>("summary");
 		if (!summary) return;
-		summary.textContent = done
-			? `Thought for ${formatThinkingDuration(elapsedMs)}`
-			: `Thinking ${Math.floor(elapsedMs / 1000)}s`;
+		summary.textContent = thinkingSummaryText(durationMs, tokens, done);
 	}
 
 	/**
-	 * Begin the live "thinking" indicator: a pulsing summary that counts up.
+	 * Begin the live "thinking" indicator: a pulsing summary whose estimated
+	 * token count ticks up as reasoning text streams in (see appendThinkingChunk).
 	 * Works whether or not reasoning text subsequently streams in.
 	 */
 	startThinkingIndicator(contentEl: HTMLElement): void {
 		const detailsEl = this.ensureThinkingBlock(contentEl);
 		detailsEl.addClass("notor-thinking-active");
-		this.thinkingStartMs = Date.now();
-		this.updateThinkingSummary(detailsEl, 0, false);
-		if (this.thinkingTimer) clearInterval(this.thinkingTimer);
-		this.thinkingTimer = setInterval(() => {
-			if (this.thinkingStartMs == null) return;
-			this.updateThinkingSummary(detailsEl, Date.now() - this.thinkingStartMs, false);
-		}, 1000);
+		this.updateThinkingSummary(detailsEl, null, 0, false);
 		this.deps.scrollToBottom();
 	}
 
@@ -268,11 +279,6 @@ export class MessageRenderer {
 	 * block entirely unless reasoning text actually arrived.
 	 */
 	cancelThinkingIndicator(contentEl: HTMLElement): void {
-		if (this.thinkingTimer) {
-			clearInterval(this.thinkingTimer);
-			this.thinkingTimer = null;
-		}
-		this.thinkingStartMs = null;
 		const detailsEl = contentEl.querySelector<HTMLElement>(".notor-thinking-block");
 		if (!detailsEl) return;
 		const body = detailsEl.querySelector<HTMLElement>(".notor-thinking-content");
@@ -284,17 +290,12 @@ export class MessageRenderer {
 		}
 	}
 
-	/** End the live indicator, freezing the summary at "Thought for Ns". */
-	stopThinkingIndicator(contentEl: HTMLElement, durationMs: number): void {
-		if (this.thinkingTimer) {
-			clearInterval(this.thinkingTimer);
-			this.thinkingTimer = null;
-		}
-		this.thinkingStartMs = null;
+	/** End the live indicator, freezing the summary at "Thought for Ns · ~N tokens". */
+	stopThinkingIndicator(contentEl: HTMLElement, durationMs: number, tokens: number): void {
 		const detailsEl = contentEl.querySelector<HTMLElement>(".notor-thinking-block");
 		if (!detailsEl) return;
 		detailsEl.removeClass("notor-thinking-active");
-		this.updateThinkingSummary(detailsEl, durationMs, true);
+		this.updateThinkingSummary(detailsEl, durationMs, tokens, true);
 		// Hidden thinking produces no body text; mark the block so it renders as a
 		// plain "Thought for Ns" trace rather than an empty expandable.
 		const body = detailsEl.querySelector<HTMLElement>(".notor-thinking-content");
@@ -303,7 +304,12 @@ export class MessageRenderer {
 		}
 	}
 
-	appendThinkingChunk(contentEl: HTMLElement, text: string): void {
+	/**
+	 * Append streamed reasoning text. `tokens` is the pipeline's running estimate
+	 * for the whole block; it only updates the summary while the indicator is
+	 * live, so a late delta can't overwrite a frozen "Thought for…" summary.
+	 */
+	appendThinkingChunk(contentEl: HTMLElement, text: string, tokens: number): void {
 		const detailsEl = this.ensureThinkingBlock(contentEl);
 		detailsEl.removeClass("notor-thinking-empty");
 		const thinkingContent = detailsEl.querySelector<HTMLElement>(".notor-thinking-content")!;
@@ -311,6 +317,9 @@ export class MessageRenderer {
 		const updated = existing + text;
 		thinkingContent.setAttribute("data-raw", updated);
 		thinkingContent.textContent = updated;
+		if (detailsEl.hasClass("notor-thinking-active")) {
+			this.updateThinkingSummary(detailsEl, null, tokens, false);
+		}
 		this.deps.scrollToBottom();
 	}
 
@@ -320,13 +329,6 @@ export class MessageRenderer {
 			this.streamRenderTimer = null;
 			this.pendingStreamRender = null;
 		}
-		// contentEl.empty() below destroys the live thinking node, so stop the
-		// interval first to avoid it writing to a detached element.
-		if (this.thinkingTimer) {
-			clearInterval(this.thinkingTimer);
-			this.thinkingTimer = null;
-		}
-		this.thinkingStartMs = null;
 		contentEl.parentElement!.dataset.messageId = message.id;
 		this.appendForkButton(contentEl.parentElement!, message);
 		contentEl.empty();
@@ -336,9 +338,7 @@ export class MessageRenderer {
 		if (message.thinking || message.thinking_duration_ms) {
 			const detailsEl = contentEl.createEl("details", { cls: "notor-thinking-block" });
 			detailsEl.createEl("summary", {
-				text: message.thinking_duration_ms
-					? `Thought for ${formatThinkingDuration(message.thinking_duration_ms)}`
-					: "Thinking",
+				text: thinkingSummaryText(message.thinking_duration_ms ?? null, message.thinking_tokens ?? 0, true),
 			});
 			const thinkingDiv = detailsEl.createEl("div", { cls: "notor-thinking-content" });
 			if (message.thinking) {
@@ -907,11 +907,6 @@ export class MessageRenderer {
 			this.streamRenderTimer = null;
 			this.pendingStreamRender = null;
 		}
-		if (this.thinkingTimer) {
-			clearInterval(this.thinkingTimer);
-			this.thinkingTimer = null;
-		}
-		this.thinkingStartMs = null;
 	}
 
 	hasMessageElement(messageId: string): boolean {

@@ -130,10 +130,11 @@ async function testThinkingSummaryLabel(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// The response has finalized, so the live "Thinking Ns" timer should now read
-	// "Thought for Ns" (driven by the persisted thinking_duration_ms).
+	// The response has finalized, so the live "Thinking ~N tokens" counter should
+	// now read "Thought for Ns · ~N tokens" (driven by the persisted
+	// thinking_duration_ms / thinking_tokens; the token part is omitted when 0).
 	const text = (await summary.textContent())?.trim() ?? "";
-	if (/^Thought for \d+m?\s?\d*s?$/.test(text)) {
+	if (/^Thought for \d+m?\s?\d*s?( · ~[\d.]+k? tokens?)?$/.test(text)) {
 		ctx.pass("Thinking summary label", `Summary text is '${text}'`);
 	} else {
 		ctx.fail("Thinking summary label", `Expected 'Thought for Ns' but got '${text}'`);
