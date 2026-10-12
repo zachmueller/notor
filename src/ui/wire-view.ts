@@ -749,7 +749,10 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 	// Wire interaction callback (follow-up questions). Unlike approval, this is
 	// never raced against a timeout or hook — it always awaits explicit input.
 	orchestrator.setInteractionCallback(async (request, abortSignal?, messageId?) => {
-		const session = orchestrator.getActiveSessions()[0];
+		// Requests that carry their conversation (plan-review) route to that
+		// session; others fall back to the first active session.
+		const session = (request.type === "plan-review" ? orchestrator.getActiveSession(request.conversationId) : undefined)
+			?? orchestrator.getActiveSessions()[0];
 
 		const toolCallEl = messageId
 			? view.getToolCallEl(messageId) ?? view.getLastToolCallEl()
@@ -766,10 +769,13 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		// OS-level desktop notification — the agent is asking a follow-up
 		// question and cannot proceed until the user answers.
 		const firstQuestion = request.type === "ask" ? request.questions[0]?.question : undefined;
+		const notificationBody = request.type === "plan-review"
+			? `Plan ready for review: ${request.title}`.slice(0, 100)
+			: firstQuestion ? firstQuestion.slice(0, 100) : "The assistant needs your input.";
 		showOsNotification(plugin.settings, {
 			kind: "input_required",
 			title: "Notor — Input needed",
-			body: firstQuestion ? firstQuestion.slice(0, 100) : "The assistant needs your input.",
+			body: notificationBody,
 			onClick: () => revealChatPanel(plugin.app, true),
 		});
 

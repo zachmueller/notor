@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeAll } from "vitest";
 import { renderInteractionPrompt, type InteractionRequest } from "./interaction-ui";
+import { PlanReviewController, setPlanReviewController } from "../plans/plan-review-controller";
 
 // ---------------------------------------------------------------------------
 // Minimal polyfill for Obsidian's HTMLElement DOM-builder extensions.
@@ -587,5 +588,67 @@ describe("renderInteractionPrompt — ask (multi-select)", () => {
 		input.dispatchEvent(new Event("input"));
 		expect(input.classList.contains("notor-interaction-input--active")).toBe(false);
 		expect(input.classList.contains("notor-interaction-input--inactive")).toBe(false);
+	});
+});
+
+describe("renderInteractionPrompt — plan-review", () => {
+	function setup() {
+		const controller = new PlanReviewController();
+		setPlanReviewController(controller);
+		const opened: string[] = [];
+		controller.setPlanOpener((id) => opened.push(id));
+		const card = makeCard();
+		const request: InteractionRequest = { type: "plan-review", id: "r1", conversationId: "conv1", title: "Tidy notes" };
+		return { controller, opened, card, request };
+	}
+
+	it("renders the review card and registers a pending review", () => {
+		const { controller, card, request } = setup();
+		void renderInteractionPrompt(card, request);
+		expect(card.querySelector(".notor-plan-review-title")?.textContent).toBe("Plan ready for review: Tidy notes");
+		const labels = Array.from(card.querySelectorAll(".notor-plan-review-actions button")).map((b) => b.textContent);
+		expect(labels).toEqual(["Open plan", "Reject", "Approve", "Approve & auto-accept edits"]);
+		expect(controller.hasPending("conv1")).toBe(true);
+	});
+
+	it.each([
+		[".notor-plan-review-approve", { kind: "approve" }],
+		[".notor-plan-review-approve-auto", { kind: "approve-auto-accept" }],
+		[".notor-plan-review-reject", { kind: "reject" }],
+	])("clicking %s resolves with the outcome and cleans up", async (selector, outcome) => {
+		const { controller, card, request } = setup();
+		const p = renderInteractionPrompt(card, request);
+		card.querySelector<HTMLButtonElement>(selector)!.click();
+		const response = await p;
+		expect(response).toEqual({ id: "r1", values: [], outcome });
+		expect(card.querySelector(".notor-plan-review-prompt")).toBeNull();
+		expect(controller.hasPending("conv1")).toBe(false);
+	});
+
+	it("is settled by an external surface (plan leaf) via the controller", async () => {
+		const { controller, card, request } = setup();
+		const p = renderInteractionPrompt(card, request);
+		expect(controller.resolve("conv1", { kind: "request-changes", feedback: "> \"x\"\nfix" })).toBe(true);
+		const response = await p;
+		expect(response.outcome).toEqual({ kind: "request-changes", feedback: "> \"x\"\nfix" });
+		expect(card.querySelector(".notor-plan-review-prompt")).toBeNull();
+	});
+
+	it("Open plan calls the installed opener without settling", () => {
+		const { controller, opened, card, request } = setup();
+		void renderInteractionPrompt(card, request);
+		card.querySelector<HTMLButtonElement>(".notor-plan-review-open")!.click();
+		expect(opened).toEqual(["conv1"]);
+		expect(controller.hasPending("conv1")).toBe(true);
+	});
+
+	it("abort rejects, removes the card and unregisters the review", async () => {
+		const { controller, card, request } = setup();
+		const ac = new AbortController();
+		const p = renderInteractionPrompt(card, request, ac.signal);
+		ac.abort();
+		await expect(p).rejects.toThrow("Interaction cancelled by user.");
+		expect(card.querySelector(".notor-plan-review-prompt")).toBeNull();
+		expect(controller.hasPending("conv1")).toBe(false);
 	});
 });

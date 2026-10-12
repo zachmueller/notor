@@ -4605,3 +4605,33 @@
 	font-size: var(--font-ui-smaller);
 	padding: 2px 8px;
 }
+
+/* ==========================================================================
+   Plan review (submit_plan tool card)
+   ========================================================================== */
+
+.notor-plan-review-title {
+	font-weight: var(--font-semibold);
+	font-size: var(--font-ui-small);
+}
+
+.notor-plan-review-hint {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.notor-plan-review-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.notor-plan-review-actions button {
+	font-size: var(--font-ui-smaller);
+	padding: 4px 10px;
+}
+
+.notor-plan-review-spacer {
+	flex: 1;
+}

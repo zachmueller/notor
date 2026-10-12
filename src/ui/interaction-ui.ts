@@ -18,6 +18,9 @@
  * @see src/ui/approval-ui.ts — the binary approve/reject pattern this generalizes
  */
 
+import type { PlanReviewOutcome } from "../plans/plan-review-controller";
+import { planReviewRenderer } from "./plan-review-interaction";
+
 /**
  * A request to interact with the user, suspending the tool loop until answered.
  *
@@ -52,6 +55,19 @@ export type InteractionRequest =
 				 */
 				multiSelect?: boolean;
 			}>;
+	  }
+	| {
+			/**
+			 * Plan review (`submit_plan`): suspends the loop until the user
+			 * approves, approves with auto-accepted edits, requests changes (from
+			 * the plan leaf or by replying in chat) or rejects the plan. Settled
+			 * through the {@link PlanReviewController} so several surfaces can
+			 * resolve the same pending review.
+			 */
+			type: "plan-review";
+			id: string;
+			conversationId: string;
+			title: string;
 	  };
 
 /** The user's answers to an `InteractionRequest`. */
@@ -63,6 +79,8 @@ export type InteractionResponse = {
 	 * question yields a `string`; a `multiSelect` question yields a `string[]`.
 	 */
 	values: Array<string | string[]>;
+	/** Set for `plan-review` requests: the user's decision. */
+	outcome?: PlanReviewOutcome;
 };
 
 /**
@@ -70,7 +88,7 @@ export type InteractionResponse = {
  * resolves with the user's response, and returns a cleanup function that
  * removes the UI (called automatically on resolve and on abort).
  */
-interface InteractionRenderer {
+export interface InteractionRenderer {
 	render(
 		el: HTMLElement,
 		request: InteractionRequest,
@@ -300,6 +318,7 @@ const askRenderer: InteractionRenderer = {
  */
 const INTERACTION_RENDERERS: Record<InteractionRequest["type"], InteractionRenderer> = {
 	ask: askRenderer,
+	"plan-review": planReviewRenderer,
 };
 
 /**

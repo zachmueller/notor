@@ -33,6 +33,17 @@ interface PendingReview {
 export class PlanReviewController {
 	private readonly pending = new Map<string, PendingReview>();
 	private readonly listeners = new Set<(conversationId: string) => void>();
+	private opener?: (conversationId: string) => void;
+
+	/** Install the "open the plan leaf" action used by review surfaces without plugin access. */
+	setPlanOpener(opener: ((conversationId: string) => void) | undefined): void {
+		this.opener = opener;
+	}
+
+	/** Open the plan leaf for a conversation (no-op when no opener is installed). */
+	openPlan(conversationId: string): void {
+		this.opener?.(conversationId);
+	}
 
 	/**
 	 * Register the settle function for a conversation's pending review.
