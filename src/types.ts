@@ -231,6 +231,10 @@ export interface MessageError {
 	message: string;
 	/** Keys of the request fields that may have caused the rejection. */
 	offending_fields?: string[];
+	/** Provider error code (e.g. "CONNECTION_FAILED"), when classified. */
+	code?: string;
+	/** Whether the failure was transient, so the turn can be retried. */
+	retryable?: boolean;
 }
 
 /**

@@ -1749,6 +1749,22 @@ export class NotorChatView extends ItemView {
 		this.messageRenderer.appendStreamChunk(contentEl, text);
 	}
 
+	hasStreamedContent(contentEl: HTMLElement): boolean {
+		return this.messageRenderer.hasStreamedContent(contentEl);
+	}
+
+	markAssistantInterrupted(contentEl: HTMLElement): void {
+		this.messageRenderer.markAssistantInterrupted(contentEl);
+	}
+
+	removeAssistantPlaceholder(contentEl: HTMLElement): void {
+		this.messageRenderer.removeAssistantPlaceholder(contentEl);
+	}
+
+	showRetryStatus(text: string | null): void {
+		this.messageRenderer.showRetryStatus(text);
+	}
+
 	appendThinkingChunk(contentEl: HTMLElement, text: string, tokens: number): void {
 		this.messageRenderer.appendThinkingChunk(contentEl, text, tokens);
 	}

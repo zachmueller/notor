@@ -218,6 +218,48 @@ export class MessageRenderer {
 		return contentEl;
 	}
 
+	/** Whether a streaming placeholder received any answer or reasoning text. */
+	hasStreamedContent(contentEl: HTMLElement): boolean {
+		if (contentEl.getAttribute("data-raw")) return true;
+		const thinking = contentEl.querySelector<HTMLElement>(".notor-thinking-content");
+		return !!thinking?.getAttribute("data-raw");
+	}
+
+	/**
+	 * Dim a placeholder whose stream was cut off by a transient failure. It
+	 * stays visible while the turn is retried, then is replaced by the
+	 * re-run's output.
+	 */
+	markAssistantInterrupted(contentEl: HTMLElement): void {
+		contentEl.parentElement?.addClass("notor-message-interrupted");
+	}
+
+	/** Remove a streaming assistant placeholder (and its message wrapper). */
+	removeAssistantPlaceholder(contentEl: HTMLElement): void {
+		if (this.pendingStreamRender?.contentEl === contentEl) this.pendingStreamRender = null;
+		const msgEl = contentEl.parentElement;
+		if (msgEl?.hasClass("notor-message-assistant")) msgEl.remove();
+		else contentEl.remove();
+	}
+
+	/**
+	 * Show, update or (with null) remove the single transient retry status
+	 * line, e.g. "Connection lost — retrying (2/6) in 4s…".
+	 */
+	showRetryStatus(text: string | null): void {
+		const messageListEl = this.deps.getMessageListEl();
+		let statusEl = messageListEl.querySelector<HTMLElement>(".notor-chat-retry-status");
+		if (text === null) {
+			statusEl?.remove();
+			return;
+		}
+		if (!statusEl) {
+			statusEl = messageListEl.createDiv({ cls: "notor-chat-retry-status" });
+			this.deps.scrollToBottom();
+		}
+		statusEl.textContent = text;
+	}
+
 	appendStreamChunk(contentEl: HTMLElement, text: string): void {
 		const existing = contentEl.getAttribute("data-raw") ?? "";
 		const updated = existing + text;

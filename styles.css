@@ -1760,6 +1760,22 @@
 	color: var(--color-red, #c0392b);
 }
 
+/* Transient "Connection lost — retrying (2/6) in 4s…" line shown while a
+   failed turn is retried automatically. */
+.notor-chat-retry-status {
+	padding: 6px 12px;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+/* Partial output from a stream cut off by a transient failure; replaced by
+   the retried turn's output once it starts streaming. */
+.notor-message-interrupted {
+	opacity: 0.5;
+}
+
 /* ==========================================================================
    Input Area
    ========================================================================== */

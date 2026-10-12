@@ -275,3 +275,19 @@ export async function withStreamRetry<T>(
 		opts.onStatus?.({ kind: "resumed", retry: retries });
 	}
 }
+
+/**
+ * Pass `stream` through, calling `onFirst` just before its first chunk is
+ * delivered — lets a retried attempt swap out the previous attempt's
+ * interrupted output at the moment new output arrives.
+ */
+export async function* onFirstChunk<C>(stream: AsyncIterable<C>, onFirst: () => void): AsyncIterable<C> {
+	let first = true;
+	for await (const chunk of stream) {
+		if (first) {
+			first = false;
+			onFirst();
+		}
+		yield chunk;
+	}
+}

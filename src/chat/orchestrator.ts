@@ -11,7 +11,7 @@
 import { type App, Notice } from "obsidian";
 import type { Conversation, ConversationMode, Message, Persona, TaskItem, ToolResult, WorkflowExecution, WorkflowAssemblyResult, ExecutionChain } from "../types";
 import { readChildRunMetadata } from "../types";
-import type { SendMessageOptions } from "../providers/provider";
+import type { SendMessageOptions, StreamChunk } from "../providers/provider";
 import { ProviderError } from "../providers/provider";
 import type { ProviderRegistry } from "../providers/index";
 import { ConversationManager } from "./conversation";
@@ -20,7 +20,10 @@ import { ContextManager } from "./context";
 import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher } from "./dispatcher";
 import { partitionToolCalls, executeToolBatches, type ToolCallInfo } from "./tool-orchestration";
-import { toChatMessages, processStream, calculateCost } from "./message-pipeline";
+import { toChatMessages, processStream, calculateCost, type StreamResult } from "./message-pipeline";
+import { formatRetryStatus, onFirstChunk, retriesAttemptedOf, retryPolicyFromSettings, withStreamRetry } from "../providers/stream-retry";
+import { retryableCodeOfError, retryableCodeOfFailure, isRetryableError, isRetryableProviderFailure } from "../providers/network-errors";
+import { transientFailureSuggestion } from "./provider-error-text";
 import { supportsThinking } from "../providers/model-metadata";
 import { resolveConversationModel } from "../presets/preset-resolver";
 import { normalizeSelection, readSelection, selectionsEqual, type ModelSelection } from "./model-selection";
@@ -1217,6 +1220,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 						name: e instanceof Error ? e.name : undefined,
 						message: details?.rawMessage ?? errMsg,
 						offending_fields: details?.offendingFields,
+						code: e instanceof ProviderError ? e.code : undefined,
+						retryable: isRetryableError(e),
 					},
 				});
 			} catch {
@@ -1395,11 +1400,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 				view?.setRespondingState(true);
 				const abortController = session.abortController;
 
-				// Eagerly create the assistant placeholder so the DOM element exists
-				// the moment we enter responding state. This ensures the element is
-				// present even if the abort fires before any text_delta chunks arrive.
-				const eagerContentEl = view?.createAssistantMessagePlaceholder();
-
 				const provider = this.providerRegistry.getProvider(sel.providerId);
 				const options: SendMessageOptions = {
 					model: sel.modelId,
@@ -1407,8 +1407,6 @@ export class ChatOrchestrator implements ToolSessionContext {
 					use_extended_context: sel.useExtendedContext,
 					thinking_level: sel.thinkingLevel,
 				};
-
-				const stream = provider.sendMessage(chatMessages, toolDefinitions, options);
 
 				// Thinking is requested for this turn when the model supports it and a
 				// level is set. Used to optimistically show the thinking indicator
@@ -1420,15 +1418,17 @@ export class ChatOrchestrator implements ToolSessionContext {
 					sel.thinkingLevel !== "off" &&
 					supportsThinking(sel.modelId);
 
-				// 7. Process stream (pass in the already-created placeholder + session-aware view resolver)
-				const result = await processStream(
-					stream,
+				// 7. Process stream, re-sending the same request on transient
+				// failures (network drop, throttling, overloaded). Safe because
+				// tools only dispatch after a stream completes and partial output
+				// never reaches the conversation. A cut-off attempt's partial text
+				// stays visible (dimmed) until the retry's first chunk replaces it.
+				const result = await this.streamWithRetry(session, {
+					send: () => provider.sendMessage(chatMessages, toolDefinitions, options),
 					abortController,
-					eagerContentEl,
-					() => this.getViewForSession(session),
 					thinkingEnabled,
-					{ onPartialToolCall: this.dispatcher.makePartialToolCallHandler() },
-				);
+					providerId: sel.providerId,
+				});
 
 				// 8. Handle result
 				if (result.type === "text") {
@@ -1620,6 +1620,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					// Persist the error into the conversation JSONL so a failed chat
 					// carries diagnostic detail (previously errors were UI-only and
 					// lost on reload). Auto-persists via the onMessageAdded wiring.
+					const retryable = isRetryableProviderFailure(result);
 					convManager.addMessage({
 						role: "error",
 						content: errStr,
@@ -1627,9 +1628,16 @@ export class ChatOrchestrator implements ToolSessionContext {
 							name: result.details?.name,
 							message: result.details?.rawMessage ?? errStr,
 							offending_fields: result.details?.offendingFields,
+							code: result.code,
+							retryable,
 						},
 					});
-					this.getViewForSession(session)?.showError(errStr + overflowSuggestion);
+					const transientSuggestion = transientFailureSuggestion(
+						result.code,
+						this.providerTypeOf(sel.providerId),
+						result.retries,
+					);
+					this.getViewForSession(session)?.showError(errStr + overflowSuggestion + transientSuggestion);
 				}
 			}
 		} finally {
@@ -1898,6 +1906,124 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 	// -----------------------------------------------------------------------
+	// Stream retry
+	// -----------------------------------------------------------------------
+
+	/** Provider type ("bedrock", "local", …) for a provider instance id. */
+	private providerTypeOf(providerId: string): string | undefined {
+		return this.settings.providers.find((p) => p.id === providerId)?.type;
+	}
+
+	/**
+	 * Stream one assistant turn, retrying transient failures per the network
+	 * retry settings. Each attempt gets a fresh placeholder; a cut-off
+	 * attempt's partial output is dimmed and kept until the next attempt's
+	 * first chunk arrives, with a countdown status line in between. Returns
+	 * the final StreamResult plus the retries spent; a final thrown failure
+	 * is rethrown annotated with `retriesAttempted`.
+	 */
+	private async streamWithRetry(
+		session: ConversationSession,
+		opts: {
+			send: () => AsyncIterable<StreamChunk>;
+			abortController: AbortController;
+			thinkingEnabled: boolean;
+			providerId: string;
+		},
+	): Promise<StreamResult & { retries: number }> {
+		const viewFor = () => this.getViewForSession(session);
+		let interruptedEl: HTMLElement | undefined;
+		let attemptEl: HTMLElement | undefined;
+		let retries = 0;
+
+		const dropInterrupted = () => {
+			if (interruptedEl) viewFor()?.removeAssistantPlaceholder(interruptedEl);
+			interruptedEl = undefined;
+		};
+
+		try {
+			const result = await withStreamRetry<StreamResult>(
+				async (attempt) => {
+					// Eagerly create the assistant placeholder so the DOM element
+					// exists the moment we enter responding state — even if the
+					// abort fires before any text_delta chunks arrive.
+					attemptEl = viewFor()?.createAssistantMessagePlaceholder();
+					const stream = attempt > 1
+						? onFirstChunk(opts.send(), () => {
+							dropInterrupted();
+							viewFor()?.showRetryStatus(null);
+						})
+						: opts.send();
+					return processStream(
+						stream,
+						opts.abortController,
+						attemptEl,
+						viewFor,
+						opts.thinkingEnabled,
+						{ onPartialToolCall: this.dispatcher.makePartialToolCallHandler() },
+					);
+				},
+				{
+					policy: retryPolicyFromSettings(this.settings),
+					signal: opts.abortController.signal,
+					label: opts.providerId,
+					classify: ({ result, error }) => {
+						if (result === undefined) return retryableCodeOfError(error);
+						return result.type === "error" ? retryableCodeOfFailure(result) : null;
+					},
+					onFailedAttempt: (outcome) => {
+						retries++;
+						const view = viewFor();
+						view?.clearStreamingToolCalls();
+						const el = outcome.result?.contentEl ?? attemptEl;
+						if (!el || !view) return;
+						view.cancelThinkingIndicator(el);
+						if (view.hasStreamedContent(el)) {
+							// Only one attempt can have streamed since the last
+							// interrupted block was dropped on first chunk.
+							dropInterrupted();
+							view.markAssistantInterrupted(el);
+							interruptedEl = el;
+						} else {
+							view.removeAssistantPlaceholder(el);
+						}
+					},
+					onStatus: (status) => viewFor()?.showRetryStatus(formatRetryStatus(status)),
+					onAbort: () => ({
+						type: "cancelled",
+						text: "",
+						thinking: "",
+						thinkingDurationMs: 0,
+						thinkingTokens: 0,
+						inputTokens: 0,
+						outputTokens: 0,
+					}),
+				},
+			);
+			if (result.type === "cancelled") dropInterrupted();
+			if (result.type === "error") this.retireFailedPlaceholder(result.contentEl ?? attemptEl, session);
+			return { ...result, retries };
+		} catch (e) {
+			this.retireFailedPlaceholder(attemptEl, session);
+			throw e;
+		} finally {
+			viewFor()?.showRetryStatus(null);
+		}
+	}
+
+	/**
+	 * After a final failure: drop an empty placeholder (and any lingering
+	 * thinking indicator); keep partial output visible but dimmed.
+	 */
+	private retireFailedPlaceholder(el: HTMLElement | undefined, session: ConversationSession): void {
+		const view = this.getViewForSession(session);
+		if (!el || !view) return;
+		view.cancelThinkingIndicator(el);
+		if (view.hasStreamedContent(el)) view.markAssistantInterrupted(el);
+		else view.removeAssistantPlaceholder(el);
+	}
+
+	// -----------------------------------------------------------------------
 	// Error handling
 	// -----------------------------------------------------------------------
 
@@ -1921,10 +2047,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 					}
 					break;
 				case "CONNECTION_FAILED":
-					suggestion = " Check that your provider is running and accessible.";
-					break;
 				case "RATE_LIMITED":
-					suggestion = " Wait a moment and try again.";
+				case "SERVICE_UNAVAILABLE":
+					suggestion = transientFailureSuggestion(e.code, e.provider, retriesAttemptedOf(e));
 					break;
 				case "CONTEXT_LENGTH_EXCEEDED":
 					suggestion = overflowNote ?? " Try starting a new conversation or reducing message length.";
@@ -1944,7 +2069,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 			});
 		} else {
 			const message = e instanceof Error ? e.message : String(e);
-			this.view?.showError(`An error occurred: ${message}`);
+			// A raw transport failure that escaped classification still gets
+			// the connection hint.
+			const hint = isRetryableError(e)
+				? transientFailureSuggestion("CONNECTION_FAILED", undefined, retriesAttemptedOf(e))
+				: "";
+			this.view?.showError(`An error occurred: ${message}${hint}`);
 			log.error("Unexpected error in chat loop", { error: message });
 		}
 	}
