@@ -1692,6 +1692,11 @@ export class NotorChatView extends ItemView {
 		this.chatInput.updateModeDisplay(mode);
 	}
 
+	/** Show/hide the "Auto-accepting edits" badge (plan approved with auto-accept). */
+	setAutoAcceptIndicator(on: boolean): void {
+		this.chatInput.setAutoAcceptIndicator(on);
+	}
+
 	appendForkButton(msgEl: HTMLElement, message?: Message): void {
 		this.messageRenderer.appendForkButton(msgEl, message);
 	}

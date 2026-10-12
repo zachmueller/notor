@@ -42,6 +42,12 @@ export interface ToolPolicyContext {
 	 * exactly as today. `blocked_paths` still takes precedence.
 	 */
 	sessionAllowedPaths?: string[];
+	/**
+	 * "Approve & auto-accept edits" is active for this session: built-in vault
+	 * write tools in {@link AUTO_ACCEPT_WRITE_TOOLS} are auto-approved. Command
+	 * patterns, path "never" rules and path enforcement still apply.
+	 */
+	autoAcceptWrites?: boolean;
 }
 
 /**
@@ -88,6 +94,25 @@ export function getWriteToolDescription(toolName: string): string {
 	};
 	return descriptions[toolName] ?? "perform write operations";
 }
+
+/**
+ * Built-in vault editing tools that "Approve & auto-accept edits" may
+ * auto-approve. Deliberately an allowlist: `execute_command`, `delete_note`,
+ * `edit_notor_settings`, import tools, MCP tools and user-extension write tools
+ * always keep their normal gate.
+ */
+export const AUTO_ACCEPT_WRITE_TOOLS: ReadonlySet<string> = new Set([
+	"write_note",
+	"replace_in_note",
+	"update_frontmatter",
+	"manage_tags",
+	"move_note",
+	"apply_template",
+	"write_file",
+	"replace_in_file",
+	"write_docx",
+	"write_xlsx",
+]);
 
 /**
  * Pure function — evaluates tool policy without reading any shared state.
@@ -182,8 +207,14 @@ export function evaluateToolPolicy(
 	}
 
 	// 4. Auto-approve resolution (DISP-004)
-	// When effectiveConfig is active, use its merged auto_approve as unified source
-	const isAutoApproved = toolEntry?.auto_approve ?? false;
+	// When effectiveConfig is active, use its merged auto_approve as unified source.
+	// Plan "approve & auto-accept edits" folds in here so the downstream vetoes
+	// (blocked command patterns, path "never" verdicts, path enforcement) still win.
+	const autoAccepted = ctx.autoAcceptWrites === true
+		&& tool.mode === "write"
+		&& !isMcpTool(toolName)
+		&& AUTO_ACCEPT_WRITE_TOOLS.has(toolName);
+	const isAutoApproved = (toolEntry?.auto_approve ?? false) || autoAccepted;
 
 	// 4b. Command pattern override for execute_command
 	let finalAutoApproved = isAutoApproved;
@@ -205,10 +236,13 @@ export function evaluateToolPolicy(
 		}
 	}
 
+	let autoApproveReason: string | undefined = autoAccepted && !(toolEntry?.auto_approve ?? false)
+		? "plan approved with auto-accept"
+		: undefined;
+
 	// 4c. Path-based auto-approve override (any tool with registered path params).
 	// Soft gate: flips whether the human sees a prompt, never whether the call is
 	// allowed — that stays with step 5 below.
-	let autoApproveReason: string | undefined;
 	if (toolEntry) {
 		const match = evaluatePathApproval(
 			toolName,

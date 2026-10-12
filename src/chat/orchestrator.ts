@@ -626,6 +626,41 @@ export class ChatOrchestrator implements ToolSessionContext {
 		return this.conversationManager.getActiveConversation();
 	}
 
+	/**
+	 * Per-dispatch tool session context bound to `session`. Delegates the
+	 * display-oriented accessors to the orchestrator and adds session-bound
+	 * mutators, so a tool flags the right session even if the panel has been
+	 * navigated to another conversation.
+	 */
+	private buildSessionContext(session: ConversationSession): ToolSessionContext {
+		return {
+			getEffectiveToolConfig: () => this.getEffectiveToolConfig(),
+			getActiveConversation: () => this.getActiveConversation(),
+			setConversationTasks: (tasks) => this.setConversationTasks(tasks),
+			getSessionConversationId: () => session.conversationId,
+			setConversationMode: (mode) => this.setSessionMode(session, mode),
+			setAutoAcceptWrites: (on) => this.setSessionAutoAcceptWrites(session, on),
+		};
+	}
+
+	/**
+	 * Switch a session's conversation mode mid-run (e.g. plan approved). Mirrors
+	 * the manual toggle in `wire-view.ts`: session manager always, display
+	 * manager + toggle only when the panel shows this conversation.
+	 */
+	private setSessionMode(session: ConversationSession, mode: ConversationMode): void {
+		session.conversationManager.setMode(mode);
+		if (this.conversationManager.getActiveConversation()?.id === session.conversationId) {
+			this.conversationManager.setMode(mode);
+			this.view?.updateModeDisplay(mode);
+		}
+	}
+
+	private setSessionAutoAcceptWrites(session: ConversationSession, on: boolean): void {
+		session.autoAcceptWrites = on;
+		this.getViewForSession(session)?.setAutoAcceptIndicator(on);
+	}
+
 	setConversationTasks(tasks: TaskItem[] | null): void {
 		// Write to the display manager so the live panel renders during the turn.
 		this.conversationManager.setTasks(tasks);
@@ -1230,6 +1265,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 				whm.deactivate(session.conversationId);
 			}
 			session.rejectAllPendingApprovals();
+			// "Approve & auto-accept edits" lasts only for this response loop.
+			if (session.autoAcceptWrites) this.setSessionAutoAcceptWrites(session, false);
 			this.sessionManager.unregisterSession(session.conversationId);
 			this.getViewForSession(session)?.setRespondingState(false);
 		}
@@ -1253,7 +1290,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1d
 	 */
 	private async responseLoop(
-		mode: ConversationMode,
+		initialMode: ConversationMode,
 		session: ConversationSession,
 	): Promise<void> {
 		let continueLoop = true;
@@ -1262,6 +1299,14 @@ export class ChatOrchestrator implements ToolSessionContext {
 		try {
 			while (continueLoop) {
 				continueLoop = false;
+
+				// Re-read the live mode every iteration: a plan approval
+				// (submit_plan → setConversationMode) or a manual toggle mid-run
+				// must change the next turn's system prompt and dispatch mode,
+				// not just the policy gate.
+				const mode: ConversationMode = convManager.getActiveConversation()
+					? convManager.getMode()
+					: initialMode;
 
 				// 0. Phase 3 (COMP-005): Check compaction threshold before each LLM call
 				await this.compactionManager.checkAndPerformCompaction(session);
@@ -1680,7 +1725,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			onProgressMap,
 			policyCtx,
 			session.approvalCallback,
-			this, // sessionContext (A4.4e)
+			this.buildSessionContext(session), // sessionContext (A4.4e)
 			approvalHookFn,
 			session.interactionCallback,
 		);

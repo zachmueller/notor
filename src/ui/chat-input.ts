@@ -67,6 +67,7 @@ export class ChatInput {
 	private sendButtonEl!: HTMLButtonElement;
 	private stopButtonEl!: HTMLButtonElement;
 	private modeToggleEl!: HTMLButtonElement;
+	private autoAcceptBadgeEl!: HTMLElement;
 	private attachmentChipContainerEl!: HTMLElement;
 
 	private userDragHeight: number | null = null;
@@ -274,13 +275,19 @@ export class ChatInput {
 		// Toolbar row below the input (mode toggle left, buttons right)
 		this.inputToolbarEl = this.inputAreaEl.createDiv({ cls: "notor-input-toolbar" });
 
-		// Mode toggle (left side of toolbar)
-		this.modeToggleEl = this.inputToolbarEl.createEl("button", {
+		// Mode toggle + auto-accept badge (left side of toolbar)
+		const leftGroup = this.inputToolbarEl.createDiv({ cls: "notor-input-toolbar-left" });
+		this.modeToggleEl = leftGroup.createEl("button", {
 			cls: "notor-mode-toggle notor-mode-plan",
 			text: "Plan",
 			attr: { "aria-label": "Toggle plan/act mode" },
 		});
 		this.modeToggleEl.addEventListener("click", () => this.handleModeToggle());
+		this.autoAcceptBadgeEl = leftGroup.createSpan({
+			cls: "notor-auto-accept-badge notor-hidden",
+			text: "Auto-accepting edits",
+			attr: { "aria-label": "Write tools are auto-approved until this response finishes" },
+		});
 
 		// Button wrapper (right side of toolbar)
 		const buttonWrapper = this.inputToolbarEl.createDiv({ cls: "notor-input-buttons" });
@@ -372,6 +379,11 @@ export class ChatInput {
 		this.modeToggleEl.textContent = mode === "plan" ? "Plan" : "Act";
 		this.modeToggleEl.removeClass("notor-mode-plan", "notor-mode-act");
 		this.modeToggleEl.addClass(mode === "plan" ? "notor-mode-plan" : "notor-mode-act");
+	}
+
+	/** Show/hide the "Auto-accepting edits" badge next to the mode toggle. */
+	setAutoAcceptIndicator(on: boolean): void {
+		this.autoAcceptBadgeEl?.toggleClass("notor-hidden", !on);
 	}
 
 	focus(): void {

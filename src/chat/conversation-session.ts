@@ -15,6 +15,7 @@ import type { ToolPolicyContext } from "./tool-policy";
 import type { ApprovalCallback, InteractionCallback } from "./dispatcher";
 import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
 import type { NotorSettings } from "../settings";
+import { getPlanReviewController } from "../plans/plan-review-controller";
 
 export type SessionStatus =
 	| "running"
@@ -92,6 +93,13 @@ export class ConversationSession {
 	/** Pending interaction rejecters — keyed by messageId. Used to unwind on teardown. */
 	readonly pendingInteractions = new Map<string, PendingInteraction>();
 
+	/**
+	 * "Approve & auto-accept edits": when true, built-in vault write tools are
+	 * auto-approved for the rest of this session's response loop. Never
+	 * persisted; reset by the orchestrator when the loop ends.
+	 */
+	autoAcceptWrites = false;
+
 	private _status: SessionStatus = "running";
 	onStatusChange?: (session: ConversationSession) => void;
 
@@ -131,6 +139,9 @@ export class ConversationSession {
 			pending.reject(new Error("Interaction cancelled by user."));
 		}
 		this.pendingInteractions.clear();
+		// A re-rendered plan-review prompt (view switch) never settles its
+		// original promise, so drop the controller entry explicitly.
+		getPlanReviewController()?.clear(this.conversationId);
 	}
 
 	/**
@@ -152,6 +163,7 @@ export class ConversationSession {
 			domainDenylist: settings.domain_denylist,
 			vaultRootPath,
 			resolveVaultPath,
+			autoAcceptWrites: this.autoAcceptWrites,
 		};
 	}
 }

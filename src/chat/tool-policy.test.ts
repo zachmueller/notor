@@ -758,3 +758,77 @@ describe("evaluateToolPolicy — command patterns in a headless (intersected-con
 		expect(result.autoApproved).toBe(true);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// "Approve & auto-accept edits" (plan flow): ctx.autoAcceptWrites folds into
+// step 4, so command patterns, path "never" verdicts, path enforcement and
+// the Plan-mode block still win.
+// ---------------------------------------------------------------------------
+describe("evaluateToolPolicy — auto-accept writes (plan approval)", () => {
+	const write = (name: string): DispatchableTool => ({ name, mode: "write" }) as any;
+
+	beforeAll(() => {
+		TOOL_PATH_PARAMS["write_note"] = [
+			{ paramName: "path", namespace: "vault", resolveAs: "note", access: "write" as const },
+		];
+		TOOL_PATH_PARAMS["write_file"] = [{ paramName: "path", namespace: "filesystem", access: "write" as const }];
+	});
+	afterAll(() => {
+		delete TOOL_PATH_PARAMS["write_note"];
+		delete TOOL_PATH_PARAMS["write_file"];
+	});
+
+	it("auto-approves an allowlisted write tool with a reason", () => {
+		const ctx = makeToolCtx("write_note", {}, { autoAcceptWrites: true });
+		const r = evaluateToolPolicy("write_note", { path: "a.md" }, write("write_note"), ctx);
+		expect(r).toMatchObject({ allowed: true, autoApproved: true, autoApproveReason: "plan approved with auto-accept" });
+	});
+
+	it("does nothing when the flag is off", () => {
+		const ctx = makeToolCtx("write_note");
+		const r = evaluateToolPolicy("write_note", { path: "a.md" }, write("write_note"), ctx);
+		expect(r.autoApproved).toBe(false);
+	});
+
+	it.each(["execute_command", "delete_note", "edit_notor_settings", "my_extension_writer"])(
+		"never auto-accepts %s",
+		(name) => {
+			const ctx = makeToolCtx(name, {}, { autoAcceptWrites: true });
+			const r = evaluateToolPolicy(name, { command: "ls", path: "a.md" }, write(name), ctx);
+			expect(r.autoApproved).toBe(false);
+		},
+	);
+
+	it("never auto-accepts MCP write tools", () => {
+		const ctx = makeToolCtx("server__write_note", {}, { autoAcceptWrites: true });
+		const r = evaluateToolPolicy("server__write_note", {}, write("server__write_note"), ctx);
+		expect(r.autoApproved).toBe(false);
+	});
+
+	it("a never_auto_approve_paths match still forces a prompt", () => {
+		const ctx = makeToolCtx("write_note", { never_auto_approve_paths: ["private/"] }, { autoAcceptWrites: true });
+		const r = evaluateToolPolicy("write_note", { path: "private/x.md" }, write("write_note"), ctx);
+		expect(r.allowed).toBe(true);
+		expect(r.autoApproved).toBe(false);
+	});
+
+	it("path enforcement still blocks", () => {
+		const ctx = makeToolCtx("write_file", { allowed_paths: ["allowed"] }, { autoAcceptWrites: true });
+		const r = evaluateToolPolicy("write_file", { path: "secret/x.txt" }, write("write_file"), ctx);
+		expect(r.allowed).toBe(false);
+	});
+
+	it("disabled tools and Plan mode still block", () => {
+		const disabled = makeToolCtx("write_note", { enabled: false }, { autoAcceptWrites: true });
+		expect(evaluateToolPolicy("write_note", { path: "a.md" }, write("write_note"), disabled).allowed).toBe(false);
+		const plan = makeToolCtx("write_note", {}, { autoAcceptWrites: true, mode: "plan" });
+		expect(evaluateToolPolicy("write_note", { path: "a.md" }, write("write_note"), plan).allowed).toBe(false);
+	});
+
+	it("keeps no auto-accept reason when the tool was already auto-approved", () => {
+		const ctx = makeToolCtx("write_note", { auto_approve: true }, { autoAcceptWrites: true });
+		const r = evaluateToolPolicy("write_note", { path: "a.md" }, write("write_note"), ctx);
+		expect(r.autoApproved).toBe(true);
+		expect(r.autoApproveReason).toBeUndefined();
+	});
+});

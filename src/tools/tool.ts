@@ -37,6 +37,23 @@ export interface ToolSessionContext {
 	getEffectiveToolConfig(): EffectiveToolConfig | null;
 	getActiveConversation(): Conversation | null;
 	setConversationTasks?(tasks: TaskItem[] | null): void;
+	/**
+	 * Id of the conversation whose session dispatched this call. Unlike
+	 * `getActiveConversation()` (the *displayed* conversation), this stays
+	 * correct when the user navigates the panel elsewhere mid-run.
+	 */
+	getSessionConversationId?(): string | null;
+	/**
+	 * Switch the dispatching session's conversation mode. Takes effect on the
+	 * next loop iteration (system prompt + policy gate) and updates the panel
+	 * toggle when it shows this conversation.
+	 */
+	setConversationMode?(mode: ConversationMode): void;
+	/**
+	 * Auto-approve built-in vault write tools for the rest of the current
+	 * response loop ("Approve & auto-accept edits"). Reset when the loop ends.
+	 */
+	setAutoAcceptWrites?(on: boolean): void;
 }
 
 export interface ToolExecuteOptions {
