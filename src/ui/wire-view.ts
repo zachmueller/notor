@@ -7,6 +7,7 @@ import { conversationFilename } from "../chat/history";
 import { parseOptionValue, buildOptionValue } from "../providers/model-grouping";
 import { resolvePersonaOverrides } from "../personas/persona-overrides";
 import { resolvePreset } from "../presets/preset-resolver";
+import { describeSelection } from "../chat/model-selection";
 import { extractJsonlFromHtml, reassignIds } from "../export/html-importer";
 import { RenameModal } from "./rename-modal";
 import { ConfirmModal } from "./confirm-modal";
@@ -44,6 +45,17 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 	 */
 	const applyModelSelectionToHeader = (opts?: { personaName?: string | null }) =>
 		orchestrator.commitModelSelection(opts);
+
+	/**
+	 * Quick Settings changes affect ONLY this panel and its conversation — never
+	 * `providerRegistry` active state, `settings.active_provider` or a
+	 * provider's stored default `model_id` (those change only from the settings
+	 * tab). Commit, then confirm what the next LLM call will use.
+	 */
+	const commitAndNotify = () => {
+		const { selection, running } = applyModelSelectionToHeader();
+		new Notice(`Model: ${describeSelection(selection, providerRegistry)}${running ? " — applies from next step" : ""}`);
+	};
 
 	view.setOnCloseCleanup(async () => {
 		view._loadConversationAbort?.abort();
@@ -110,27 +122,31 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 
 	view.setOnPersonaChange((persona) => {
 		orchestrator.setActivePersona(persona);
+		const before = describeSelection(orchestrator.getActiveSelection(), providerRegistry);
 
 		if (persona) {
-			const resolution = resolvePersonaOverrides(persona, providerRegistry, plugin.settings.model_presets ?? []);
+			const resolution = resolvePersonaOverrides(
+				persona,
+				providerRegistry,
+				plugin.settings.model_presets ?? [],
+				orchestrator.getActiveProviderId(),
+			);
 			if (resolution) {
 				orchestrator.setActiveProvider(resolution.providerId);
 				orchestrator.setActiveModel(resolution.modelId, resolution.useExtendedContext, resolution.thinkingLevel);
-				view.updateProviderDisplay(resolution.providerId);
-				const modelValue = resolution.useExtendedContext
-					? `${resolution.modelId}::1m`
-					: resolution.modelId;
-				view.updateModelDisplay(modelValue);
-				if (resolution.presetName) {
-					orchestrator.setActivePresetName(resolution.presetName);
-					view.updatePresetDisplay(resolution.presetName);
-				}
+				// A legacy provider/model override is not a preset → "Custom".
+				orchestrator.setActivePresetName(resolution.presetName);
+				view.clearDisplayOverrides();
 			}
 		}
 
 		// A persona override may have changed provider/model/preset/thinking, so
 		// commit the full selection alongside persona_name (single write path).
-		applyModelSelectionToHeader({ personaName: persona?.name ?? null });
+		const { selection, running } = applyModelSelectionToHeader({ personaName: persona?.name ?? null });
+		const after = describeSelection(selection, providerRegistry);
+		if (after !== before) {
+			new Notice(`Model: ${after}${running ? " — applies from next step" : ""}`);
+		}
 
 		toolDispatcher.setActivePersonaName(persona?.name ?? null);
 
@@ -497,45 +513,22 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 
 	// Provider change
 	view.setOnProviderChange((providerId) => {
+		// setActiveProvider picks a valid model for the new provider, so commit
+		// the whole selection (not just provider_id).
 		orchestrator.setActiveProvider(providerId);
-		providerRegistry.switchProvider(providerId);
-		plugin.settings.active_provider = providerId;
-		plugin.saveSettings().catch((e) => {
-			log.error("Failed to save provider change", { error: String(e) });
-		});
-
-		// setActiveProvider resets model/extended from the provider config, so
-		// snapshot the whole selection (not just provider_id) into the header.
-		applyModelSelectionToHeader();
+		commitAndNotify();
 	});
 
 	// Model change
 	view.setOnModelChange((selectedValue) => {
 		const { modelId, isExtendedContext } = parseOptionValue(selectedValue);
 		orchestrator.setActiveModel(modelId, isExtendedContext);
-
-		const activeId = orchestrator.getActiveProviderId();
-		const config = providerRegistry.getConfig(activeId);
-		if (config) {
-			const updated = { ...config, model_id: modelId, use_extended_context: isExtendedContext };
-			providerRegistry.updateConfig(updated);
-			const idx = plugin.settings.providers.findIndex(
-				(p) => p.id === activeId
-			);
-			if (idx >= 0) {
-				plugin.settings.providers[idx] = updated;
-				plugin.saveSettings().catch((e) => {
-					log.error("Failed to save model change", { error: String(e) });
-				});
-			}
-		}
-
-		applyModelSelectionToHeader();
+		commitAndNotify();
 	});
 
-	// Refresh models
+	// Refresh models (for THIS panel's provider, not the global active one)
 	view.setOnRefreshModels(async () => {
-		return providerRegistry.refreshModels();
+		return providerRegistry.refreshModels(orchestrator.getActiveProviderId());
 	});
 
 	// Available providers
@@ -558,7 +551,11 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 			if (cached.length > 0) {
 				return cached;
 			}
-			providerRegistry.getModels(activeId).catch(() => {});
+			// Populate the open popover once the fetch lands (non-empty only, so
+			// an empty result can't re-trigger this fetch in a loop).
+			providerRegistry.getModels(activeId)
+				.then((models) => { if (models.length > 0) view.refreshModelList(); })
+				.catch(() => {});
 			const config = providerRegistry.getConfig(activeId);
 			if (config?.model_id) {
 				return [{ id: config.model_id, display_name: config.model_id }];
@@ -598,28 +595,13 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 
 		if (providerId) {
 			orchestrator.setActiveProvider(providerId);
-			providerRegistry.switchProvider(providerId);
-			plugin.settings.active_provider = providerId;
 		}
 		if (modelId !== undefined) {
 			orchestrator.setActiveModel(modelId, useExtendedContext ?? false, thinkingLevel);
-			const config = providerRegistry.getConfig(orchestrator.getActiveProviderId());
-			if (config) {
-				const updated = { ...config, model_id: modelId, use_extended_context: useExtendedContext ?? false };
-				providerRegistry.updateConfig(updated);
-				const idx = plugin.settings.providers.findIndex((p) => p.id === config.id);
-				if (idx >= 0) {
-					plugin.settings.providers[idx] = updated;
-				}
-			}
 		}
 
 		orchestrator.setActivePresetName(presetName);
-
-		plugin.saveSettings().catch((e) => {
-			log.error("Failed to save preset change", { error: String(e) });
-		});
-		applyModelSelectionToHeader();
+		commitAndNotify();
 	});
 
 	// Available presets
@@ -640,10 +622,10 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		return orchestrator.getActiveThinkingLevel();
 	});
 	view.setOnThinkingLevelChange((level) => {
+		// Keeps the preset label: the header records exactly what was picked,
+		// and the stored-first resolver restores this level on reopen.
 		orchestrator.setActiveThinkingLevel(level);
-		// Persist so reopen/fork restore the level from the header instead of
-		// dropping it (the "stored" resolver branch now reads thinking_level).
-		applyModelSelectionToHeader();
+		commitAndNotify();
 	});
 
 	// Checkpoint callbacks

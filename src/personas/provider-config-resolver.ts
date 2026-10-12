@@ -4,11 +4,11 @@
  * Resolves the provider + model a step turn should run on **without** mutating
  * the shared `ProviderRegistry`. This is a concurrency-correctness requirement,
  * not a polish item: the engine relies on concurrency (the shared `Semaphore`,
- * concurrent `run_flow` children, a flow running alongside foreground chat), and
- * `PersonaManager.applyProviderModelOverrides()` mutates **global** state via
- * `providerRegistry.switchProvider(...)` / `updateConfig(...)` — so two concurrent
- * step turns with different models would clobber each other's selection
- * (research.md Finding 5).
+ * concurrent `run_flow` children, a flow running alongside foreground chat), so
+ * a persona override applied to **global** state (`providerRegistry
+ * .switchProvider(...)` / `updateConfig(...)`) would let two concurrent step
+ * turns with different models clobber each other's selection (research.md
+ * Finding 5). Background workflows use this resolver for the same reason.
  *
  * This function only **reads** the preset/provider/model tables and returns a
  * {@link ResolvedProviderConfig} value object — it performs NO mutating registry
@@ -36,7 +36,7 @@ const log = logger("PersonaProviderResolver");
  * Resolve a persona's effective provider/model for a single step turn, as a
  * pinned value object — never writing to the global registry.
  *
- * Precedence (mirrors `applyProviderModelOverrides`, read-only):
+ * Precedence (mirrors `resolvePersonaOverrides`, read-only):
  *   1. `persona.preferred_preset` (if it resolves to a configured preset);
  *   2. else `persona.preferred_provider` + `persona.preferred_model`;
  *   3. else the registry's current active provider + its configured model.

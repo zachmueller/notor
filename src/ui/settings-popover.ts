@@ -250,6 +250,8 @@ export class SettingsPopover {
 			this.deps.setDisplayedModelValue(null);
 			this.deps.onProviderChange?.(providerSelect.value);
 			this.refreshModelSelect();
+			// Thinking support depends on the (new) model.
+			this.refreshThinkingSection();
 		});
 
 		const modelWrapper = container.createDiv({ cls: "notor-settings-section" });
@@ -309,6 +311,7 @@ export class SettingsPopover {
 			modelSelect.addEventListener("change", () => {
 				this.deps.setDisplayedModelValue(null);
 				this.deps.onModelChange?.(modelSelect.value);
+				this.refreshThinkingSection();
 			});
 		} else {
 			const modelInput = wrapper.createEl("input", {
@@ -323,6 +326,7 @@ export class SettingsPopover {
 			modelInput.addEventListener("change", () => {
 				this.deps.setDisplayedModelValue(null);
 				this.deps.onModelChange?.(modelInput.value);
+				this.refreshThinkingSection();
 			});
 		}
 	}

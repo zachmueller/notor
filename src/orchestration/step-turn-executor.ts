@@ -9,7 +9,7 @@
  *  2. resolves the step's persona via `PersonaManager.getPersonaByName()`
  *     **without** mutating global state (never `activatePersona()`);
  *  3. resolves provider/model via the **pure** `resolvePersonaProviderConfig(...)`
- *     (ARCH-007) — never the global-mutating `applyProviderModelOverrides()` — and
+ *     (ARCH-007) — never a global registry write — and
  *     **pins** it into the step's `RunLoop` (`modelId` → `RunLoopOptions.model`),
  *     so concurrent step turns never race on model selection;
  *  4. asks `StepPromptBuilder` (FEAT-005) to assemble the prompt;

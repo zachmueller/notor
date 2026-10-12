@@ -17,7 +17,7 @@ import { notifyFileLeafActivated } from "./context/auto-context";
 // Workflows
 import { discoverWorkflows } from "./workflows/workflow-discovery";
 import { autoInjectUnidentifiedWorkflows, injectWorkflowFrontmatter } from "./workflows/workflow-frontmatter";
-import type { Workflow } from "./types";
+import type { LLMProviderConfig, Workflow } from "./types";
 
 // Group G: Workflow hook override manager
 import { WorkflowHookOverrideManager } from "./hooks/workflow-hook-override";
@@ -153,6 +153,12 @@ import { resolveNote } from "./utils/resolve-note";
 
 const log = logger("Main");
 
+/** Comparison key for a provider config, ignoring the persisted model-list cache. */
+function providerConfigKey(config: LLMProviderConfig): string {
+	const { model_cache: _cache, model_cache_timestamp: _ts, ...rest } = config;
+	return JSON.stringify(rest);
+}
+
 export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	settings: NotorSettings;
 
@@ -171,6 +177,8 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 
 	// Lazily initialized components (heavy init deferred until first use)
 	private _providerRegistry?: ProviderRegistry;
+	/** Serialized provider configs as last pushed to the registry (see saveSettings). */
+	private readonly _providerConfigKeys = new Map<string, string>();
 	private _toolRegistry?: ToolRegistry;
 	private _toolDispatcher?: ToolDispatcher;
 	private _historyManager?: HistoryManager;
@@ -1470,9 +1478,17 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 
 		// Propagate settings changes to live components (if initialized)
 		if (this._providerRegistry) {
-			// Rebuild provider configs from updated settings
+			// Rebuild only provider configs that actually changed — updateConfig
+			// destroys the cached instance and model list, so doing it for every
+			// provider on every save reset in-flight model fetches and dropdowns.
+			// (Configs are shared by reference with the registry, so compare
+			// against a serialized snapshot rather than registry.getConfig().)
 			for (const config of this.settings.providers) {
-				this._providerRegistry.updateConfig(config);
+				const key = providerConfigKey(config);
+				if (this._providerConfigKeys.get(config.id) !== key) {
+					this._providerConfigKeys.set(config.id, key);
+					this._providerRegistry.updateConfig(config);
+				}
 			}
 			this._providerRegistry.switchProvider(
 				this.settings.active_provider
@@ -1580,6 +1596,9 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 				this.settings.providers,
 				this.settings.active_provider
 			);
+			for (const config of this.settings.providers) {
+				this._providerConfigKeys.set(config.id, providerConfigKey(config));
+			}
 
 			// Register HTTP-based providers (always available)
 			this._providerRegistry.registerFactory("local", (config, app) => {

@@ -16,11 +16,15 @@ export interface PersonaOverrideResolution {
  *
  * Returns null if the persona specifies no overrides or if none could be
  * resolved (provider/model unavailable).
+ *
+ * @param fallbackProviderId provider to pair with a model-only override —
+ *   pass the caller's panel provider; defaults to the global active provider.
  */
 export function resolvePersonaOverrides(
 	persona: Persona,
 	providerRegistry: ProviderRegistry,
 	presets: ModelPreset[],
+	fallbackProviderId: string = providerRegistry.getActiveId(),
 ): PersonaOverrideResolution | null {
 	// Preset takes highest priority
 	if (persona.preferred_preset) {
@@ -57,7 +61,7 @@ export function resolvePersonaOverrides(
 	}
 
 	if (persona.preferred_model) {
-		const checkProviderId = providerId ?? providerRegistry.getActiveId();
+		const checkProviderId = providerId ?? fallbackProviderId;
 		const cachedModels = providerRegistry.getCachedModels(checkProviderId);
 		const modelAvailable =
 			cachedModels.length === 0 ||
@@ -70,8 +74,8 @@ export function resolvePersonaOverrides(
 	if (!providerId && !modelId) return null;
 
 	return {
-		providerId: providerId ?? providerRegistry.getActiveId(),
-		modelId: modelId ?? providerRegistry.getConfig(providerId ?? providerRegistry.getActiveId())?.model_id ?? "",
+		providerId: providerId ?? fallbackProviderId,
+		modelId: modelId ?? providerRegistry.getConfig(providerId ?? fallbackProviderId)?.model_id ?? "",
 		useExtendedContext,
 		presetName: null,
 		thinkingLevel: null,

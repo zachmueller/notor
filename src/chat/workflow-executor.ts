@@ -49,6 +49,7 @@ import {
 	assembleWorkflowPrompt,
 } from "../workflows/workflow-executor";
 import { resolvePreset } from "../presets/preset-resolver";
+import { resolvePersonaProviderConfig } from "../personas/provider-config-resolver";
 import { writeSelection, type ModelSelection } from "./model-selection";
 import { logger } from "../utils/logger";
 import { resolveNote } from "../utils/resolve-note";
@@ -566,15 +567,22 @@ export class WorkflowExecutor {
 
 		// Resolve provider/model exactly as the background path (preset → fallback).
 		const mode = workflow.mode ?? this.deps.getSettings().mode;
-		const registryProviderId = this.deps.providerRegistry.getActiveId();
-		const registryConfig = this.deps.providerRegistry.getConfig(registryProviderId);
+		// No panel here: fall back to the active persona's model (pure
+		// resolution — personas never mutate the global registry), else the
+		// settings-tab default provider/model.
+		const fallback = resolvePersonaProviderConfig(
+			personaManager?.getActivePersona() ?? null,
+			null,
+			this.deps.getSettings(),
+			this.deps.providerRegistry,
+		);
 		const { providerId, modelId, useExtendedContext, thinkingLevel } = resolveWorkflowProviderConfig(
 			workflow,
 			this.deps.getSettings(),
-			registryProviderId,
-			registryConfig?.model_id ?? "",
-			registryConfig?.use_extended_context ?? false,
-			null,
+			fallback.providerId,
+			fallback.modelId,
+			fallback.useExtendedContext,
+			fallback.thinkingLevel,
 		);
 
 		const activePersonaName = personaManager?.getActivePersona()?.name ?? null;
@@ -772,15 +780,22 @@ export class WorkflowExecutor {
 		// active conversation — we operate on a separate ConversationManager instance
 		// scoped to this background execution).
 		const mode = workflow.mode ?? this.deps.getSettings().mode;
-		const registryProviderId = this.deps.providerRegistry.getActiveId();
-		const registryConfig = this.deps.providerRegistry.getConfig(registryProviderId);
+		// No panel here: fall back to the active persona's model (pure
+		// resolution — personas never mutate the global registry), else the
+		// settings-tab default provider/model.
+		const fallback = resolvePersonaProviderConfig(
+			personaManager?.getActivePersona() ?? null,
+			null,
+			this.deps.getSettings(),
+			this.deps.providerRegistry,
+		);
 		const { providerId, modelId, useExtendedContext, thinkingLevel } = resolveWorkflowProviderConfig(
 			workflow,
 			this.deps.getSettings(),
-			registryProviderId,
-			registryConfig?.model_id ?? "",
-			registryConfig?.use_extended_context ?? false,
-			null,
+			fallback.providerId,
+			fallback.modelId,
+			fallback.useExtendedContext,
+			fallback.thinkingLevel,
 		);
 
 		// Determine the active persona name after any switch

@@ -142,8 +142,10 @@ export class PersonaManager {
 			preferredModel: persona.preferred_model,
 		});
 
-		// Switch provider/model if persona specifies overrides (A-007, A-008)
-		this.applyProviderModelOverrides(persona);
+		// Surface unavailable provider/model overrides (A-008). The overrides
+		// themselves are applied per panel / per run (resolvePersonaOverrides,
+		// resolvePersonaProviderConfig) — never to the global registry.
+		this.warnUnavailableOverrides(persona);
 
 		// Notify listeners (file-watcher refresh + plugin startup)
 		for (const cb of this.personaChangedCallbacks) cb(persona);
@@ -152,18 +154,12 @@ export class PersonaManager {
 	}
 
 	/**
-	 * Deactivate the current persona, reverting to global defaults.
-	 *
-	 * Clears the active persona, reverts provider/model to global settings,
-	 * and persists the cleared state.
+	 * Deactivate the current persona and persist the cleared state.
 	 */
 	deactivatePersona(): void {
 		const previousName = this.activePersona?.name;
 		this.activePersona = null;
 		this.settings.active_persona = "";
-
-		// Revert provider/model to global defaults
-		this.revertProviderModel();
 
 		// Persist (fire-and-forget — errors logged internally by saveData)
 		this.saveData().catch((e) => {
@@ -340,115 +336,45 @@ export class PersonaManager {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Apply provider and model overrides specified by a persona.
-	 *
-	 * Handles fallback gracefully: if the specified provider or model is
-	 * not available, falls back to the current default and surfaces a
-	 * non-blocking notice (A-008).
+	 * Warn (non-blocking, A-008) when a persona's preset, provider or model
+	 * override can't be honored. Read-only: never touches the global
+	 * `ProviderRegistry` — mutating it made one panel's (or a background
+	 * workflow's) persona silently change every other panel's model.
 	 */
-	private applyProviderModelOverrides(persona: Persona): void {
-		// --- Preset resolution (highest priority) ---
+	private warnUnavailableOverrides(persona: Persona): void {
 		if (persona.preferred_preset) {
 			const resolved = resolvePreset(persona.preferred_preset, this.settings.model_presets);
-			if (resolved) {
-				try {
-					const config = this.providerRegistry.getConfig(resolved.providerId);
-					if (config) {
-						this.providerRegistry.switchProvider(resolved.providerId);
-						const updated = {
-							...config,
-							model_id: resolved.modelId,
-							use_extended_context: resolved.useExtendedContext,
-						};
-						this.providerRegistry.updateConfig(updated);
-						log.info("Applied preset override for persona", {
-							persona: persona.name,
-							preset: persona.preferred_preset,
-							provider: resolved.providerId,
-							model: resolved.modelId,
-						});
-						return; // Preset fully applied — skip legacy provider/model overrides
-					}
-				} catch (e) {
-					log.warn("Failed to apply persona preset override", {
-						persona: persona.name,
-						preset: persona.preferred_preset,
-						error: String(e),
-					});
-				}
-			}
-			// Preset not configured or failed — fall through to legacy overrides
+			if (resolved && this.providerRegistry.getConfig(resolved.providerId)) return;
 			new Notice(
 				`Preset '${persona.preferred_preset}' not available; falling back to provider/model overrides.`
 			);
 		}
 
-		// --- Provider switch (legacy fallback) ---
+		let providerId: string | null = null;
 		if (persona.preferred_provider) {
-			try {
-				// Try as instance ID first, then resolve as type for backward compat
-				let config = this.providerRegistry.getConfig(persona.preferred_provider);
-				if (!config) {
-					const resolvedId = this.providerRegistry.resolveTypeToId(persona.preferred_provider);
-					if (resolvedId) config = this.providerRegistry.getConfig(resolvedId);
-				}
-				if (config) {
-					this.providerRegistry.switchProvider(config.id);
-					log.info("Switched provider for persona", {
-						persona: persona.name,
-						provider: config.id,
-					});
-				} else {
-					new Notice(
-						`Provider '${persona.preferred_provider}' not available; using default.`
-					);
-					log.warn("Persona preferred provider not available, using default", {
-						persona: persona.name,
-						requestedProvider: persona.preferred_provider,
-					});
-				}
-			} catch (e) {
-				new Notice(
-					`Provider '${persona.preferred_provider}' not available; using default.`
-				);
-				log.warn("Failed to switch to persona preferred provider", {
+			providerId = this.providerRegistry.getConfig(persona.preferred_provider)?.id
+				?? this.providerRegistry.resolveTypeToId(persona.preferred_provider);
+			if (!providerId) {
+				new Notice(`Provider '${persona.preferred_provider}' not available; using default.`);
+				log.warn("Persona preferred provider not available, using default", {
 					persona: persona.name,
 					requestedProvider: persona.preferred_provider,
-					error: String(e),
 				});
 			}
 		}
 
-		// --- Model switch ---
 		if (persona.preferred_model) {
-			const activeId = this.providerRegistry.getActiveId();
-			const config = this.providerRegistry.getConfig(activeId);
-
-			if (config) {
-				// Check if the model is available in the cached model list
-				const cachedModels = this.providerRegistry.getCachedModels(activeId);
-				const modelAvailable =
-					cachedModels.length === 0 || // No cache yet — optimistically set it
-					cachedModels.some((m) => m.id === persona.preferred_model);
-
-				if (modelAvailable) {
-					const updated = { ...config, model_id: persona.preferred_model, use_extended_context: false };
-					this.providerRegistry.updateConfig(updated);
-					log.info("Switched model for persona", {
-						persona: persona.name,
-						model: persona.preferred_model,
-					});
-				} else {
-					// Model not in cached list — fall back with notice (A-008)
-					new Notice(
-						`Model '${persona.preferred_model}' not available; using default.`
-					);
-					log.warn("Persona preferred model not available, using default", {
-						persona: persona.name,
-						requestedModel: persona.preferred_model,
-						availableModels: cachedModels.map((m) => m.id),
-					});
-				}
+			const cachedModels = this.providerRegistry.getCachedModels(providerId ?? this.providerRegistry.getActiveId());
+			const modelAvailable =
+				cachedModels.length === 0 || // No cache yet — optimistically accept
+				cachedModels.some((m) => m.id === persona.preferred_model);
+			if (!modelAvailable) {
+				new Notice(`Model '${persona.preferred_model}' not available; using default.`);
+				log.warn("Persona preferred model not available, using default", {
+					persona: persona.name,
+					requestedModel: persona.preferred_model,
+					availableModels: cachedModels.map((m) => m.id),
+				});
 			}
 		}
 	}
@@ -465,45 +391,6 @@ export class PersonaManager {
 			const normalized = normalizePath(current);
 			if (!this.vault.getAbstractFileByPath(normalized)) {
 				await this.vault.createFolder(normalized);
-			}
-		}
-	}
-
-	/**
-	 * Revert provider and model to global defaults from settings.
-	 *
-	 * Called on persona deactivation to restore the user's configured
-	 * defaults.
-	 */
-	private revertProviderModel(): void {
-		// Revert provider to global default
-		const globalProviderId = this.settings.active_provider;
-		try {
-			this.providerRegistry.switchProvider(globalProviderId);
-			log.debug("Reverted provider to global default", { provider: globalProviderId });
-		} catch (e) {
-			log.warn("Failed to revert provider to global default", {
-				error: String(e),
-			});
-		}
-
-		// Revert model and use_extended_context to global defaults (from the provider's stored config)
-		const providerSettings = this.settings.providers.find(
-			(p) => p.id === globalProviderId
-		);
-		if (providerSettings?.model_id) {
-			const currentConfig = this.providerRegistry.getConfig(globalProviderId);
-			if (currentConfig) {
-				const reverted = {
-					...currentConfig,
-					model_id: providerSettings.model_id,
-					use_extended_context: providerSettings.use_extended_context ?? false,
-				};
-				this.providerRegistry.updateConfig(reverted);
-				log.debug("Reverted model to global default", {
-					model: providerSettings.model_id,
-					use_extended_context: providerSettings.use_extended_context ?? false,
-				});
 			}
 		}
 	}

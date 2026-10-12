@@ -980,6 +980,13 @@ export class NotorChatView extends ItemView {
 		}
 	}
 
+	/** Re-render the popover's model list (e.g. after a background fetch). */
+	refreshModelList(): void {
+		if (this.settingsPopover?.isOpen()) {
+			this.settingsPopover.refreshModelSelect();
+		}
+	}
+
 	updatePresetDisplay(presetName: string | null): void {
 		this.displayedPresetName = presetName;
 		if (this.settingsPopover?.isOpen()) {

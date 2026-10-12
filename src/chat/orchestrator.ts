@@ -2002,9 +2002,14 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	setActiveProvider(providerId: string): void {
 		this.activeProviderId = providerId;
+		// The provider's settings-tab default (Quick Settings never rewrite it),
+		// else the first cached model — always a model valid for THIS provider.
 		const config = this.providerRegistry.getConfig(providerId);
-		this.activeModelId = config?.model_id ?? "";
-		this.activeUseExtendedContext = config?.use_extended_context ?? false;
+		this.activeModelId = config?.model_id
+			|| this.providerRegistry.getCachedModels(providerId)[0]?.id
+			|| "";
+		this.activeUseExtendedContext = (config?.model_id === this.activeModelId)
+			&& (config?.use_extended_context ?? false);
 	}
 
 	/**
@@ -2031,7 +2036,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 	/** The panel's active model selection as one value. */
-	private getActiveSelection(): ModelSelection {
+	getActiveSelection(): ModelSelection {
 		return {
 			providerId: this.activeProviderId,
 			modelId: this.activeModelId,
