@@ -1869,12 +1869,18 @@ export class ChatOrchestrator implements ToolSessionContext {
 			}
 
 			for (const [toolName, entries] of blocksByTool) {
-				convManager.addMessage({
+				const blockMessage = convManager.addMessage({
 					role: "extension_block",
 					content: entries.map((e) => e.block),
 					source_extension: toolName,
 					exclude_from_compaction: false,
 				});
+				// The session manager only persists; render live so the block
+				// appears now rather than after the next conversation reload.
+				const view = this.getViewForSession(session);
+				if (view && !view.hasMessageElement(blockMessage.id)) {
+					view.renderExtensionBlock(blockMessage);
+				}
 			}
 		}
 	}

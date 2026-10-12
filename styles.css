@@ -4757,7 +4757,8 @@
 	flex-shrink: 0;
 }
 
-.notor-plan-footer:not(.is-pending) .notor-plan-note {
+/* Read-only once decided: the header status badge carries the state. */
+.notor-plan-footer:not(.is-pending) {
 	display: none;
 }
 
