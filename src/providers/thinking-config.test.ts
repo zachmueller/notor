@@ -6,7 +6,7 @@ describe("resolveAnthropicThinking", () => {
 	describe("effort models (Opus 4.8)", () => {
 		it("maps named level to adaptive + matching effort (direct id)", () => {
 			expect(resolveAnthropicThinking("high", "claude-opus-4-8")).toEqual({
-				thinking: { type: "adaptive" },
+				thinking: { type: "adaptive", display: "summarized" },
 				effort: "high",
 			});
 		});
@@ -20,7 +20,7 @@ describe("resolveAnthropicThinking", () => {
 			];
 			for (const id of ids) {
 				expect(resolveAnthropicThinking("medium", id)).toEqual({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 					effort: "medium",
 				});
 			}
@@ -28,7 +28,7 @@ describe("resolveAnthropicThinking", () => {
 
 		it("maps a custom integer budget to adaptive + effort:medium (regression: must NOT be enabled)", () => {
 			expect(resolveAnthropicThinking("8000", "global.anthropic.claude-opus-4-8")).toEqual({
-				thinking: { type: "adaptive" },
+				thinking: { type: "adaptive", display: "summarized" },
 				effort: "medium",
 			});
 		});
@@ -87,11 +87,11 @@ describe("resolveAnthropicThinking", () => {
 		// adaptive + effort exactly like Opus 4.8 — NOT to an undefined/no-op payload.
 		it("maps a level to adaptive + effort for Claude Fable 5", () => {
 			expect(resolveAnthropicThinking("high", "global.anthropic.claude-fable-5")).toEqual({
-				thinking: { type: "adaptive" },
+				thinking: { type: "adaptive", display: "summarized" },
 				effort: "high",
 			});
 			expect(resolveAnthropicThinking("medium", "claude-fable-5")).toEqual({
-				thinking: { type: "adaptive" },
+				thinking: { type: "adaptive", display: "summarized" },
 				effort: "medium",
 			});
 		});

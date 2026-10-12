@@ -206,7 +206,7 @@ describe("BedrockProvider — credential expiry retry", () => {
  */
 async function runSend(
 	model: string,
-	opts: { useExtendedContext?: boolean; error?: Error } = {}
+	opts: { useExtendedContext?: boolean; thinkingLevel?: string; error?: Error } = {}
 ): Promise<{ input: Record<string, unknown>; thrown?: unknown }> {
 	const provider = makeProvider();
 	let input: Record<string, unknown> = {};
@@ -222,6 +222,7 @@ async function runSend(
 		for await (const _chunk of provider.sendMessage([{ role: "user", content: "hi" }], [], {
 			model,
 			use_extended_context: opts.useExtendedContext,
+			thinking_level: opts.thinkingLevel,
 		})) {
 			// drain
 		}
@@ -297,5 +298,22 @@ describe("BedrockProvider — 1M beta and context limits", () => {
 		)];
 		expect(chunks[0]).toMatchObject({ type: "error", details: { name: "ValidationException" } });
 		expect(getLearnedContextWindow("us.anthropic.claude-opus-5-5")).toBe(200_000);
+	});
+});
+
+describe("BedrockProvider — thinking request fields", () => {
+	function fieldsOf(input: Record<string, unknown>): Record<string, unknown> | undefined {
+		return input.additionalModelRequestFields as Record<string, unknown> | undefined;
+	}
+
+	it("requests summarized adaptive thinking for effort models", async () => {
+		const { input } = await runSend("us.anthropic.claude-opus-4-8", { thinkingLevel: "high" });
+		expect(fieldsOf(input)?.thinking).toEqual({ type: "adaptive", display: "summarized" });
+		expect(fieldsOf(input)?.output_config).toEqual({ effort: "high" });
+	});
+
+	it("leaves legacy budget thinking without a display field", async () => {
+		const { input } = await runSend("us.anthropic.claude-opus-4-6-v1", { thinkingLevel: "high" });
+		expect(fieldsOf(input)?.thinking).toEqual({ type: "enabled", budget_tokens: 16384 });
 	});
 });

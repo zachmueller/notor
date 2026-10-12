@@ -142,3 +142,40 @@ describe("AnthropicProvider — model limits", () => {
 		expect(getLearnedContextWindow("claude-opus-5-5")).toBe(200_000);
 	});
 });
+
+describe("AnthropicProvider — thinking request body", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	/** Send one message and return the parsed request body (the fetch is rejected after capture). */
+	async function captureBody(model: string, thinkingLevel: string): Promise<Record<string, unknown>> {
+		let body: Record<string, unknown> = {};
+		vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: string }) => {
+			body = JSON.parse(init.body) as Record<string, unknown>;
+			return { ok: false, status: 400, text: async () => "{}" };
+		}));
+		const app = { secretStorage: { getSecret: () => "sk-test" } } as unknown as App;
+		const provider = new AnthropicProvider({ id: "test", endpoint: "https://api.example.com" } as never, app);
+		try {
+			for await (const _chunk of provider.sendMessage([{ role: "user", content: "hi" }], [], {
+				model,
+				thinking_level: thinkingLevel,
+			})) {
+				// drain
+			}
+		} catch {
+			// expected — the stubbed response is an error
+		}
+		return body;
+	}
+
+	it("requests summarized adaptive thinking for effort models", async () => {
+		const body = await captureBody("claude-opus-4-8", "high");
+		expect(body.thinking).toEqual({ type: "adaptive", display: "summarized" });
+		expect(body.output_config).toEqual({ effort: "high" });
+	});
+
+	it("leaves legacy budget thinking without a display field", async () => {
+		const body = await captureBody("claude-opus-4-6", "high");
+		expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 16384 });
+	});
+});

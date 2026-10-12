@@ -20,7 +20,7 @@ const OPENAI_LEVEL_MAP: Record<string, "low" | "medium" | "high"> = {
 
 export type AnthropicThinkingConfig =
 	| { type: "enabled"; budget_tokens: number }
-	| { type: "adaptive" };
+	| { type: "adaptive"; display?: "summarized" | "omitted" };
 
 export type OpenAIReasoningEffort = "low" | "medium" | "high";
 
@@ -49,10 +49,12 @@ export function resolveAnthropicThinking(
 
 	// Effort models (Opus 4.8+) use adaptive thinking + output_config.effort and
 	// reject thinking.type=enabled. Named levels map directly; a custom integer
-	// budget has no effort meaning, so default to medium.
+	// budget has no effort meaning, so default to medium. `display: "summarized"`
+	// opts back into streamed reasoning text — Opus 4.7+ and the 5-series default
+	// to "omitted" (empty thinking text, signature only).
 	if (mode === "effort") {
 		return {
-			thinking: { type: "adaptive" },
+			thinking: { type: "adaptive", display: "summarized" },
 			effort: EFFORT_MAP[level] ?? "medium",
 		};
 	}
