@@ -38,12 +38,13 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	buildDefaultSettings,
 	newConversation,
+	sendMessage,
 	waitForSelector,
+	CHAT_ONLY,
 	VAULT_PATH,
 	PLUGIN_DATA_PATH,
 } from "../lib/test-helpers";
@@ -96,27 +97,6 @@ function getAllMessages(): Array<Record<string, unknown>> {
 	return [];
 }
 
-async function sendMessageLocal(page: Page, msg: string): Promise<boolean> {
-	const input = await page.$(".notor-text-input");
-	if (!input) throw new Error("Chat input not found");
-	await input.click();
-	await input.evaluate((el, m) => { el.textContent = m; el.dispatchEvent(new Event("input", { bubbles: true })); }, msg);
-	await page.waitForTimeout(200);
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(600);
-	console.log(`    → Sent: "${msg.substring(0, 80)}"`);
-	const start = Date.now();
-	while (Date.now() - start < 90_000) {
-		await page.waitForTimeout(1_500);
-		const ready = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el ? el.getAttribute("contenteditable") === "true" : false;
-		});
-		if (ready) return true;
-	}
-	return false;
-}
-
 function buildHookSettings(hooks: Record<string, unknown[]>): Record<string, unknown> {
 	return buildDefaultSettings({
 		model_id: undefined,
@@ -147,7 +127,7 @@ async function testPreSendHookInjection(ctx: TestContext): Promise<void> {
 	await ctx.page.waitForTimeout(5_000);
 
 	await newConversation(ctx.page);
-	const responded = await sendMessageLocal(ctx.page, "Hello with pre-send hook");
+	const responded = await sendMessage(ctx.page, "Hello with pre-send hook" + CHAT_ONLY);
 	const shot = await ctx.screenshot("01-pre-send");
 
 	await ctx.page.waitForTimeout(1_000);
@@ -216,7 +196,7 @@ async function testAfterCompletionHook(ctx: TestContext): Promise<void> {
 	await ctx.page.waitForTimeout(5_000);
 
 	await newConversation(ctx.page);
-	await sendMessageLocal(ctx.page, "Hello, test after-completion hook");
+	await sendMessage(ctx.page, "Hello, test after-completion hook" + CHAT_ONLY);
 	const shot = await ctx.screenshot("02-after-completion");
 
 	await ctx.page.waitForTimeout(3_000);
@@ -245,7 +225,7 @@ async function testHookTimeout(ctx: TestContext): Promise<void> {
 	await ctx.page.waitForTimeout(5_000);
 
 	await newConversation(ctx.page);
-	const responded = await sendMessageLocal(ctx.page, "Test with timeout hook");
+	const responded = await sendMessage(ctx.page, "Test with timeout hook" + CHAT_ONLY);
 	const shot = await ctx.screenshot("03-hook-timeout");
 
 	if (responded) {
@@ -270,7 +250,7 @@ async function testFailingHookNonBlocking(ctx: TestContext): Promise<void> {
 	await ctx.page.waitForTimeout(5_000);
 
 	await newConversation(ctx.page);
-	const responded = await sendMessageLocal(ctx.page, "Test with failing hook");
+	const responded = await sendMessage(ctx.page, "Test with failing hook" + CHAT_ONLY);
 	const shot = await ctx.screenshot("04-failing-hook");
 
 	if (responded) {
@@ -295,7 +275,7 @@ async function testHookOutputRendersAsCollapsible(ctx: TestContext): Promise<voi
 	await ctx.page.waitForTimeout(5_000);
 
 	await newConversation(ctx.page);
-	await sendMessageLocal(ctx.page, "ACI-TEST-005-a: verify hook output renders as collapsible");
+	await sendMessage(ctx.page, "ACI-TEST-005-a: verify hook output renders as collapsible" + CHAT_ONLY);
 	const shot = await ctx.screenshot("aci-005a-collapsible");
 
 	await ctx.page.waitForTimeout(1_000);
@@ -473,7 +453,7 @@ async function testNoCollapsibleWhenNoHookOutput(ctx: TestContext): Promise<void
 	await ctx.page.waitForTimeout(5_000);
 
 	await newConversation(ctx.page);
-	await sendMessageLocal(ctx.page, "ACI-TEST-005-d: silent hook — no collapsible should appear");
+	await sendMessage(ctx.page, "ACI-TEST-005-d: silent hook — no collapsible should appear" + CHAT_ONLY);
 	const shot = await ctx.screenshot("aci-005d-no-collapsible");
 
 	await ctx.page.waitForTimeout(1_000);
@@ -519,7 +499,7 @@ async function testDisabledHookSkipped(ctx: TestContext): Promise<void> {
 	await ctx.page.waitForTimeout(5_000);
 
 	await newConversation(ctx.page);
-	await sendMessageLocal(ctx.page, "Test with disabled hook");
+	await sendMessage(ctx.page, "Test with disabled hook" + CHAT_ONLY);
 	const shot = await ctx.screenshot("05-disabled-hook");
 
 	await ctx.page.waitForTimeout(2_000);

@@ -38,6 +38,7 @@ import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	buildDefaultSettings,
 	sendMessage,
+	waitForResponse,
 	newConversation,
 	ensureCleanState,
 	writeCleanWorkspace,
@@ -152,22 +153,6 @@ async function switchWorkflow(page: Page, workflowFilePath: string): Promise<{ o
 	}, workflowFilePath);
 }
 
-/** Wait for the chat input to be editable again (response settled). */
-async function waitForInputEnabled(page: Page, timeoutMs = 90_000): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		const enabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			const stop = document.querySelector(".notor-stop-btn");
-			const stopHidden = !stop || stop.classList.contains("notor-hidden");
-			return el?.getAttribute("contenteditable") === "true" && stopHidden;
-		});
-		if (enabled) return true;
-		await page.waitForTimeout(1_000);
-	}
-	return false;
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -194,10 +179,10 @@ async function testForegroundSyncBack(ctx: TestContext): Promise<{ workflowConvI
 		return { workflowConvId: null };
 	}
 
-	const settled = await waitForInputEnabled(page);
+	const settled = await waitForResponse(page);
 	if (!settled) {
 		const shot = await ctx.screenshot("01-not-settled");
-		ctx.fail("Workflow turn settled", "Input did not re-enable within timeout after workflow turn", shot);
+		ctx.fail("Workflow turn settled", "Send button did not return within timeout after workflow turn", shot);
 		return { workflowConvId: null };
 	}
 	// Give the finally-block sync-back a beat to flush into the display manager.
@@ -335,10 +320,10 @@ async function testSwitchWorkflowStaysAttached(ctx: TestContext): Promise<void> 
 		return;
 	}
 
-	const settled = await waitForInputEnabled(page);
+	const settled = await waitForResponse(page);
 	if (!settled) {
 		const shot = await ctx.screenshot("03-switch-not-settled");
-		ctx.fail("Switched workflow turn settled", "Input did not re-enable after switchWorkflow turn", shot);
+		ctx.fail("Switched workflow turn settled", "Send button did not return after switchWorkflow turn", shot);
 		return;
 	}
 	await page.waitForTimeout(1_500);

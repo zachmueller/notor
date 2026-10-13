@@ -23,7 +23,7 @@ import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	buildDefaultSettings,
 	sendMessage,
-	waitForResponse,
+	sendMessageNoWait,
 	newConversation,
 	ensureCleanState,
 	setMode,
@@ -32,25 +32,6 @@ import {
 // ---------------------------------------------------------------------------
 // Local helpers
 // ---------------------------------------------------------------------------
-
-/** Send a message without waiting for the response to complete. */
-async function sendMessageNoWait(page: any, message: string): Promise<void> {
-	const found = await page.evaluate((msg: string) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (!el) return false;
-		el.focus();
-		el.textContent = msg;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-		return true;
-	}, message);
-	if (!found) throw new Error("Chat input not found");
-
-	await page.waitForTimeout(300);
-	await page.focus(".notor-text-input");
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(400);
-	console.log(`    -> Sent (no wait): "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
-}
 
 /** Wait until the stop button becomes visible (streaming started). */
 async function waitForStopButton(page: any, timeoutMs = 30_000): Promise<boolean> {
@@ -62,20 +43,6 @@ async function waitForStopButton(page: any, timeoutMs = 30_000): Promise<boolean
 			return btn && !btn.classList.contains("notor-hidden");
 		});
 		if (stopVisible) return true;
-	}
-	return false;
-}
-
-/** Wait until the contenteditable input is re-enabled. */
-async function waitForInputEnabled(page: any, timeoutMs = 30_000): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		await page.waitForTimeout(500);
-		const enabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
-		});
-		if (enabled) return true;
 	}
 	return false;
 }
@@ -151,14 +118,6 @@ async function isStopButtonVisible(page: any): Promise<boolean> {
 	});
 }
 
-/** Check if the chat input is editable. */
-async function isInputEnabled(page: any): Promise<boolean> {
-	return page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el !== null && el.getAttribute("contenteditable") === "true";
-	});
-}
-
 /** Get the current mode text from the mode toggle button. */
 async function getCurrentMode(page: any): Promise<string | null> {
 	return page.evaluate(() => {
@@ -199,7 +158,7 @@ const shared: SharedState = {};
  * Test 1: Switch away from a conversation with an active tool call.
  *
  * Verifies that the destination conversation has send button visible and
- * input enabled, and that switching back shows the correct state.
+ * stop button hidden, and that switching back shows the correct state.
  */
 async function testSwitchAwayFromActiveToolCall(ctx: TestContext): Promise<void> {
 	console.log("\nTest 1: Switch away from active tool call");
@@ -266,15 +225,15 @@ async function testSwitchAwayFromActiveToolCall(ctx: TestContext): Promise<void>
 	}
 	await page.waitForTimeout(500);
 
-	// Step 5: Verify send button is visible and input is enabled in idle conversation
+	// Step 5: Verify send button is visible and stop button hidden in idle conversation
 	const sendVisible = await isSendButtonVisible(page);
-	const inputEnabled = await isInputEnabled(page);
+	const stopHidden = !(await isStopButtonVisible(page));
 	const ss1 = await ctx.screenshot("test1-idle-conversation-state");
 
-	if (sendVisible && inputEnabled) {
-		ctx.pass("Idle conversation UI unlocked", "Send button visible and input enabled after switching away from streaming", ss1);
+	if (sendVisible && stopHidden) {
+		ctx.pass("Idle conversation UI unlocked", "Send button visible and stop button hidden after switching away from streaming", ss1);
 	} else {
-		ctx.fail("Idle conversation UI unlocked", `Send button visible: ${sendVisible}, input enabled: ${inputEnabled}`, ss1);
+		ctx.fail("Idle conversation UI unlocked", `Send button visible: ${sendVisible}, stop button hidden: ${stopHidden}`, ss1);
 	}
 
 	// Step 6: Switch back to the streaming conversation
@@ -316,13 +275,13 @@ async function testSwitchAwayFromActiveToolCall(ctx: TestContext): Promise<void>
 	}
 
 	const finalSendVisible = await isSendButtonVisible(page);
-	const finalInputEnabled = await isInputEnabled(page);
+	const finalStopHidden = !(await isStopButtonVisible(page));
 	const ss3 = await ctx.screenshot("test1-after-completion");
 
-	if (finalSendVisible && finalInputEnabled) {
-		ctx.pass("Final state after completion", "Send button visible and input enabled after session completed", ss3);
+	if (finalSendVisible && finalStopHidden) {
+		ctx.pass("Final state after completion", "Send button visible and stop button hidden after session completed", ss3);
 	} else {
-		ctx.fail("Final state after completion", `Send button: ${finalSendVisible}, input: ${finalInputEnabled}`, ss3);
+		ctx.fail("Final state after completion", `Send button: ${finalSendVisible}, stop hidden: ${finalStopHidden}`, ss3);
 	}
 }
 
@@ -362,15 +321,15 @@ async function testNewConversationDuringToolCall(ctx: TestContext): Promise<void
 	await newConversation(page);
 	await page.waitForTimeout(1_000);
 
-	// Step 3: Verify send button is visible and input is enabled
+	// Step 3: Verify send button is visible and stop button hidden
 	const sendVisible = await isSendButtonVisible(page);
-	const inputEnabled = await isInputEnabled(page);
+	const stopHidden = !(await isStopButtonVisible(page));
 	const ss1 = await ctx.screenshot("test2-new-conversation-state");
 
-	if (sendVisible && inputEnabled) {
-		ctx.pass("New conversation UI ready", "Send button visible and input enabled after New Conversation during tool call", ss1);
+	if (sendVisible && stopHidden) {
+		ctx.pass("New conversation UI ready", "Send button visible and stop button hidden after New Conversation during tool call", ss1);
 	} else {
-		ctx.fail("New conversation UI ready", `Send button: ${sendVisible}, input: ${inputEnabled} — UI stuck in responding state`, ss1);
+		ctx.fail("New conversation UI ready", `Send button: ${sendVisible}, stop hidden: ${stopHidden} — UI stuck in responding state`, ss1);
 	}
 
 	// Step 4: Verify we can send a message in the new conversation
@@ -382,7 +341,7 @@ async function testNewConversationDuringToolCall(ctx: TestContext): Promise<void
 		return;
 	}
 
-	if (sendVisible && inputEnabled) {
+	if (sendVisible && stopHidden) {
 		console.log("    Sending a test message in the new conversation...");
 		const responded = await sendMessage(page, "Say exactly: hello-test-response");
 
@@ -404,13 +363,13 @@ async function testNewConversationDuringToolCall(ctx: TestContext): Promise<void
 			await page.waitForTimeout(1_000);
 
 			const sendBtn = await isSendButtonVisible(page);
-			const input = await isInputEnabled(page);
+			const stopHidden = !(await isStopButtonVisible(page));
 			const ss2 = await ctx.screenshot("test2-back-to-old-conversation");
 
-			if (sendBtn && input) {
-				ctx.pass("Old conversation usable after completion", "Send button visible and input enabled in old conversation", ss2);
+			if (sendBtn && stopHidden) {
+				ctx.pass("Old conversation usable after completion", "Send button visible and stop button hidden in old conversation", ss2);
 			} else {
-				ctx.fail("Old conversation usable after completion", `Send: ${sendBtn}, input: ${input}`, ss2);
+				ctx.fail("Old conversation usable after completion", `Send: ${sendBtn}, stop hidden: ${stopHidden}`, ss2);
 			}
 		}
 	}
@@ -491,10 +450,10 @@ async function testRapidSwitching(ctx: TestContext): Promise<void> {
 
 		if (label !== "streaming") {
 			const sendBtn = await isSendButtonVisible(page);
-			const input = await isInputEnabled(page);
-			if (!sendBtn || !input) {
+			const stopHidden = !(await isStopButtonVisible(page));
+			if (!sendBtn || !stopHidden) {
 				allIdleSwitchesCorrect = false;
-				console.log(`    FAIL: After switching to ${label}: send=${sendBtn}, input=${input}`);
+				console.log(`    FAIL: After switching to ${label}: send=${sendBtn}, stopHidden=${stopHidden}`);
 			}
 		}
 		console.log(`    Switched to ${label}`);
@@ -502,7 +461,7 @@ async function testRapidSwitching(ctx: TestContext): Promise<void> {
 
 	const ss1 = await ctx.screenshot("test3-after-rapid-switches");
 	if (allIdleSwitchesCorrect) {
-		ctx.pass("Idle conversations unlocked during rapid switching", "All idle conversations had send button visible and input enabled", ss1);
+		ctx.pass("Idle conversations unlocked during rapid switching", "All idle conversations had send button visible and stop button hidden", ss1);
 	} else {
 		ctx.fail("Idle conversations unlocked during rapid switching", "One or more idle conversations had stuck UI state", ss1);
 	}
@@ -519,16 +478,16 @@ async function testRapidSwitching(ctx: TestContext): Promise<void> {
 		await switchToConversation(page, filename);
 		await page.waitForTimeout(500);
 		const sendBtn = await isSendButtonVisible(page);
-		const input = await isInputEnabled(page);
-		if (!sendBtn || !input) {
+		const stopHidden = !(await isStopButtonVisible(page));
+		if (!sendBtn || !stopHidden) {
 			allFinalStatesCorrect = false;
-			console.log(`    FAIL: ${filename}: send=${sendBtn}, input=${input}`);
+			console.log(`    FAIL: ${filename}: send=${sendBtn}, stopHidden=${stopHidden}`);
 		}
 	}
 
 	const ss2 = await ctx.screenshot("test3-all-conversations-final");
 	if (allFinalStatesCorrect) {
-		ctx.pass("All conversations usable after streaming completes", "Send button and input enabled in all conversations", ss2);
+		ctx.pass("All conversations usable after streaming completes", "Send button visible and stop button hidden in all conversations", ss2);
 	} else {
 		ctx.fail("All conversations usable after streaming completes", "One or more conversations had stuck UI state after streaming completed", ss2);
 	}

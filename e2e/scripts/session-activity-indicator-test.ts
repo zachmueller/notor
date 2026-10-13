@@ -29,31 +29,14 @@ import {
 	waitForSelector,
 	newConversation,
 	ensureCleanState,
+	sendMessageNoWait,
+	hasFinishedReply,
 	CHAT_ONLY,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Local helpers
 // ---------------------------------------------------------------------------
-
-/** Send a message without waiting for the response to complete. */
-async function sendMessageNoWait(page: any, message: string): Promise<void> {
-	const found = await page.evaluate((msg: string) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (!el) return false;
-		el.focus();
-		el.textContent = msg;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-		return true;
-	}, message);
-	if (!found) throw new Error("Chat input not found");
-
-	await page.waitForTimeout(300);
-	await page.focus(".notor-text-input");
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(400);
-	console.log(`    -> Sent (no wait): "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
-}
 
 /** Wait until the stop button becomes visible (streaming started). */
 async function waitForStopButton(page: any, timeoutMs = 15_000): Promise<boolean> {
@@ -272,16 +255,13 @@ async function testBadgeShowsCountOnMidStreamSwitch(ctx: TestContext): Promise<v
 	// Wait for streaming to start
 	const stopAppeared = await waitForStopButton(page, 30_000);
 	if (!stopAppeared) {
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el?.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) {
+		// The response may have finished between polls
+		if (await hasFinishedReply(page)) {
 			ctx.pass("Badge count mid-stream", "Response completed too quickly to observe streaming (fast model)");
 			return;
 		}
 		const shot = await ctx.screenshot("01-no-stop-button");
-		ctx.fail("Badge count mid-stream", "Stop button never appeared and input still disabled", shot);
+		ctx.fail("Badge count mid-stream", "Stop button never appeared and no finished reply", shot);
 		return;
 	}
 
@@ -653,11 +633,7 @@ async function testIndicatorAnimationDuringSession(ctx: TestContext): Promise<vo
 
 	const stopAppeared = await waitForStopButton(page, 30_000);
 	if (!stopAppeared) {
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el?.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) {
+		if (await hasFinishedReply(page)) {
 			ctx.pass("Indicator animation", "Response completed too quickly to observe animation (fast model)");
 			return;
 		}

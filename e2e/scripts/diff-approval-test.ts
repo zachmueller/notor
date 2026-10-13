@@ -27,6 +27,8 @@ import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	waitForSelector,
 	waitForResponse,
+	sendMessageNoWait,
+	revealChatView,
 	getLastAssistantMessage,
 	newConversation,
 	setMode,
@@ -42,8 +44,8 @@ import type { Page, ElementHandle } from "playwright-core";
 
 /**
  * Wait for an approval prompt or diff view to appear after the LLM makes a
- * write-tool call. This fires before the response loop completes (input is
- * still disabled while approval is pending).
+ * write-tool call. This fires before the response loop completes (the stop
+ * button stays visible while approval is pending).
  */
 async function waitForApprovalUI(page: Page, timeoutMs = 30_000): Promise<boolean> {
 	const start = Date.now();
@@ -54,40 +56,14 @@ async function waitForApprovalUI(page: Page, timeoutMs = 30_000): Promise<boolea
 		const rejectBtn = await page.$(".notor-reject-btn");
 		const diffView = await page.$(".notor-diff-view");
 
-		if (approveBtn || rejectBtn || diffView) return true;
+		if (approveBtn || rejectBtn || diffView) {
+			// A note the model read first opens in a tab in front of the chat,
+			// hiding the approval buttons from clicks
+			await revealChatView(page);
+			return true;
+		}
 	}
 	return false;
-}
-
-/**
- * Send a chat message and return (without waiting for the full response so the
- * caller can intercept the approval UI mid-flight).
- *
- * Uses `page.evaluate()` to set the contenteditable div's text directly,
- * avoiding `keyboard.type()` which dispatches Enter keydown events for `\n`
- * characters — those would trigger the plugin's Enter-to-send handler and
- * prematurely send a partial message.
- */
-async function sendMessageNoWait(page: Page, message: string): Promise<void> {
-	const found = await page.evaluate((msg) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (!el) return false;
-		el.focus();
-		el.textContent = msg;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-		return true;
-	}, message);
-	if (!found) throw new Error("Chat input not found");
-
-	await page.waitForTimeout(300);
-
-	const sendBtn = await page.$(".notor-send-btn");
-	if (sendBtn) await sendBtn.click();
-	else await page.keyboard.press("Enter");
-
-	await page.waitForTimeout(600);
-
-	console.log(`    → Sent: "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
 }
 
 /**
@@ -169,20 +145,17 @@ async function testWriteNoteApprovalUIAppears(ctx: TestContext): Promise<void> {
 		ctx.fail("write_note — approval UI appears", `Unexpected state: approveBtn=${!!approveBtn}, rejectBtn=${!!rejectBtn}, diffView=${!!diffView}`, shot);
 	}
 
-	// Verify the send button is disabled while approval is pending
+	// Verify the send button is disabled while approval is pending. The input
+	// itself stays editable while a response is in flight (for /btw).
 	const sendDisabled = await page.evaluate(() => {
 		const btn = document.querySelector(".notor-send-btn") as HTMLButtonElement | null;
 		return btn ? btn.disabled || btn.classList.contains("notor-hidden") : true;
 	});
-	const textareaDisabled = await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el ? el.getAttribute("contenteditable") === "false" : false;
-	});
 
-	if (sendDisabled || textareaDisabled) {
-		ctx.pass("write_note — send disabled during approval", "Send button or textarea is disabled while approval is pending");
+	if (sendDisabled) {
+		ctx.pass("write_note — send disabled during approval", "Send button is disabled or hidden while approval is pending");
 	} else {
-		ctx.fail("write_note — send disabled during approval", `sendDisabled=${sendDisabled}, textareaDisabled=${textareaDisabled}`);
+		ctx.fail("write_note — send disabled during approval", "Send button visible and enabled while approval is pending");
 	}
 
 	// Clean up: reject to unblock the response loop

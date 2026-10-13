@@ -26,64 +26,16 @@ import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	buildDefaultSettings,
 	newConversation,
+	sendMessage,
+	sendMessageNoWait,
+	waitForResponse,
+	RESPONSE_TIMEOUT_MS,
 	VAULT_PATH,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
-// Timing
-// ---------------------------------------------------------------------------
-const RESPONSE_TIMEOUT_MS = 90_000;
-const POLL_INTERVAL_MS = 1_000;
-
-// ---------------------------------------------------------------------------
 // Local helpers (unique to this test)
 // ---------------------------------------------------------------------------
-
-/** Send a message and return immediately (do not wait for response). */
-async function sendMessageNoWait(page: Page, message: string): Promise<void> {
-	// Wait for the input to be present
-	const input = await page.waitForSelector(".notor-text-input", { timeout: 8_000 }).catch(() => null);
-	if (!input) throw new Error("Chat input not found");
-	// Set textContent via evaluate (more reliable than keyboard.type on contenteditable)
-	await page.evaluate((text) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (!el) return;
-		el.focus();
-		el.textContent = text;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-	}, message);
-	await page.waitForTimeout(200);
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(400);
-	console.log(`    → Sent: "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
-}
-
-/**
- * Wait until the chat input is re-enabled (response complete).
- * Returns true if completed within timeout.
- *
- * Checks `contenteditable` attribute — the plugin sets it to "false"
- * while responding and back to "true" when done (the input is a
- * contenteditable div, not an <input>, so `.disabled` doesn't apply).
- */
-async function waitForResponse(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		await page.waitForTimeout(POLL_INTERVAL_MS);
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) return true;
-	}
-	return false;
-}
-
-/** Send a message and wait for the response to complete. */
-async function sendMessage(page: Page, message: string): Promise<boolean> {
-	await sendMessageNoWait(page, message);
-	return waitForResponse(page);
-}
 
 /** Wait for at least one streaming text chunk to appear in the last assistant message. */
 async function waitForStreamingStart(page: Page, timeoutMs = 45_000): Promise<boolean> {

@@ -8,7 +8,7 @@
  *  2. Launch Obsidian with the test vault
  *  3. Verify chat panel opens
  *  4. Open settings popover — confirm Bedrock is the active provider
- *  5. Refresh model list and pick the first available model
+ *  5. Refresh model list and pick a known chat model
  *  6. Send a real test prompt to the LLM
  *  7. Wait up to 45s for streaming response
  *  8. Verify: stop button transitions → send button, assistant message rendered,
@@ -24,7 +24,7 @@
  */
 
 import { runTest, type TestContext } from "../lib/test-harness";
-import { waitForSelector, buildDefaultSettings } from "../lib/test-helpers";
+import { waitForSelector, buildDefaultSettings, isPanelIdle, sendMessage } from "../lib/test-helpers";
 
 // Max time to wait for a real LLM response (ms)
 const RESPONSE_TIMEOUT_MS = 60_000;
@@ -127,8 +127,8 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 3: Refresh models and pick first one ─────────────────────
-	console.log("\nTest 3: Refresh Bedrock model list and select first model");
+	// ── Test 3: Refresh models and pick a chat model ──────────────────
+	console.log("\nTest 3: Refresh Bedrock model list and select a chat model");
 	let selectedModelId = "";
 	{
 		const refreshBtn = await page.$(".notor-settings-popover .notor-settings-refresh-btn");
@@ -159,20 +159,20 @@ async function tests(ctx: TestContext) {
 				}
 
 				if (optionData.length > 0) {
-					// Prefer a Claude or Amazon Nova model which reliably supports
-					// the Bedrock Converse API with text-only prompts
+					// Prefer a current Claude or Amazon Nova model that supports the
+					// Bedrock Converse API with text-only prompts. The live catalog also
+					// lists end-of-life and speech models, so "first option" isn't safe.
 					const PREFERRED_PREFIXES = [
+						"anthropic.claude-haiku-4-5",
 						"anthropic.claude-sonnet-4-5",
-						"anthropic.claude-haiku",
-						"anthropic.claude-sonnet",
 						"amazon.nova-lite",
 						"amazon.nova-pro",
-						"anthropic.claude",
-						"amazon.nova",
 					];
+					// Inference profile IDs carry a geo prefix (us., global., …)
+					const baseId = (id: string) => id.replace(/^[a-z-]+\.(?=[a-z0-9-]+\.)/, "");
 					let chosen = optionData[0]!;
 					for (const prefix of PREFERRED_PREFIXES) {
-						const match = optionData.find((o) => o.value.startsWith(prefix));
+						const match = optionData.find((o) => baseId(o.value).startsWith(prefix));
 						if (match) { chosen = match; break; }
 					}
 
@@ -259,14 +259,9 @@ async function tests(ctx: TestContext) {
 						const assistantMsg = await page.$(".notor-message-assistant");
 						const errorMsg = await page.$(".notor-chat-error");
 
-						// Check if input is re-enabled (responding state ended)
-						// The text input is a contenteditable div; contenteditable="false" while responding.
-						const inputEnabled = await page.evaluate(() => {
-							const el = document.querySelector(".notor-text-input");
-							return el && el.getAttribute("contenteditable") === "true";
-						});
-
-						if ((assistantMsg || errorMsg) && inputEnabled) {
+						// The responding state ended: send visible, stop hidden. The input
+						// stays editable while streaming, so it can't signal completion.
+						if ((assistantMsg || errorMsg) && (await isPanelIdle(page))) {
 							responseReceived = true;
 							break;
 						}
@@ -308,26 +303,20 @@ async function tests(ctx: TestContext) {
 					}
 				}
 
-				// ── Test 7: Input re-enabled after response ──────────────
+				// ── Test 7: Input state restored after response ──────────
 				console.log("\nTest 7: Input state restored after response");
 				{
-					const isEnabled = await page.evaluate(() => {
+					const idle = await isPanelIdle(page);
+					// The input stays editable throughout (for /btw); check it still is
+					const isEditable = await page.evaluate(() => {
 						const el = document.querySelector(".notor-text-input");
-						return el && el.getAttribute("contenteditable") === "true";
-					});
-					const stopHidden = await page.evaluate(() => {
-						const btn = document.querySelector(".notor-stop-btn");
-						return !btn || btn.classList.contains("notor-hidden");
-					});
-					const sendVisible = await page.evaluate(() => {
-						const btn = document.querySelector(".notor-send-btn");
-						return btn && !btn.classList.contains("notor-hidden");
+						return el?.getAttribute("contenteditable") === "true";
 					});
 
-					if (isEnabled && stopHidden && sendVisible) {
-						ctx.pass("Input state restored", "Textarea enabled, stop hidden, send visible");
+					if (idle && isEditable) {
+						ctx.pass("Input state restored", "Send visible, stop hidden, input editable");
 					} else {
-						ctx.fail("Input state restored", `textarea.disabled=${!isEnabled}, stopHidden=${stopHidden}, sendVisible=${sendVisible}`);
+						ctx.fail("Input state restored", `idle (send visible, stop hidden)=${idle}, input editable=${isEditable}`);
 					}
 				}
 

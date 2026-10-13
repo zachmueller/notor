@@ -6,13 +6,13 @@
  *
  * Part A — Stop / Abort Mid-Stream (CHAT-007 / CHAT-010):
  *   1. Stop button aborts an in-flight LLM request (send→stop→send transition)
- *   2. After abort, input is re-enabled and a new message can be sent
+ *   2. After abort, the UI returns to the send state and a new message can be sent
  *   3. Aborted response is marked/truncated in the UI (not shown as complete)
  *
  * Part B — Provider Error Handling (INT-004):
  *   4. Bad endpoint (local provider unreachable) shows error in chat, no crash
  *   5. Error message is actionable (not a raw stack trace)
- *   6. After an error the input is re-enabled and a new message can be sent
+ *   6. After an error the UI returns to the send state with no active session
  *   7. Switching provider after error restores functionality
  *
  * Part C — Settings Persistence (SET-001 / SET-002):
@@ -34,10 +34,14 @@ import {
 	waitForSelector,
 	newConversation,
 	setMode,
+	sendMessage,
+	sendMessageNoWait,
+	waitForResponse,
+	isPanelIdle,
+	hasFinishedReply,
 	getLastAssistantMessage,
 	buildDefaultSettings,
 	RESPONSE_TIMEOUT_MS,
-	POLL_INTERVAL_MS,
 	writeCleanWorkspace,
 	CHAT_ONLY,
 } from "../lib/test-helpers";
@@ -45,23 +49,6 @@ import {
 // ---------------------------------------------------------------------------
 // Local helpers (abort-specific — not in shared module)
 // ---------------------------------------------------------------------------
-
-/** Wait until the send button is visible (response/abort fully complete). */
-async function waitForInputEnabled(page: Page, timeoutMs = RESPONSE_TIMEOUT_MS): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		await page.waitForTimeout(POLL_INTERVAL_MS);
-		const ready = await page.evaluate(() => {
-			const sendBtn = document.querySelector(".notor-send-btn");
-			const stopBtn = document.querySelector(".notor-stop-btn");
-			const sendVisible = sendBtn && !sendBtn.classList.contains("notor-hidden");
-			const stopHidden = !stopBtn || stopBtn.classList.contains("notor-hidden");
-			return sendVisible && stopHidden;
-		});
-		if (ready) return true;
-	}
-	return false;
-}
 
 /** Wait until the stop button becomes visible (LLM call in flight). */
 async function waitForStopButton(page: Page, timeoutMs = 15_000): Promise<boolean> {
@@ -75,22 +62,6 @@ async function waitForStopButton(page: Page, timeoutMs = 15_000): Promise<boolea
 		if (stopVisible) return true;
 	}
 	return false;
-}
-
-async function sendMessageNoWait(page: Page, message: string): Promise<void> {
-	const input = await page.$(".notor-text-input");
-	if (!input) throw new Error("Chat input not found");
-	await input.click();
-	await page.keyboard.type(message);
-	await page.waitForTimeout(200);
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(400);
-	console.log(`    → Sent (no wait): "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
-}
-
-async function sendMessage(page: Page, message: string): Promise<boolean> {
-	await sendMessageNoWait(page, message);
-	return waitForInputEnabled(page);
 }
 
 async function getCurrentMode(page: Page): Promise<string> {
@@ -119,24 +90,15 @@ async function testStopButtonAborts(ctx: TestContext): Promise<void> {
 	const shot1 = await ctx.screenshot("01a-stop-visible");
 
 	if (!stopAppeared) {
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) {
-			const errMsg = await page.$(".notor-chat-error");
-			const assistantMsg = await page.$(".notor-message-assistant");
-			if (errMsg) {
-				ctx.fail("stop button — stop visible", "Provider errored before stop button appeared", shot1);
-			} else if (assistantMsg) {
-				ctx.pass("stop button — response completed quickly", "LLM responded faster than stop could be clicked (fast model)");
-			} else {
-				ctx.fail("stop button — stop visible", "Stop button did not appear within 30s", shot1);
-			}
+		const errMsg = await page.$(".notor-chat-error");
+		if (errMsg) {
+			ctx.fail("stop button — stop visible", "Provider errored before stop button appeared", shot1);
+		} else if (await hasFinishedReply(page)) {
+			ctx.pass("stop button — response completed quickly", "LLM responded faster than stop could be clicked (fast model)");
 		} else {
-			ctx.fail("stop button — stop visible", "Stop button did not appear and input still disabled", shot1);
+			ctx.fail("stop button — stop visible", "Stop button did not appear within 30s and no finished reply", shot1);
 		}
-		await waitForInputEnabled(page, 30_000);
+		await waitForResponse(page, 30_000);
 		return;
 	}
 
@@ -145,36 +107,21 @@ async function testStopButtonAborts(ctx: TestContext): Promise<void> {
 	const stopBtn = await page.$(".notor-stop-btn");
 	if (!stopBtn) {
 		ctx.fail("stop button — click stop", "Stop button element not found despite appearing earlier");
-		await waitForInputEnabled(page, 30_000);
+		await waitForResponse(page, 30_000);
 		return;
 	}
 
 	await stopBtn.click();
 	console.log("    → Clicked stop button");
 
-	const abortComplete = await waitForInputEnabled(page, 15_000);
+	const abortComplete = await waitForResponse(page, 15_000);
 
 	const shot2 = await ctx.screenshot("01b-after-stop");
 
 	if (abortComplete) {
-		ctx.pass("stop button — input re-enabled after abort", "Send button visible after abort", shot2);
-	} else {
-		ctx.fail("stop button — input re-enabled after abort", "Send button not visible 15s after stop click", shot2);
-	}
-
-	const stopHidden = await page.evaluate(() => {
-		const btn = document.querySelector(".notor-stop-btn");
-		return !btn || btn.classList.contains("notor-hidden");
-	});
-	const sendVisible = await page.evaluate(() => {
-		const btn = document.querySelector(".notor-send-btn");
-		return btn && !btn.classList.contains("notor-hidden");
-	});
-
-	if (stopHidden && sendVisible) {
 		ctx.pass("stop button — UI reverted to send state", "Stop hidden, send visible after abort", shot2);
 	} else {
-		ctx.fail("stop button — UI reverted to send state", `stopHidden=${stopHidden}, sendVisible=${sendVisible}`, shot2);
+		ctx.fail("stop button — UI reverted to send state", "Stop button still visible 15s after stop click", shot2);
 	}
 }
 
@@ -219,8 +166,13 @@ async function testPartialResponseRetained(ctx: TestContext): Promise<void> {
 	const stopAppeared = await waitForStopButton(page, 30_000);
 
 	if (!stopAppeared) {
-		ctx.pass("partial response — response completed before stop", "Model responded before stop could be clicked (fast response)");
-		await waitForInputEnabled(page, 30_000);
+		if (await hasFinishedReply(page)) {
+			ctx.pass("partial response — response completed before stop", "Model responded before stop could be clicked (fast response)");
+		} else {
+			const shot = await ctx.screenshot("03-no-stop");
+			ctx.fail("partial response — stop visible", "Stop button did not appear within 30s and no finished reply", shot);
+		}
+		await waitForResponse(page, 30_000);
 		return;
 	}
 
@@ -252,7 +204,7 @@ async function testPartialResponseRetained(ctx: TestContext): Promise<void> {
 		ctx.fail("partial response — message element present", "No .notor-message-assistant element after abort", shot);
 	}
 
-	await waitForInputEnabled(page, 10_000);
+	await waitForResponse(page, 10_000);
 }
 
 // ---------------------------------------------------------------------------
@@ -290,15 +242,7 @@ async function testUnreachableProviderShowsError(ctx: TestContext): Promise<void
 			ctx.pass("error handling — assistant responded", `Got response despite bad provider: "${lastAssistant.trim().substring(0, 80)}"`, shot);
 		}
 	} else if (!responded) {
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) {
-			ctx.pass("error handling — input usable after timeout", "Input re-enabled even though no response was received");
-		} else {
-			ctx.fail("error handling — error displayed", "No error message, no response, and input is still disabled", shot);
-		}
+		ctx.fail("error handling — error displayed", `No error message and no response within ${RESPONSE_TIMEOUT_MS / 1000}s (stop button still visible)`, shot);
 	} else {
 		ctx.fail("error handling — error displayed", "No error element and no assistant message after sending to bad provider", shot);
 	}
@@ -335,36 +279,37 @@ async function testErrorMessageIsHumanReadable(ctx: TestContext): Promise<void> 
 	}
 }
 
-async function testInputReEnabledAfterError(ctx: TestContext): Promise<void> {
+async function testIdleAfterError(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
-	console.log("\n── Error Test 6: input re-enabled after provider error ──────────");
-
-	const inputEnabled = await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el !== null && el.getAttribute("contenteditable") === "true";
-	});
+	console.log("\n── Error Test 6: panel idle after provider error ───────────────");
 
 	const shot = await ctx.screenshot("06-input-after-error");
 
-	if (inputEnabled) {
-		ctx.pass("error recovery — input re-enabled", "Textarea is enabled after provider error", shot);
+	if (await isPanelIdle(page)) {
+		ctx.pass("error recovery — UI in send state", "Stop hidden, send visible after error", shot);
 	} else {
-		ctx.fail("error recovery — input re-enabled", "Textarea still disabled after provider error", shot);
+		ctx.fail("error recovery — UI in send state", "Stop button still visible after provider error", shot);
 	}
 
-	const stopHidden = await page.evaluate(() => {
-		const btn = document.querySelector(".notor-stop-btn");
-		return !btn || btn.classList.contains("notor-hidden");
+	const activeSessions = await page.evaluate(() => {
+		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
+		return plugin?.getActiveOrchestrator?.()?.getActiveSessions?.().length ?? -1;
 	});
-	const sendVisible = await page.evaluate(() => {
-		const btn = document.querySelector(".notor-send-btn");
-		return btn && !btn.classList.contains("notor-hidden");
-	});
-
-	if (stopHidden && sendVisible) {
-		ctx.pass("error recovery — UI in send state", "Stop hidden, send visible after error");
+	if (activeSessions === 0) {
+		ctx.pass("error recovery — no active session", "Orchestrator has no active sessions after error");
 	} else {
-		ctx.fail("error recovery — UI in send state", `stopHidden=${stopHidden}, sendVisible=${sendVisible}`, shot);
+		ctx.fail("error recovery — no active session", `getActiveSessions().length = ${activeSessions}`, shot);
+	}
+
+	// The input stays editable throughout (for /btw); check it still is
+	const inputEditable = await page.evaluate(() => {
+		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
+		return el !== null && el.getAttribute("contenteditable") === "true";
+	});
+	if (inputEditable) {
+		ctx.pass("error recovery — input editable", "Input is editable after provider error");
+	} else {
+		ctx.fail("error recovery — input editable", "Input not editable after provider error", shot);
 	}
 }
 
@@ -535,7 +480,7 @@ async function tests(ctx: TestContext): Promise<void> {
 
 	await testUnreachableProviderShowsError(ctx);
 	await testErrorMessageIsHumanReadable(ctx);
-	await testInputReEnabledAfterError(ctx);
+	await testIdleAfterError(ctx);
 }
 
 runTest(

@@ -228,6 +228,32 @@ export async function scrollToSettingsSubsection(page: Page, subsection: string)
 // ---------------------------------------------------------------------------
 
 /**
+ * Whether the chat panel is idle: send button visible, stop button hidden.
+ * The input stays editable while a response streams (so /btw works), so its
+ * `contenteditable` state says nothing about whether the response finished.
+ * Queries the first chat panel; scope to a leaf's container in multi-panel tests.
+ */
+export async function isPanelIdle(page: Page): Promise<boolean> {
+	return page.evaluate(() => {
+		const sendBtn = document.querySelector(".notor-send-btn");
+		const stopBtn = document.querySelector(".notor-stop-btn");
+		const sendVisible = !!sendBtn && !sendBtn.classList.contains("notor-hidden");
+		const stopHidden = !stopBtn || stopBtn.classList.contains("notor-hidden");
+		return sendVisible && stopHidden;
+	});
+}
+
+/**
+ * Whether a response finished with a reply: the panel is idle and the last
+ * assistant message has text. Verifies a "finished too fast to observe"
+ * fallback when the stop button never appeared — an error or a still-running
+ * response fails it.
+ */
+export async function hasFinishedReply(page: Page): Promise<boolean> {
+	return (await isPanelIdle(page)) && (await getLastAssistantMessage(page)).trim().length > 0;
+}
+
+/**
  * Wait for any pending LLM response to finish.
  * Polls until the send button is visible (stop button hidden), which indicates
  * setRespondingState(false) has been called.
@@ -241,15 +267,7 @@ export async function waitForResponse(
 	while (Date.now() - start < timeoutMs) {
 		await page.waitForTimeout(pollMs);
 
-		const responseComplete = await page.evaluate(() => {
-			const sendBtn = document.querySelector(".notor-send-btn");
-			const stopBtn = document.querySelector(".notor-stop-btn");
-			const sendVisible = sendBtn && !sendBtn.classList.contains("notor-hidden");
-			const stopHidden = !stopBtn || stopBtn.classList.contains("notor-hidden");
-			return sendVisible && stopHidden;
-		});
-
-		if (responseComplete) return true;
+		if (await isPanelIdle(page)) return true;
 
 		const lastMsg = await page.$(".notor-message-assistant:last-child .notor-message-content");
 		if (lastMsg) {
@@ -259,6 +277,61 @@ export async function waitForResponse(
 				console.log(`    [${elapsed}s] Streaming: "${partial.trim().substring(0, 80)}..."`);
 			}
 		}
+	}
+	return false;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-panel helpers — scope every query to one chat leaf's container, since
+// a global `document.querySelector` always picks up the first panel.
+// ---------------------------------------------------------------------------
+
+/**
+ * Send a message in the chat leaf at `leafIndex` (in `getLeavesOfType` order)
+ * without waiting for the response. Dispatches Enter on that leaf's own input,
+ * so it works while the leaf's tab is in the background.
+ */
+export async function sendMessageNoWaitInLeaf(page: Page, leafIndex: number, message: string): Promise<void> {
+	const found = await page.evaluate((args: { index: number; msg: string }) => {
+		const leaves = (window as any).app?.workspace?.getLeavesOfType?.("notor-chat-view") ?? [];
+		const el = leaves[args.index]?.view?.containerEl?.querySelector(".notor-text-input") as HTMLElement | null;
+		if (!el) return false;
+		el.focus();
+		el.textContent = args.msg;
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+		el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
+		return true;
+	}, { index: leafIndex, msg: message });
+	if (!found) throw new Error(`Chat input not found in leaf ${leafIndex}`);
+	await page.waitForTimeout(400);
+	console.log(`    → Sent in leaf ${leafIndex}: "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
+}
+
+/** {@link isPanelIdle} for the chat leaf at `leafIndex`. */
+export async function isLeafIdle(page: Page, leafIndex: number): Promise<boolean> {
+	return page.evaluate((index: number) => {
+		const leaves = (window as any).app?.workspace?.getLeavesOfType?.("notor-chat-view") ?? [];
+		const container = leaves[index]?.view?.containerEl as HTMLElement | undefined;
+		if (!container) return false;
+		const sendBtn = container.querySelector(".notor-send-btn");
+		const stopBtn = container.querySelector(".notor-stop-btn");
+		const sendVisible = !!sendBtn && !sendBtn.classList.contains("notor-hidden");
+		const stopHidden = !stopBtn || stopBtn.classList.contains("notor-hidden");
+		return sendVisible && stopHidden;
+	}, leafIndex);
+}
+
+/** {@link waitForResponse} for the chat leaf at `leafIndex`. */
+export async function waitForLeafResponse(
+	page: Page,
+	leafIndex: number,
+	timeoutMs = RESPONSE_TIMEOUT_MS,
+	pollMs = POLL_INTERVAL_MS,
+): Promise<boolean> {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		await page.waitForTimeout(pollMs);
+		if (await isLeafIdle(page, leafIndex)) return true;
 	}
 	return false;
 }
@@ -446,14 +519,7 @@ export async function sendMessageWithApprovalHandling(
 			}
 		}
 
-		const responseComplete = await page.evaluate(() => {
-			const sendBtn = document.querySelector(".notor-send-btn");
-			const stopBtn = document.querySelector(".notor-stop-btn");
-			const sendVisible = sendBtn && !sendBtn.classList.contains("notor-hidden");
-			const stopHidden = !stopBtn || stopBtn.classList.contains("notor-hidden");
-			return sendVisible && stopHidden;
-		});
-		if (responseComplete) {
+		if (await isPanelIdle(page)) {
 			return { responded: true, approved };
 		}
 	}
@@ -577,12 +643,13 @@ export async function getPersonaChip(page: Page): Promise<{ text: string; isDefa
 }
 
 /**
- * Force-abort any in-progress LLM response and wait for the chat input to
- * become editable again. Call this at the start of tests that require a clean
- * input state, especially after tests that may leave a response in flight.
+ * Force-abort any in-progress LLM response and wait for the panel to go idle
+ * (send button visible, stop button hidden). Call this at the start of tests
+ * that require a clean input state, especially after tests that may leave a
+ * response in flight.
  *
- * Tries the visible stop button first, then falls back to aborting via the
- * plugin's AbortController. Waits up to 20 seconds for the input to re-enable.
+ * Tries the visible stop button first, then falls back to aborting the active
+ * orchestrator's sessions. Waits up to 20 seconds for the panel to go idle.
  */
 export async function ensureCleanState(page: Page): Promise<void> {
 	const isResponding = await page.evaluate(() => {
@@ -601,29 +668,21 @@ export async function ensureCleanState(page: Page): Promise<void> {
 		await stopBtn.click();
 		console.log("  Clicked stop button");
 	} else {
-		// Fallback: abort via orchestrator's AbortController
+		// Fallback: abort the sessions directly, as the stop button does
 		await page.evaluate(() => {
 			const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-			if (!plugin) return;
 			try {
-				const view = plugin.getChatView?.() ?? plugin.view;
-				if (view) {
-					const controller = view.getAbortController?.();
-					if (controller) controller.abort();
+				for (const session of plugin?.getActiveOrchestrator?.()?.getActiveSessions?.() ?? []) {
+					session.abortController?.abort();
 				}
 			} catch {}
 		});
 		console.log("  Aborted via orchestrator fallback");
 	}
 
-	// Wait for send button to become visible (response fully complete)
 	for (let i = 0; i < 20; i++) {
 		await page.waitForTimeout(1_000);
-		const ready = await page.evaluate(() => {
-			const sendBtn = document.querySelector(".notor-send-btn");
-			return sendBtn && !sendBtn.classList.contains("notor-hidden");
-		});
-		if (ready) {
+		if (await isPanelIdle(page)) {
 			console.log(`  Response state cleared after ${i + 1}s`);
 			return;
 		}

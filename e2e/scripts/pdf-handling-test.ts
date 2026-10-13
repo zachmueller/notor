@@ -24,6 +24,7 @@ import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	waitForSelector,
 	sendMessageWithApprovalHandling,
+	waitForResponse,
 	getLastAssistantMessage,
 	getLastToolCallNames,
 	newConversation,
@@ -252,21 +253,17 @@ async function testPdfAttachmentVaultPicker(ctx: TestContext): Promise<void> {
 			await page.waitForTimeout(600);
 
 			const { responded } = await sendMessageWithApprovalHandling(page, "");
-			// Note: message was already sent via Enter key above, so just wait
-			if (!responded) {
-				// Try waiting longer
-				const input2 = await waitForSelector(page, ".notor-text-input[contenteditable='true']", 30_000);
-				if (input2) {
-					ctx.pass("PDF attachment sent", "Message with PDF attachment was sent");
-				}
-			}
+			// Note: message was already sent via Enter key above, so just wait (longer if needed)
+			const finished = responded || (await waitForResponse(page, 30_000));
 
 			const shot3 = await ctx.screenshot("03c-pdf-response");
 			const response = await getLastAssistantMessage(page);
-			if (response.length > 10) {
+			if (!finished) {
+				ctx.fail("PDF attachment response", "Response did not finish within timeout", shot3);
+			} else if (response.length > 10) {
 				ctx.pass("PDF attachment response", `Model responded to PDF attachment: ${response.substring(0, 120)}...`, shot3);
 			} else {
-				ctx.pass("PDF attachment flow", "Attachment flow completed (response may be in progress)", shot3);
+				ctx.pass("PDF attachment flow", "Attachment flow completed (response may be minimal)", shot3);
 			}
 		} else {
 			ctx.fail("PDF in vault suggest", "PDF file not found in vault suggestions", shot1);

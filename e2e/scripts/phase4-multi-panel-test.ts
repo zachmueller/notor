@@ -32,6 +32,7 @@ import {
 	buildDefaultSettings,
 	waitForSelector,
 	ensureCleanState,
+	sendMessageNoWaitInLeaf,
 	VAULT_PATH,
 	CHAT_ONLY,
 } from "../lib/test-helpers";
@@ -46,47 +47,6 @@ const HISTORY_DIR = ".obsidian/plugins/notor/history/";
 // ---------------------------------------------------------------------------
 // Local helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Send a message in a specific leaf without waiting for the response.
- * Scopes the input to the leaf's container to avoid DOM ordering issues
- * when multiple panels are open.
- */
-async function sendMessageNoWaitInLeaf(page: any, leafIndex: number, message: string): Promise<void> {
-	const found = await page.evaluate((args: { viewType: string; index: number; msg: string }) => {
-		const app = (window as any).app;
-		if (!app) return false;
-		const leaves = app.workspace.getLeavesOfType(args.viewType);
-		if (args.index >= leaves.length) return false;
-		const view = leaves[args.index]?.view;
-		if (!view) return false;
-		const el = view.containerEl?.querySelector(".notor-text-input") as HTMLElement | null;
-		if (!el) return false;
-		el.focus();
-		el.textContent = args.msg;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-		// Dispatch Enter keydown directly on the input to trigger the send handler
-		el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
-		return true;
-	}, { viewType: CHAT_VIEW_TYPE, index: leafIndex, msg: message });
-	if (!found) throw new Error(`Chat input not found in leaf ${leafIndex}`);
-	await page.waitForTimeout(400);
-	console.log(`    -> Sent in leaf ${leafIndex} (no wait): "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
-}
-
-/** Wait until the contenteditable input is re-enabled. */
-async function waitForInputEnabled(page: any, timeoutMs = 30_000): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		await page.waitForTimeout(500);
-		const enabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
-		});
-		if (enabled) return true;
-	}
-	return false;
-}
 
 /**
  * Execute the "open-secondary-chat" Obsidian command via plugin internals.

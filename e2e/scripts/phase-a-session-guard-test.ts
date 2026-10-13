@@ -27,9 +27,10 @@ import {
 	buildDefaultSettings,
 	waitForSelector,
 	sendMessage,
-	newConversation,
+	sendMessageNoWaitInLeaf,
+	isLeafIdle,
+	waitForLeafResponse,
 	ensureCleanState,
-	waitForResponse,
 	writeCleanWorkspace,
 	CHAT_ONLY,
 } from "../lib/test-helpers";
@@ -90,34 +91,16 @@ async function getLeafConversationId(page: any, leafIndex: number): Promise<stri
 	}, { viewType: CHAT_VIEW_TYPE, index: leafIndex });
 }
 
-/** Send a message without waiting for response. */
-async function sendMessageNoWait(page: any, message: string): Promise<void> {
-	const found = await page.evaluate((msg: string) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (!el) return false;
-		el.focus();
-		el.textContent = msg;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-		return true;
-	}, message);
-	if (!found) throw new Error("Chat input not found");
-
-	await page.waitForTimeout(300);
-	await page.focus(".notor-text-input");
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(400);
-	console.log(`    -> Sent (no wait): "${message.substring(0, 80)}"`);
-}
-
-/** Wait until the stop button is visible (streaming started). */
-async function waitForStopButton(page: any, timeoutMs = 15_000): Promise<boolean> {
+/** Wait until the stop button in a leaf is visible (streaming started). */
+async function waitForStopButton(page: any, leafIndex: number, timeoutMs = 15_000): Promise<boolean> {
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
 		await page.waitForTimeout(300);
-		const visible = await page.evaluate(() => {
-			const btn = document.querySelector(".notor-stop-btn");
-			return btn && !btn.classList.contains("notor-hidden");
-		});
+		const visible = await page.evaluate((args: { viewType: string; index: number }) => {
+			const leaves = (window as any).app?.workspace?.getLeavesOfType(args.viewType) ?? [];
+			const btn = leaves[args.index]?.view?.containerEl?.querySelector(".notor-stop-btn");
+			return !!btn && !btn.classList.contains("notor-hidden");
+		}, { viewType: CHAT_VIEW_TYPE, index: leafIndex });
 		if (visible) return true;
 	}
 	return false;
@@ -179,11 +162,22 @@ async function getActiveConversationSessions(page: any): Promise<string[]> {
 	});
 }
 
-/** Count rendered assistant messages in the currently active panel. */
-async function getAssistantMessageCount(page: any): Promise<number> {
-	return page.evaluate(() => {
-		return document.querySelectorAll(".notor-message-assistant").length;
-	});
+/** Count rendered assistant messages in a leaf. */
+async function getAssistantMessageCount(page: any, leafIndex: number): Promise<number> {
+	return page.evaluate((args: { viewType: string; index: number }) => {
+		const leaves = (window as any).app?.workspace?.getLeavesOfType(args.viewType) ?? [];
+		return leaves[args.index]?.view?.containerEl?.querySelectorAll(".notor-message-assistant").length ?? 0;
+	}, { viewType: CHAT_VIEW_TYPE, index: leafIndex });
+}
+
+/** Count the sessions owned by a leaf's own orchestrator. */
+async function getLeafSessionCount(page: any, leafIndex: number): Promise<number> {
+	return page.evaluate((args: { viewType: string; index: number }) => {
+		const app = (window as any).app;
+		const leaf = app?.workspace?.getLeavesOfType(args.viewType)?.[args.index];
+		const orch = leaf ? app.plugins?.plugins?.["notor"]?._orchestrators?.get(leaf.id) : null;
+		return orch?.getActiveSessions?.().length ?? -1;
+	}, { viewType: CHAT_VIEW_TYPE, index: leafIndex });
 }
 
 // ---------------------------------------------------------------------------
@@ -295,26 +289,24 @@ async function testSessionGuardBlocks(ctx: TestContext): Promise<void> {
 	await activateLeaf(page, 0);
 	await page.waitForTimeout(500);
 
-	await sendMessageNoWait(
+	await sendMessageNoWaitInLeaf(
 		page,
+		0,
 		"Write a very detailed, comprehensive 2000-word essay about the complete history of " +
 		"astronomy from ancient Babylonian observations through modern space telescopes. " +
 		"Cover every major discovery, key astronomers, and technological breakthrough." + CHAT_ONLY,
 	);
 
 	// Wait for streaming to start
-	const streamingStarted = await waitForStopButton(page, 30_000);
+	const streamingStarted = await waitForStopButton(page, 0, 30_000);
 	if (!streamingStarted) {
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el?.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) {
+		// The response may have finished between polls
+		if ((await isLeafIdle(page, 0)) && (await getAssistantMessageCount(page, 0)) >= 2) {
 			ctx.pass("Session guard blocks", "Response completed too quickly to test guard (fast model)");
 			return;
 		}
 		const shot = await ctx.screenshot("03-no-streaming");
-		ctx.fail("Session guard blocks", "Streaming never started", shot);
+		ctx.fail("Session guard blocks", "Streaming never started and panel 1 has no finished reply", shot);
 		return;
 	}
 
@@ -331,40 +323,40 @@ async function testSessionGuardBlocks(ctx: TestContext): Promise<void> {
 	await activateLeaf(page, 1);
 	await page.waitForTimeout(500);
 
-	const panel2AssistantsBefore = await getAssistantMessageCount(page);
+	const panel2AssistantsBefore = await getAssistantMessageCount(page, 1);
 
 	// Try sending in panel 2 — should be blocked by session guard
-	await sendMessageNoWait(page, "This should be blocked by the session guard.");
+	await sendMessageNoWaitInLeaf(page, 1, "This should be blocked by the session guard.");
 	await page.waitForTimeout(2_000);
 
-	const panel2AssistantsAfter = await getAssistantMessageCount(page);
+	const panel2AssistantsAfter = await getAssistantMessageCount(page, 1);
 	const noticeCountAfter = await page.evaluate(() =>
 		document.querySelectorAll(".notice").length,
 	);
 
-	// Check if the input is still enabled (guard returned early, no session created)
-	const inputStillEnabled = await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el?.getAttribute("contenteditable") === "true";
-	});
+	// The guard returns early: panel 2 starts no session and stays idle
+	const panel2Sessions = await getLeafSessionCount(page, 1);
+	const panel2Idle = await isLeafIdle(page, 1);
 
 	const shot = await ctx.screenshot("03-guard-blocked");
 
 	const noticeAppeared = noticeCountAfter > noticeCountBefore;
 	const noNewResponse = panel2AssistantsAfter === panel2AssistantsBefore;
+	const noPanel2Session = panel2Sessions === 0 && panel2Idle;
 
-	if (isActive && (noticeAppeared || noNewResponse)) {
+	if (isActive && noPanel2Session && (noticeAppeared || noNewResponse)) {
 		ctx.pass(
 			"Session guard blocks",
 			`Guard active=${isActive}, notice appeared=${noticeAppeared}, ` +
-			`no new response=${noNewResponse}, input enabled=${inputStillEnabled}`,
+			`no new response=${noNewResponse}, panel 2 sessions=${panel2Sessions}, panel 2 idle=${panel2Idle}`,
 			shot,
 		);
 	} else {
 		ctx.fail(
 			"Session guard blocks",
 			`Guard active=${isActive}, notice=${noticeAppeared}, ` +
-			`noNewResponse=${noNewResponse} (before=${panel2AssistantsBefore}, after=${panel2AssistantsAfter})`,
+			`noNewResponse=${noNewResponse} (before=${panel2AssistantsBefore}, after=${panel2AssistantsAfter}), ` +
+			`panel 2 sessions=${panel2Sessions}, panel 2 idle=${panel2Idle}`,
 			shot,
 		);
 	}
@@ -378,21 +370,7 @@ async function testSendAfterCompletion(ctx: TestContext): Promise<void> {
 	await activateLeaf(page, 0);
 	await page.waitForTimeout(500);
 
-	// Wait for input to be re-enabled (response completed)
-	const start = Date.now();
-	let completed = false;
-	while (Date.now() - start < 120_000) {
-		await page.waitForTimeout(2_000);
-		const enabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el?.getAttribute("contenteditable") === "true";
-		});
-		if (enabled) {
-			completed = true;
-			break;
-		}
-	}
-
+	const completed = await waitForLeafResponse(page, 0, 120_000, 2_000);
 	if (!completed) {
 		const shot = await ctx.screenshot("04-still-streaming");
 		ctx.fail("Send after completion", "Panel 1 streaming never completed", shot);
@@ -419,7 +397,8 @@ async function testSendAfterCompletion(ctx: TestContext): Promise<void> {
 	});
 	await page.waitForTimeout(2_000);
 
-	const responded = await sendMessage(page, "Say 'Panel 2 works!' and nothing else.");
+	await sendMessageNoWaitInLeaf(page, 1, "Say 'Panel 2 works!' and nothing else.");
+	const responded = (await waitForLeafResponse(page, 1)) && (await getAssistantMessageCount(page, 1)) > 0;
 	const shot = await ctx.screenshot("04-panel2-sends");
 
 	if (responded) {

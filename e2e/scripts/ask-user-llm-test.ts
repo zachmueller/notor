@@ -39,6 +39,7 @@ import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	waitForSelector,
 	waitForResponse,
+	sendMessageNoWait,
 	getLastAssistantMessage,
 	setMode,
 	buildDefaultSettings,
@@ -46,34 +47,8 @@ import {
 import type { Page } from "playwright-core";
 
 // ---------------------------------------------------------------------------
-// Local helpers (mirrors diff-approval-test.ts — not in shared test-helpers)
+// Local helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Send a chat message without waiting for the full response, so the caller can
- * intercept the inline interaction prompt mid-flight (the response loop pauses,
- * input stays disabled, while ask_user awaits answers).
- */
-async function sendMessageNoWait(page: Page, message: string): Promise<void> {
-	const found = await page.evaluate((msg) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (!el) return false;
-		el.focus();
-		el.textContent = msg;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-		return true;
-	}, message);
-	if (!found) throw new Error("Chat input not found");
-
-	await page.waitForTimeout(300);
-
-	const sendBtn = await page.$(".notor-send-btn");
-	if (sendBtn) await sendBtn.click();
-	else await page.keyboard.press("Enter");
-
-	await page.waitForTimeout(600);
-	console.log(`    → Sent: "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
-}
 
 /** Poll until an inline interaction prompt (or approval prompt) appears. */
 async function waitForInteractionUI(page: Page, timeoutMs = 45_000): Promise<boolean> {

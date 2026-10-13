@@ -29,6 +29,7 @@ import {
 	waitForSelector,
 	sendMessage,
 	sendMessageWithApprovalHandling,
+	isPanelIdle,
 	getLastAssistantMessage,
 	getLastToolCallNames,
 	newConversation,
@@ -448,11 +449,7 @@ async function testImageAttachmentVaultPicker(ctx: TestContext): Promise<void> {
 			continue;
 		}
 
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el?.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) {
+		if (await isPanelIdle(page)) {
 			gotResponse = true;
 			break;
 		}

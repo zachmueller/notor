@@ -384,15 +384,11 @@ async function tests(ctx: TestContext) {
 	// ── Test 16: Plan mode type and send a second message ─────────────
 	console.log("\nTest 16: Second message send in Plan mode");
 	{
-		// Ensure input is ready (not still disabled from prior response)
-		await waitForResponse(page, 30_000);
+		// Let any prior response finish first
+		const idle = await waitForResponse(page, 30_000);
 
-		const inputReady = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
-		});
-
-		if (inputReady) {
+		if (idle) {
+			const userMsgsBefore = (await page.$$(".notor-message-user")).length;
 			await page.evaluate(() => {
 				const el = document.querySelector(".notor-text-input") as HTMLElement;
 				el.focus();
@@ -405,13 +401,13 @@ async function tests(ctx: TestContext) {
 
 			const userMsgs = await page.$$(".notor-message-user");
 			const shot = await ctx.screenshot("16-second-message");
-			if (userMsgs.length >= 1) {
+			if (userMsgs.length > userMsgsBefore) {
 				ctx.pass("Second message sends correctly", `${userMsgs.length} user message(s) in chat`, shot);
 			} else {
-				ctx.fail("Second message sends correctly", "No user messages found after send", shot);
+				ctx.fail("Second message sends correctly", `No new user message after send (${userMsgs.length} before and after)`, shot);
 			}
 		} else {
-			ctx.fail("Second message sends correctly", "Input not ready — still disabled from prior response");
+			ctx.fail("Second message sends correctly", "Prior response still running after 30s");
 		}
 	}
 

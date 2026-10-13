@@ -31,12 +31,12 @@ import {
 	buildDefaultSettings,
 	waitForSelector,
 	sendMessage,
+	sendMessageNoWait,
 	waitForResponse,
+	hasFinishedReply,
 	newConversation,
 	ensureCleanState,
 	VAULT_PATH,
-	RESPONSE_TIMEOUT_MS,
-	POLL_INTERVAL_MS,
 	CHAT_ONLY,
 } from "../lib/test-helpers";
 
@@ -50,25 +50,6 @@ const HISTORY_DIR = ".obsidian/plugins/notor/history/";
 // Local helpers
 // ---------------------------------------------------------------------------
 
-/** Send a message without waiting for the response to complete. */
-async function sendMessageNoWait(page: any, message: string): Promise<void> {
-	const found = await page.evaluate((msg: string) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (!el) return false;
-		el.focus();
-		el.textContent = msg;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-		return true;
-	}, message);
-	if (!found) throw new Error("Chat input not found");
-
-	await page.waitForTimeout(300);
-	await page.focus(".notor-text-input");
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(400);
-	console.log(`    -> Sent (no wait): "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
-}
-
 /** Wait until the stop button becomes visible (streaming started). */
 async function waitForStopButton(page: any, timeoutMs = 15_000): Promise<boolean> {
 	const start = Date.now();
@@ -79,20 +60,6 @@ async function waitForStopButton(page: any, timeoutMs = 15_000): Promise<boolean
 			return btn && !btn.classList.contains("notor-hidden");
 		});
 		if (stopVisible) return true;
-	}
-	return false;
-}
-
-/** Wait until the contenteditable input is re-enabled. */
-async function waitForInputEnabled(page: any, timeoutMs = RESPONSE_TIMEOUT_MS): Promise<boolean> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		await page.waitForTimeout(POLL_INTERVAL_MS);
-		const enabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
-		});
-		if (enabled) return true;
 	}
 	return false;
 }
@@ -308,17 +275,13 @@ async function testActiveSessionDuringStreaming(ctx: TestContext): Promise<void>
 	// Wait for streaming to start (stop button becomes visible)
 	const stopAppeared = await waitForStopButton(page, 30_000);
 	if (!stopAppeared) {
-		// Check if the response completed instantly
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el?.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) {
+		// The response may have finished between polls
+		if (await hasFinishedReply(page)) {
 			ctx.pass("Active session during streaming", "Response completed too quickly to observe streaming state (fast model)");
 			return;
 		}
 		const shot = await ctx.screenshot("01-no-stop-button");
-		ctx.fail("Active session during streaming", "Stop button never appeared and input still disabled", shot);
+		ctx.fail("Active session during streaming", "Stop button never appeared and no finished reply", shot);
 		return;
 	}
 
@@ -392,14 +355,14 @@ async function testSyncBackOnMidStreamSwitch(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	// Verify input is unlocked in the target conversation
-	const inputUnlocked = await waitForInputEnabled(page, 5_000);
-	if (!inputUnlocked) {
-		const shot = await ctx.screenshot("02-input-locked");
-		ctx.fail("Sync-back mid-stream", "Input still locked after switching away from streaming conversation", shot);
+	// Verify the target conversation shows the idle send state
+	const targetIdle = await waitForResponse(page, 5_000);
+	if (!targetIdle) {
+		const shot = await ctx.screenshot("02-target-not-idle");
+		ctx.fail("Sync-back mid-stream", "Target conversation still shows the stop button after switching away from the streaming conversation", shot);
 		return;
 	}
-	console.log("  Input unlocked in target conversation after switching away");
+	console.log("  Target conversation idle (send visible, stop hidden) after switching away");
 
 	// Wait for more messages to accumulate in the background session
 	await page.waitForTimeout(3_000);
@@ -580,7 +543,12 @@ async function testStopButtonAbortsActiveSession(ctx: TestContext): Promise<void
 
 		const stopAppeared = await waitForStopButton(page, 30_000);
 		if (!stopAppeared) {
-			ctx.pass("Stop aborts session", "Response completed too quickly to test abort (fast model)");
+			if (await hasFinishedReply(page)) {
+				ctx.pass("Stop aborts session", "Response completed too quickly to test abort (fast model)");
+			} else {
+				const shot = await ctx.screenshot("04-no-streaming");
+				ctx.fail("Stop aborts session", "Stop button never appeared and no finished reply", shot);
+			}
 			return;
 		}
 	}
@@ -599,10 +567,10 @@ async function testStopButtonAbortsActiveSession(ctx: TestContext): Promise<void
 
 	const shot = await ctx.screenshot("04-after-stop");
 
-	// Verify input is re-enabled
-	const inputEnabled = await waitForInputEnabled(page, 10_000);
-	if (!inputEnabled) {
-		ctx.fail("Stop aborts session", "Input not re-enabled after clicking stop", shot);
+	// Verify the UI reverted to the send state
+	const idle = await waitForResponse(page, 10_000);
+	if (!idle) {
+		ctx.fail("Stop aborts session", "Stop button still visible 10s after clicking it", shot);
 		return;
 	}
 
@@ -615,21 +583,7 @@ async function testStopButtonAbortsActiveSession(ctx: TestContext): Promise<void
 		}
 	}
 
-	// Verify UI reverted to send state
-	const stopHidden = await page.evaluate(() => {
-		const btn = document.querySelector(".notor-stop-btn");
-		return !btn || btn.classList.contains("notor-hidden");
-	});
-	const sendVisible = await page.evaluate(() => {
-		const btn = document.querySelector(".notor-send-btn");
-		return btn && !btn.classList.contains("notor-hidden");
-	});
-
-	if (stopHidden && sendVisible) {
-		ctx.pass("Stop aborts session", "Input re-enabled, session cleaned up, UI reverted to send state", shot);
-	} else {
-		ctx.pass("Stop aborts session", `Input re-enabled, session cleaned up (stopHidden=${stopHidden}, sendVisible=${sendVisible})`, shot);
-	}
+	ctx.pass("Stop aborts session", "UI reverted to send state and session cleaned up", shot);
 }
 
 async function testActiveSessionsEmptyAfterCompletion(ctx: TestContext): Promise<void> {
@@ -778,16 +732,12 @@ async function testCannotDeleteStreamingConversation(ctx: TestContext): Promise<
 
 	const stopAppeared = await waitForStopButton(page, 30_000);
 	if (!stopAppeared) {
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el?.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) {
+		if (await hasFinishedReply(page)) {
 			ctx.pass("Deletion guard", "Response completed too quickly to test deletion guard (fast model)");
 			return;
 		}
 		const shot = await ctx.screenshot("07-no-streaming");
-		ctx.fail("Deletion guard", "Stop button never appeared and input still disabled", shot);
+		ctx.fail("Deletion guard", "Stop button never appeared and no finished reply", shot);
 		return;
 	}
 

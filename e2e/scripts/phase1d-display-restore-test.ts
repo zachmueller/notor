@@ -31,6 +31,9 @@ import {
 	buildDefaultSettings,
 	waitForSelector,
 	sendMessage,
+	sendMessageNoWait,
+	isPanelIdle,
+	hasFinishedReply,
 	newConversation,
 	selectPersona,
 	ensureCleanState,
@@ -189,25 +192,6 @@ async function getActiveSessionCount(page: any): Promise<number> {
 			return -1;
 		}
 	});
-}
-
-/** Send a message without waiting for the response to complete. */
-async function sendMessageNoWait(page: any, message: string): Promise<void> {
-	const found = await page.evaluate((msg: string) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		if (!el) return false;
-		el.focus();
-		el.textContent = msg;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-		return true;
-	}, message);
-	if (!found) throw new Error("Chat input not found");
-
-	await page.waitForTimeout(300);
-	await page.focus(".notor-text-input");
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(400);
-	console.log(`    -> Sent (no wait): "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
 }
 
 /** Wait until the stop button becomes visible (streaming started). */
@@ -839,24 +823,25 @@ async function testDestroyAbortsActiveSessions(ctx: TestContext): Promise<void> 
 
 	const stopAppeared = await waitForStopButton(page, 30_000);
 	if (!stopAppeared) {
-		// Check if the response completed too quickly
-		const inputEnabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el?.getAttribute("contenteditable") === "true";
-		});
-		if (inputEnabled) {
+		// The response may have finished between polls
+		if (await hasFinishedReply(page)) {
 			ctx.pass("Destroy aborts sessions", "Response completed too quickly to test destroy (fast model)");
 			return;
 		}
 		const shot = await ctx.screenshot("07-no-streaming");
-		ctx.fail("Destroy aborts sessions", "Stop button never appeared and input still disabled", shot);
+		ctx.fail("Destroy aborts sessions", "Stop button never appeared and no finished reply", shot);
 		return;
 	}
 
 	// Verify there's an active session
 	const sessionCountBefore = await getActiveSessionCount(page);
 	if (sessionCountBefore <= 0) {
-		ctx.pass("Destroy aborts sessions", "No active session detected (response completed too fast)");
+		if (await hasFinishedReply(page)) {
+			ctx.pass("Destroy aborts sessions", "No active session detected (response completed too fast)");
+		} else {
+			const shot = await ctx.screenshot("07-no-session");
+			ctx.fail("Destroy aborts sessions", `Stop button visible but getActiveSessions() reported ${sessionCountBefore} and no finished reply`, shot);
+		}
 		return;
 	}
 	console.log(`  Active sessions before destroy: ${sessionCountBefore}`);
@@ -901,12 +886,8 @@ async function testDestroyAbortsActiveSessions(ctx: TestContext): Promise<void> 
 		);
 	}
 
-	// Verify UI state recovered
-	const inputEnabled = await page.evaluate(() => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-		return el?.getAttribute("contenteditable") === "true";
-	});
-	console.log(`  Input re-enabled after destroy: ${inputEnabled}`);
+	// destroy() is the unload path, so the view isn't required to recover — log only
+	console.log(`  Panel idle (send visible, stop hidden) after destroy: ${await isPanelIdle(page)}`);
 }
 
 // ---------------------------------------------------------------------------
