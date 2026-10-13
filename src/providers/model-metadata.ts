@@ -120,6 +120,14 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		output_price_per_1k: 0.050,
 		display_name: "Claude Fable 5.1",
 	},
+	// Haiku 5.5 bills prompts over 100K tokens at a higher tier ($0.50/$2.50
+	// per MTok); the rates here are the ≤100K tier.
+	"claude-haiku-5-5": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.0001,
+		output_price_per_1k: 0.0005,
+		display_name: "Claude Haiku 5.5",
+	},
 	"claude-opus-4-8": {
 		context_window: 200_000,
 		input_price_per_1k: 0.015, // verify pricing
@@ -509,14 +517,14 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 	//
 	// As of 2026-10, us-east-1 lists only `us.` and `global.` profiles (the
 	// model cards also name eu./au./jp. geos — not added until seen live).
-	// Live converse probes: all three accept the `context-1m-2025-08-07` beta
+	// Live converse probes: all of them accept the `context-1m-2025-08-07` beta
 	// and reject thinking.type=enabled ("use adaptive"), so they classify
 	// "effort" via the getThinkingMode() default. The AWS model cards list a
 	// 1M context window, so `extended_context.default` sends the beta on every
 	// request (no separate 1M picker variant); if Bedrock ever rejects it the
-	// model falls back to the 200K base. No long-context premium, so the 1M
-	// window uses base pricing. Bedrock rates aren't published on the pricing
-	// page yet — Anthropic list rates below.
+	// model falls back to the 200K base. No long-context premium (except Haiku
+	// 5.5), so the 1M window uses base pricing. Bedrock rates aren't published
+	// on the pricing page yet — Anthropic list rates below.
 	// -----------------------------------------------------------------------
 
 	// Claude Opus 5.5
@@ -584,6 +592,33 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		input_price_per_1k: 0.010, // verify (Anthropic list rate; geo profiles may add ~10%)
 		output_price_per_1k: 0.050, // verify
 		display_name: "Claude Fable 5.1",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			default: true,
+		},
+	},
+
+	// Claude Haiku 5.5 — same live probe results as the rest of the series
+	// (2026-10), plus adaptive + display=summarized streams reasoning text.
+	// Unlike the others it has a long-context premium: prompts over 100K tokens
+	// bill at $0.50/$2.50 per MTok. Base rates below are the ≤100K tier.
+	"us.anthropic.claude-haiku-5-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0001, // verify (Anthropic list rate; geo profiles may add ~10%)
+		output_price_per_1k: 0.0005, // verify
+		display_name: "Claude Haiku 5.5",
+		extended_context: {
+			context_window: 1_000_000,
+			beta_flag: "context-1m-2025-08-07",
+			default: true,
+		},
+	},
+	"global.anthropic.claude-haiku-5-5": {
+		context_window: 200_000,
+		input_price_per_1k: 0.0001, // verify (Anthropic list rate; geo profiles may add ~10%)
+		output_price_per_1k: 0.0005, // verify
+		display_name: "Claude Haiku 5.5",
 		extended_context: {
 			context_window: 1_000_000,
 			beta_flag: "context-1m-2025-08-07",
@@ -1148,6 +1183,22 @@ const MODEL_METADATA: Record<string, ModelMetadataEntry> = {
 		input_price_per_1k: 0.003, // verify pricing
 		output_price_per_1k: 0.015, // verify pricing
 	},
+
+	// -----------------------------------------------------------------------
+	// AWS Bedrock — Z.AI inference profiles
+	// -----------------------------------------------------------------------
+	// GLM 5.3 — 1M context per the AWS model card; Standard-tier rates from the
+	// Bedrock pricing page (2026-10). Cross-region only (us. + global.).
+	"us.zai.glm-5.3": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.001848, // verify pricing
+		output_price_per_1k: 0.005808, // verify pricing
+	},
+	"global.zai.glm-5.3": {
+		context_window: 1_000_000,
+		input_price_per_1k: 0.00168, // verify pricing
+		output_price_per_1k: 0.00528, // verify pricing
+	},
 };
 
 /**
@@ -1454,15 +1505,17 @@ export function getKnownModelIds(): string[] {
 // ---------------------------------------------------------------------------
 
 const THINKING_PATTERNS = [
-	// Anthropic direct API — Claude 3.5 Sonnet, 3.7 Sonnet, Sonnet/Opus 4+ and 5-series
+	// Anthropic direct API — Claude 3.5 Sonnet, 3.7 Sonnet, Sonnet/Opus 4+, Haiku 5+
+	// and 5-series. Haiku 5.5 is the first Haiku with effort controls (Haiku 4.5
+	// stays unmatched).
 	/^claude-(opus|sonnet)-4/,
-	/^claude-(opus|sonnet)-5/,
+	/^claude-(opus|sonnet|haiku)-5/,
 	/^claude-fable-5/,
 	/^claude-3-7-sonnet/,
 	/^claude-3-5-sonnet/,
 	// Bedrock Anthropic inference profiles
 	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet)-4/,
-	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet)-5/,
+	/^(us|eu|apac|global)\.anthropic\.claude-(opus|sonnet|haiku)-5/,
 	/^(us|eu|apac|global)\.anthropic\.claude-fable-5/,
 	/^(us|eu|apac|global)\.anthropic\.claude-3-7-sonnet/,
 	/^(us|eu|apac|global)\.anthropic\.claude-3-5-sonnet/,

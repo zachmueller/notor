@@ -130,6 +130,8 @@ describe("getContextWindow — 5.5-series / Fable 5.1 entries", () => {
 		"global.anthropic.claude-sonnet-5-5",
 		"us.anthropic.claude-fable-5-1",
 		"global.anthropic.claude-fable-5-1",
+		"us.anthropic.claude-haiku-5-5",
+		"global.anthropic.claude-haiku-5-5",
 	];
 
 	it("defaults Bedrock profiles to 1M and sends the beta on every request", () => {
@@ -155,7 +157,7 @@ describe("getContextWindow — 5.5-series / Fable 5.1 entries", () => {
 	});
 
 	it("gives direct-API aliases a 1M base window with no beta", () => {
-		for (const id of ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]) {
+		for (const id of ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-haiku-5-5"]) {
 			expect(getContextWindow(id)).toBe(1_000_000);
 			expect(getExtendedContextBeta(id, true)).toBeUndefined();
 		}
@@ -169,6 +171,11 @@ describe("getContextWindow — 5.5-series / Fable 5.1 entries", () => {
 		});
 		expect(enrichModelInfo({ id: "global.anthropic.claude-sonnet-5-5", display_name: "global.anthropic.claude-sonnet-5-5" }))
 			.toMatchObject({ display_name: "Claude Sonnet 5.5", context_window: 1_000_000 });
+		expect(getModelMetadata("global.anthropic.claude-haiku-5-5")).toMatchObject({
+			display_name: "Claude Haiku 5.5",
+			input_price_per_1k: 0.0001,
+			output_price_per_1k: 0.0005,
+		});
 	});
 });
 
@@ -179,8 +186,11 @@ describe("getContextWindow — new non-Anthropic Bedrock profiles", () => {
 		expect(getContextWindow("us.openai.gpt-6.1-sol")).toBe(1_000_000);
 		expect(getContextWindow("us.xai.grok-4.7")).toBe(500_000);
 		expect(getContextWindow("global.moonshotai.kimi-k3")).toBe(1_000_000);
+		expect(getContextWindow("us.zai.glm-5.3")).toBe(1_000_000);
+		expect(getContextWindow("global.zai.glm-5.3")).toBe(1_000_000);
 		// No 1M beta variant for non-Anthropic models.
 		expect(getModelExtendedContext("us.openai.gpt-6-sol")).toBeUndefined();
+		expect(getModelExtendedContext("us.zai.glm-5.3")).toBeUndefined();
 	});
 });
 

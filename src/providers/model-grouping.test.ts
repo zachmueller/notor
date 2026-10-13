@@ -430,8 +430,12 @@ describe("formatFullVariantLabel", () => {
 describe("groupModels — inferred and overridden windows", () => {
 	afterEach(() => resetModelLimits());
 
-	it("gives default-1M models (Opus 5.5, an inferred Opus 6) a single 1M variant", () => {
-		for (const [id, label] of [["us.anthropic.claude-opus-5-5", "Claude Opus 5.5"], ["us.anthropic.claude-opus-6", "Claude Opus 6"]] as const) {
+	it("gives default-1M models (Opus 5.5, Haiku 5.5, an inferred Opus 6) a single 1M variant", () => {
+		for (const [id, label] of [
+			["us.anthropic.claude-opus-5-5", "Claude Opus 5.5"],
+			["global.anthropic.claude-haiku-5-5", "Claude Haiku 5.5"],
+			["us.anthropic.claude-opus-6", "Claude Opus 6"],
+		] as const) {
 			const groups = groupModels([enrichModelInfo({ id, display_name: id })]);
 			expect(groups[0]!.label).toBe(label);
 			expect(groups[0]!.variants).toHaveLength(1);

@@ -210,25 +210,34 @@ describe("getThinkingMode", () => {
 		}
 	});
 
-	// Opus 5.5 / Sonnet 5.5 / Fable 5.1 reject thinking.type=enabled ("use
-	// adaptive") on Bedrock (live converse probe, 2026-10) — "effort", and
+	// Opus 5.5 / Sonnet 5.5 / Fable 5.1 / Haiku 5.5 reject thinking.type=enabled
+	// ("use adaptive") on Bedrock (live converse probe, 2026-10) — "effort", and
 	// thinking is offered.
-	it("is 'effort' (and supported) for Opus 5.5 / Sonnet 5.5 / Fable 5.1", () => {
+	it("is 'effort' (and supported) for Opus 5.5 / Sonnet 5.5 / Fable 5.1 / Haiku 5.5", () => {
 		const ids = [
 			"claude-opus-5-5",
 			"claude-sonnet-5-5",
 			"claude-fable-5-1",
+			"claude-haiku-5-5",
 			"us.anthropic.claude-opus-5-5",
 			"global.anthropic.claude-opus-5-5",
 			"us.anthropic.claude-sonnet-5-5",
 			"global.anthropic.claude-sonnet-5-5",
 			"us.anthropic.claude-fable-5-1",
 			"global.anthropic.claude-fable-5-1",
+			"us.anthropic.claude-haiku-5-5",
+			"global.anthropic.claude-haiku-5-5",
 		];
 		for (const id of ids) {
 			expect(supportsThinking(id)).toBe(true);
 			expect(getThinkingMode(id)).toBe("effort");
 		}
+	});
+
+	// The Haiku 5 pattern must not leak into Haiku 4.5.
+	it("leaves Haiku 4.5 without thinking", () => {
+		expect(supportsThinking("claude-haiku-4-5-20251001")).toBe(false);
+		expect(supportsThinking("us.anthropic.claude-haiku-4-5-20251001-v1:0")).toBe(false);
 	});
 });
 
