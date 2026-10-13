@@ -22,7 +22,9 @@
  *   6. "Approve & auto-accept edits" on the card switches to Act mode, shows
  *      the auto-accept badge, and the badge clears when the run ends
  *   7. "Open plan for current conversation" command opens the leaf
- *   8. No unexpected errors logged
+ *   8. Shared e2e helpers (waitForResponseOrPlanReview / rejectPendingPlan)
+ *      detect the pending review, reject it and close the plan tab
+ *   9. No unexpected errors logged
  *
  * @see src/tools/submit-plan.ts, src/ui/plan-view.ts, src/ui/plan-review-interaction.ts
  * @see ai/notor/ideas — "Plan document flow with inline commenting and hand-back"
@@ -31,7 +33,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { buildDefaultSettings, VAULT_PATH } from "../lib/test-helpers";
+import { buildDefaultSettings, rejectPendingPlan, VAULT_PATH, waitForResponseOrPlanReview } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Local constants & helpers
@@ -382,8 +384,33 @@ async function testOpenPlanCommand(ctx: TestContext): Promise<void> {
 	else ctx.fail("Command opens the plan leaf (read-only after approval)", String(status));
 }
 
+async function testSharedRejectHelper(ctx: TestContext): Promise<void> {
+	console.log("\nTest 8: Shared plan-review helpers detect and reject a pending plan");
+	const convId = await startPendingPlan(ctx, "reject");
+	if (!convId) return;
+	const outcome = await waitForResponseOrPlanReview(ctx.page, 10_000);
+	if (outcome === "plan") ctx.pass("waitForResponseOrPlanReview reports the pending review", outcome);
+	else ctx.fail("waitForResponseOrPlanReview reports the pending review", outcome);
+
+	// The follow-up turn uses a fake model and errors out, so the response finishes
+	const finished = await rejectPendingPlan(ctx.page);
+	await stopRun(ctx);
+	const state = await ctx.page.evaluate(() => ({
+		card: !!document.querySelector(".notor-plan-review-prompt"),
+		planLeaves: (window as any).app.workspace.getLeavesOfType("notor-plan-view").length,
+		mode: (window as any).app.plugins.plugins["notor"].getActiveOrchestrator().getConversationManager().getMode(),
+	}));
+	const result = await lastToolResult(ctx);
+	const shot = await ctx.screenshot("08-shared-reject");
+	if (finished && !state.card && state.planLeaves === 0 && state.mode === "plan" && result?.includes("rejected the plan")) {
+		ctx.pass("rejectPendingPlan rejects, closes the plan tab and stays in Plan", JSON.stringify(state), shot);
+	} else {
+		ctx.fail("rejectPendingPlan rejects, closes the plan tab and stays in Plan", JSON.stringify({ finished, ...state, result }), shot);
+	}
+}
+
 async function testNoErrors(ctx: TestContext): Promise<void> {
-	console.log("\nTest 8: No unexpected errors logged");
+	console.log("\nTest 9: No unexpected errors logged");
 	// The follow-up model turns are deliberately aborted; ignore abort/provider noise.
 	const errors = ctx.collector.getLogsByLevel("error").filter((e) => {
 		const text = JSON.stringify(e);
@@ -408,6 +435,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	await testTypedReply(ctx);
 	await testApproveAutoAccept(ctx);
 	await testOpenPlanCommand(ctx);
+	await testSharedRejectHelper(ctx);
 	await testNoErrors(ctx);
 }
 

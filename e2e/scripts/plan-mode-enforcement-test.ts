@@ -3,7 +3,9 @@
  * Plan Mode Enforcement Test
  *
  * Verifies that the plugin correctly blocks write tool calls when the chat is
- * in Plan mode, even when the LLM attempts to invoke them.
+ * in Plan mode, even when the LLM attempts to invoke them. A model may instead
+ * propose the change with `submit_plan` (the Plan-mode flow); that plan is
+ * rejected and the vault must still be unchanged.
  * Uses AWS Bedrock (default profile) for real LLM calls.
  *
  * Scenarios covered:
@@ -34,6 +36,7 @@ import {
 	getLastAssistantMessage,
 	getLastToolCallNames,
 	newConversation,
+	sendPlanModeMessage,
 	setMode,
 	VAULT_PATH,
 } from "../lib/test-helpers";
@@ -99,7 +102,7 @@ async function testWriteNoteBlockedInPlanMode(ctx: TestContext): Promise<void> {
 	const targetPath = path.join(VAULT_PATH, "Plan-Mode-Should-Not-Exist.md");
 	if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
 
-	const responded = await sendMessage(
+	const { responded, planSubmitted } = await sendPlanModeMessage(
 		page,
 		"Please use the write_note tool to create a file at 'Plan-Mode-Should-Not-Exist.md' " +
 		"with the content '# Blocked'. This is a test of Plan mode enforcement."
@@ -110,6 +113,11 @@ async function testWriteNoteBlockedInPlanMode(ctx: TestContext): Promise<void> {
 	if (!responded) {
 		ctx.fail("write_note blocked in Plan mode — response", `No response within timeout`, shot);
 		return;
+	}
+
+	// Plan mode may propose the change for review instead of attempting it
+	if (planSubmitted) {
+		ctx.pass("write_note blocked in Plan mode — proposed via submit_plan", "Model submitted a plan instead of writing; the plan was rejected", shot);
 	}
 
 	const response = await getLastAssistantMessage(page);
@@ -171,7 +179,7 @@ async function testReplaceInNoteBlockedInPlanMode(ctx: TestContext): Promise<voi
 	const targetPath = path.join(VAULT_PATH, "Plan-Mode-Test.md");
 	const originalContent = fs.readFileSync(targetPath, "utf8");
 
-	const responded = await sendMessage(
+	const { responded, planSubmitted } = await sendPlanModeMessage(
 		page,
 		"In 'Plan-Mode-Test.md', please use replace_in_note to replace " +
 		"'Original body content here.' with 'This text should not appear — Plan mode.'"
@@ -182,6 +190,11 @@ async function testReplaceInNoteBlockedInPlanMode(ctx: TestContext): Promise<voi
 	if (!responded) {
 		ctx.fail("replace_in_note blocked — response", `No response within timeout`, shot);
 		return;
+	}
+
+	// Plan mode may propose the change for review instead of attempting it
+	if (planSubmitted) {
+		ctx.pass("replace_in_note blocked — proposed via submit_plan", "Model submitted a plan instead of writing; the plan was rejected", shot);
 	}
 
 	const currentContent = fs.readFileSync(targetPath, "utf8");
@@ -217,7 +230,7 @@ async function testUpdateFrontmatterBlockedInPlanMode(ctx: TestContext): Promise
 	const targetPath = path.join(VAULT_PATH, "Plan-Mode-Test.md");
 	const originalContent = fs.readFileSync(targetPath, "utf8");
 
-	const responded = await sendMessage(
+	const { responded, planSubmitted } = await sendPlanModeMessage(
 		page,
 		"In 'Plan-Mode-Test.md', please use the update_frontmatter tool to set " +
 		"'status' to 'modified-by-plan-mode-test'. This should be blocked."
@@ -228,6 +241,11 @@ async function testUpdateFrontmatterBlockedInPlanMode(ctx: TestContext): Promise
 	if (!responded) {
 		ctx.fail("update_frontmatter blocked — response", `No response within timeout`, shot);
 		return;
+	}
+
+	// Plan mode may propose the change for review instead of attempting it
+	if (planSubmitted) {
+		ctx.pass("update_frontmatter blocked — proposed via submit_plan", "Model submitted a plan instead of writing; the plan was rejected", shot);
 	}
 
 	const currentContent = fs.readFileSync(targetPath, "utf8");
@@ -259,7 +277,7 @@ async function testManageTagsBlockedInPlanMode(ctx: TestContext): Promise<void> 
 
 	const targetPath = path.join(VAULT_PATH, "Plan-Mode-Test.md");
 
-	const responded = await sendMessage(
+	const { responded, planSubmitted } = await sendPlanModeMessage(
 		page,
 		"Please use the manage_tags tool to add the tag 'plan-mode-blocked-tag' " +
 		"to the note 'Plan-Mode-Test.md'. This should be blocked in Plan mode."
@@ -270,6 +288,11 @@ async function testManageTagsBlockedInPlanMode(ctx: TestContext): Promise<void> 
 	if (!responded) {
 		ctx.fail("manage_tags blocked — response", `No response within timeout`, shot);
 		return;
+	}
+
+	// Plan mode may propose the change for review instead of attempting it
+	if (planSubmitted) {
+		ctx.pass("manage_tags blocked — proposed via submit_plan", "Model submitted a plan instead of writing; the plan was rejected", shot);
 	}
 
 	const currentContent = fs.readFileSync(targetPath, "utf8");
@@ -302,7 +325,7 @@ async function testReadToolsWorkInPlanMode(ctx: TestContext): Promise<void> {
 
 	// list_vault
 	{
-		const responded = await sendMessage(
+		const { responded } = await sendPlanModeMessage(
 			page,
 			"Please use the list_vault tool to list the notes in my vault root."
 		);
@@ -337,7 +360,7 @@ async function testReadToolsWorkInPlanMode(ctx: TestContext): Promise<void> {
 	await newConversation(page);
 	await setMode(page, "Plan");
 	{
-		const responded = await sendMessage(
+		const { responded } = await sendPlanModeMessage(
 			page,
 			"Please use read_note to read 'Plan-Mode-Test.md' and tell me what the title heading is."
 		);
@@ -366,7 +389,7 @@ async function testReadToolsWorkInPlanMode(ctx: TestContext): Promise<void> {
 	await newConversation(page);
 	await setMode(page, "Plan");
 	{
-		const responded = await sendMessage(
+		const { responded } = await sendPlanModeMessage(
 			page,
 			"Please search my vault for the word 'original' using search_vault."
 		);
@@ -395,7 +418,7 @@ async function testReadToolsWorkInPlanMode(ctx: TestContext): Promise<void> {
 	await newConversation(page);
 	await setMode(page, "Plan");
 	{
-		const responded = await sendMessage(
+		const { responded } = await sendPlanModeMessage(
 			page,
 			"Please use read_frontmatter to read the frontmatter of 'Plan-Mode-Test.md'."
 		);
@@ -518,7 +541,7 @@ async function testSwitchToPlanReBlocksWrites(ctx: TestContext): Promise<void> {
 	const blockTargetPath = path.join(VAULT_PATH, "Plan-Mode-Mid-Convo-Blocked.md");
 	if (fs.existsSync(blockTargetPath)) fs.unlinkSync(blockTargetPath);
 
-	const responded = await sendMessage(
+	const { responded, planSubmitted } = await sendPlanModeMessage(
 		page,
 		"Now please use write_note to create 'Plan-Mode-Mid-Convo-Blocked.md' with content '# Should Be Blocked'."
 	);
@@ -528,6 +551,11 @@ async function testSwitchToPlanReBlocksWrites(ctx: TestContext): Promise<void> {
 	if (!responded) {
 		ctx.fail("Act→Plan test — response received", `No response within timeout`, shot);
 		return;
+	}
+
+	// Plan mode may propose the change for review instead of attempting it
+	if (planSubmitted) {
+		ctx.pass("Act→Plan test — write proposed via submit_plan", "Model submitted a plan instead of writing; the plan was rejected", shot);
 	}
 
 	if (!fs.existsSync(blockTargetPath)) {

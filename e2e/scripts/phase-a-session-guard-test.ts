@@ -31,6 +31,7 @@ import {
 	ensureCleanState,
 	waitForResponse,
 	writeCleanWorkspace,
+	CHAT_ONLY,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -82,7 +83,10 @@ async function getLeafConversationId(page: any, leafIndex: number): Promise<stri
 		if (!app) return null;
 		const leaves = app.workspace.getLeavesOfType(args.viewType);
 		if (args.index >= leaves.length) return null;
-		return leaves[args.index]?.view?.activeConversationId ?? null;
+		// Read the leaf orchestrator: switchLeafToConversation calls it directly,
+		// which (unlike the UI wrappers) doesn't update view.activeConversationId
+		const orch = app.plugins?.plugins?.["notor"]?._orchestrators?.get(leaves[args.index].id);
+		return orch?.getConversationManager().getActiveConversation()?.id ?? leaves[args.index]?.view?.activeConversationId ?? null;
 	}, { viewType: CHAT_VIEW_TYPE, index: leafIndex });
 }
 
@@ -295,7 +299,7 @@ async function testSessionGuardBlocks(ctx: TestContext): Promise<void> {
 		page,
 		"Write a very detailed, comprehensive 2000-word essay about the complete history of " +
 		"astronomy from ancient Babylonian observations through modern space telescopes. " +
-		"Cover every major discovery, key astronomers, and technological breakthrough.",
+		"Cover every major discovery, key astronomers, and technological breakthrough." + CHAT_ONLY,
 	);
 
 	// Wait for streaming to start
@@ -567,7 +571,7 @@ async function tests(ctx: TestContext): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const settings = buildDefaultSettings({
-	mode: "plan",
+	mode: "act", // Plain streamed chat (prompts use CHAT_ONLY); Plan mode now proposes vault changes via submit_plan
 });
 
 runTest({

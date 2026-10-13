@@ -39,6 +39,7 @@ import {
 	RESPONSE_TIMEOUT_MS,
 	POLL_INTERVAL_MS,
 	writeCleanWorkspace,
+	CHAT_ONLY,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -105,13 +106,13 @@ async function testStopButtonAborts(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
 	console.log("\n── Abort Test 1: stop button aborts in-flight request ──────────");
 	await newConversation(page);
-	await setMode(page, "Plan");
+	await setMode(page, "Act");
 
 	await sendMessageNoWait(
 		page,
 		"Please write a very detailed, comprehensive 2000-word essay about the history of " +
 		"note-taking from ancient times to the modern digital era. Include many specific " +
-		"examples, dates, and analysis in each section."
+		"examples, dates, and analysis in each section." + CHAT_ONLY
 	);
 
 	const stopAppeared = await waitForStopButton(page, 30_000);
@@ -207,12 +208,12 @@ async function testPartialResponseRetained(ctx: TestContext): Promise<void> {
 	const { page } = ctx;
 	console.log("\n── Abort Test 3: partial response retained in chat ─────────────");
 	await newConversation(page);
-	await setMode(page, "Plan");
+	await setMode(page, "Act");
 
 	await sendMessageNoWait(
 		page,
 		"List all 50 US states alphabetically with their capitals and a one-sentence " +
-		"historical fact about each state. Be very thorough."
+		"historical fact about each state. Be very thorough." + CHAT_ONLY
 	);
 
 	const stopAppeared = await waitForStopButton(page, 30_000);

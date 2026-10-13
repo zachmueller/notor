@@ -29,6 +29,7 @@ import {
 	buildDefaultSettings,
 	sendMessage,
 	sendMessageWithApprovalHandling,
+	sendPlanModeMessage,
 	getLastAssistantMessage,
 	getLastToolCallNames,
 	newConversation,
@@ -125,7 +126,7 @@ async function testSubAgentWriteBlockedInPlanMode(ctx: TestContext): Promise<voi
 	const targetFile = path.join(VAULT_PATH, "SubAgent-Plan-Blocked.md");
 	if (fs.existsSync(targetFile)) fs.unlinkSync(targetFile);
 
-	const responded = await sendMessage(
+	const { responded, planSubmitted } = await sendPlanModeMessage(
 		page,
 		"Use the use_subagent tool with the vault-writer profile. " +
 		"Ask it to create a note called 'SubAgent-Plan-Blocked.md' with content '# Should Not Exist'.",
@@ -136,6 +137,11 @@ async function testSubAgentWriteBlockedInPlanMode(ctx: TestContext): Promise<voi
 	if (!responded) {
 		ctx.fail("Sub-agent write blocked in Plan mode — response", "No response within timeout", shot);
 		return;
+	}
+
+	// Plan mode may propose the change for review instead of delegating it
+	if (planSubmitted) {
+		ctx.pass("Sub-agent write in Plan mode — proposed via submit_plan", "Model submitted a plan instead; the plan was rejected", shot);
 	}
 
 	// File must NOT have been created
@@ -174,7 +180,7 @@ async function testSubAgentReadWorksInPlanMode(ctx: TestContext): Promise<void> 
 	await newConversation(page);
 	await setMode(page, "Plan");
 
-	const responded = await sendMessage(
+	const { responded } = await sendPlanModeMessage(
 		page,
 		"Use the use_subagent tool with the vault-writer profile. " +
 		"Ask it to read the note 'Sub-Agent-Test.md' and tell you the title.",

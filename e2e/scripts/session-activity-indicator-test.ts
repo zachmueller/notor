@@ -29,6 +29,7 @@ import {
 	waitForSelector,
 	newConversation,
 	ensureCleanState,
+	CHAT_ONLY,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -265,7 +266,7 @@ async function testBadgeShowsCountOnMidStreamSwitch(ctx: TestContext): Promise<v
 		"Please write a very detailed, comprehensive 2000-word essay about the history of " +
 		"note-taking from ancient civilizations through to modern digital tools. Include specific " +
 		"examples, dates, technologies, and analysis in each section. Cover clay tablets, papyrus, " +
-		"medieval manuscripts, the printing press, notebooks, and digital note-taking applications.",
+		"medieval manuscripts, the printing press, notebooks, and digital note-taking applications." + CHAT_ONLY,
 	);
 
 	// Wait for streaming to start
@@ -647,7 +648,7 @@ async function testIndicatorAnimationDuringSession(ctx: TestContext): Promise<vo
 		page,
 		"Write a comprehensive 1500-word analysis of the evolution of software engineering " +
 		"methodologies from waterfall through agile, DevOps, and modern practices. Include " +
-		"specific frameworks, key figures, and critical turning points in the industry.",
+		"specific frameworks, key figures, and critical turning points in the industry." + CHAT_ONLY,
 	);
 
 	const stopAppeared = await waitForStopButton(page, 30_000);
@@ -788,7 +789,7 @@ async function tests(ctx: TestContext): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const settings = buildDefaultSettings({
-	mode: "plan", // Plan mode avoids tool calls -- cleaner streaming tests
+	mode: "act", // Plain streamed chat (prompts use CHAT_ONLY); Plan mode now proposes vault changes via submit_plan
 });
 
 runTest(

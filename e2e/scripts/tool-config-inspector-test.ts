@@ -18,23 +18,12 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { waitForSelector, VAULT_PATH, selectPersona } from "../lib/test-helpers";
+import { waitForSelector, VAULT_PATH, selectPersona, revealChatView } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Custom helpers — these call revealLeaf before interacting since the
 // inspector sidebar may obscure the chat view
 // ---------------------------------------------------------------------------
-
-async function revealChatView(page: Page): Promise<void> {
-	await page.evaluate(() => {
-		const app = (window as unknown as { app?: { workspace?: { getLeavesOfType?: (type: string) => Array<{ view?: unknown }> } } }).app;
-		const chatLeaves = app?.workspace?.getLeavesOfType?.("notor-chat-view") ?? [];
-		if (chatLeaves.length > 0) {
-			(app?.workspace as { revealLeaf?: (leaf: unknown) => void })?.revealLeaf?.(chatLeaves[0]);
-		}
-	});
-	await page.waitForTimeout(500);
-}
 
 async function selectPersonaLocal(page: Page, personaName: string | null): Promise<boolean> {
 	await revealChatView(page);

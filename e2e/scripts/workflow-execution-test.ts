@@ -1593,7 +1593,7 @@ notor-workflow-persona: "organizer"
 
 # Daily review workflow
 
-Review today's daily notes and create a summary of key themes.
+Review today's daily notes and reply in chat with a short summary of key themes.
 `
 			);
 

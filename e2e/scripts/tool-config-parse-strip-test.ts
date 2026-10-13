@@ -15,7 +15,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { waitForSelector, selectPersona, buildDefaultSettings, VAULT_PATH } from "../lib/test-helpers";
+import { waitForSelector, selectPersona, buildDefaultSettings, VAULT_PATH, getPersonaChip } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -415,18 +415,16 @@ async function tests(ctx: TestContext): Promise<void> {
 	{
 		const deactivated = await selectPersona(page, null);
 		if (deactivated) {
-			const label = await page.$(".notor-persona-label");
-			const isHidden = !label || (await label.evaluate((el) => el.classList.contains("notor-hidden")));
-			const text = label ? await label.textContent() : "";
+			const chip = await getPersonaChip(page);
 			const shot = await ctx.screenshot("09-deactivated");
-			if (isHidden || !text?.trim()) {
-				ctx.pass("Deactivate persona", "Persona label hidden after selecting None", shot);
+			if (chip?.isDefault) {
+				ctx.pass("Deactivate persona", `Default persona chip shown: "${chip.text}"`, shot);
 			} else {
-				ctx.fail("Deactivate persona", `Label still visible: "${text?.trim()}"`, shot);
+				ctx.fail("Deactivate persona", `Chip: ${JSON.stringify(chip)} — expected the default persona chip`, shot);
 			}
 		} else {
 			const shot = await ctx.screenshot("09-deactivate-failed");
-			ctx.fail("Deactivate persona", "Could not select None from persona dropdown", shot);
+			ctx.fail("Deactivate persona", "Could not select None from the persona menu", shot);
 		}
 	}
 

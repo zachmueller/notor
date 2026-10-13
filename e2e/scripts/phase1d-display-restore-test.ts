@@ -35,6 +35,7 @@ import {
 	selectPersona,
 	ensureCleanState,
 	VAULT_PATH,
+	CHAT_ONLY,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -833,7 +834,7 @@ async function testDestroyAbortsActiveSessions(ctx: TestContext): Promise<void> 
 		page,
 		"Write a very detailed, comprehensive 2000-word essay about the complete history " +
 		"of mathematics from ancient Babylonian number systems through modern abstract algebra. " +
-		"Include specific dates, key mathematicians, and important theorems in each era.",
+		"Include specific dates, key mathematicians, and important theorems in each era." + CHAT_ONLY,
 	);
 
 	const stopAppeared = await waitForStopButton(page, 30_000);
@@ -999,7 +1000,7 @@ read_note:
 // ---------------------------------------------------------------------------
 
 const settings = buildDefaultSettings({
-	mode: "plan", // Plan mode avoids tool calls — cleaner for these tests
+	mode: "act", // Plain streamed chat (prompts use CHAT_ONLY); Plan mode now proposes vault changes via submit_plan
 });
 
 runTest(

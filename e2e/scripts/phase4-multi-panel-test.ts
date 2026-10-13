@@ -33,6 +33,7 @@ import {
 	waitForSelector,
 	ensureCleanState,
 	VAULT_PATH,
+	CHAT_ONLY,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -221,7 +222,7 @@ async function getLeafProviderType(page: any, leafIndex: number): Promise<string
 		try {
 			// Look up orchestrator via the unified registry by leaf ID
 			const orch = plugin._orchestrators?.get(leaf.id);
-			return orch?.getActiveProviderType?.() ?? null;
+			return orch?.getActiveProviderId?.() ?? null;
 		} catch {
 			return null;
 		}
@@ -462,7 +463,7 @@ async function testSimultaneousMessages(ctx: TestContext): Promise<void> {
 	await sendMessageNoWaitInLeaf(
 		page,
 		shared.primaryLeafIndex,
-		"You are in Panel A (primary). Write a 500-word essay about the history of astronomy.",
+		"You are in Panel A (primary). Write a 500-word essay about the history of astronomy." + CHAT_ONLY,
 	);
 	await page.waitForTimeout(1_000);
 
@@ -472,7 +473,7 @@ async function testSimultaneousMessages(ctx: TestContext): Promise<void> {
 	await sendMessageNoWaitInLeaf(
 		page,
 		shared.secondaryLeafIndex,
-		"You are in Panel B (secondary). Write a 500-word essay about the history of mathematics.",
+		"You are in Panel B (secondary). Write a 500-word essay about the history of mathematics." + CHAT_ONLY,
 	);
 
 	// Wait for both to complete
@@ -662,8 +663,8 @@ async function testPerOrchestratorProviderModelIndependence(ctx: TestContext): P
 			return {
 				areDifferentObjects,
 				differentConvManagers,
-				orch1ProviderType: orch1.getActiveProviderType?.() ?? "unknown",
-				orch2ProviderType: orch2.getActiveProviderType?.() ?? "unknown",
+				orch1ProviderType: orch1.getActiveProviderId?.() ?? "unknown",
+				orch2ProviderType: orch2.getActiveProviderId?.() ?? "unknown",
 			};
 		} catch (e: any) {
 			return { error: e.message };
@@ -981,7 +982,7 @@ async function tests(ctx: TestContext): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const settings = buildDefaultSettings({
-	mode: "plan", // Plan mode avoids tool calls — cleaner multi-panel tests
+	mode: "act", // Plain streamed chat (prompts use CHAT_ONLY); Plan mode now proposes vault changes via submit_plan
 });
 
 runTest(

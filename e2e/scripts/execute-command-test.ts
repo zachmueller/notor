@@ -23,6 +23,7 @@ import { runTest, type TestContext } from "../lib/test-harness";
 import {
 	waitForSelector,
 	sendMessage,
+	sendPlanModeMessage,
 	newConversation,
 	setMode,
 	buildDefaultSettings,
@@ -61,7 +62,8 @@ async function testPlanModeBlocked(ctx: TestContext): Promise<void> {
 	// Snapshot log count before sending so we only inspect logs from this test
 	const logCountBefore = ctx.collector.getStructuredLogs().length;
 
-	const responded = await sendMessage(page, "Please execute the command: echo test");
+	// The model may attempt the command (blocked) or propose it via submit_plan
+	const { responded, planSubmitted } = await sendPlanModeMessage(page, "Please execute the command: echo test");
 	const shot = await ctx.screenshot("02-plan-mode");
 
 	if (!responded) {
@@ -69,7 +71,7 @@ async function testPlanModeBlocked(ctx: TestContext): Promise<void> {
 		return;
 	}
 
-	ctx.pass("Plan mode response", "Response received", shot);
+	ctx.pass("Plan mode response", planSubmitted ? "Plan submitted and rejected" : "Response received", shot);
 
 	// Verify dispatcher actually blocked the write tool in Plan mode
 	const recentLogs = ctx.collector.getStructuredLogs().slice(logCountBefore);

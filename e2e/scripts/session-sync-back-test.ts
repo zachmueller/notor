@@ -37,6 +37,7 @@ import {
 	VAULT_PATH,
 	RESPONSE_TIMEOUT_MS,
 	POLL_INTERVAL_MS,
+	CHAT_ONLY,
 } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
@@ -301,7 +302,7 @@ async function testActiveSessionDuringStreaming(ctx: TestContext): Promise<void>
 		"Please write a very detailed, comprehensive 2000-word essay about the history of " +
 		"note-taking from ancient civilizations through to modern digital tools. Include specific " +
 		"examples, dates, technologies, and analysis in each section. Cover clay tablets, papyrus, " +
-		"medieval manuscripts, the printing press, notebooks, and digital note-taking applications.",
+		"medieval manuscripts, the printing press, notebooks, and digital note-taking applications." + CHAT_ONLY,
 	);
 
 	// Wait for streaming to start (stop button becomes visible)
@@ -574,7 +575,7 @@ async function testStopButtonAbortsActiveSession(ctx: TestContext): Promise<void
 			page,
 			"Write a very detailed 3000-word analysis of every aspect of the Renaissance period " +
 			"in European history. Cover art, science, politics, religion, culture, economics, " +
-			"and social changes in extreme detail with many specific examples.",
+			"and social changes in extreme detail with many specific examples." + CHAT_ONLY,
 		);
 
 		const stopAppeared = await waitForStopButton(page, 30_000);
@@ -772,7 +773,7 @@ async function testCannotDeleteStreamingConversation(ctx: TestContext): Promise<
 		"Write a very detailed, comprehensive 3000-word analysis of the entire history of " +
 		"computing from Charles Babbage through to modern artificial intelligence systems. " +
 		"Cover every major development, key figures, important dates, and technological " +
-		"breakthroughs. Include sections on hardware, software, networking, and AI.",
+		"breakthroughs. Include sections on hardware, software, networking, and AI." + CHAT_ONLY,
 	);
 
 	const stopAppeared = await waitForStopButton(page, 30_000);
@@ -949,7 +950,7 @@ async function tests(ctx: TestContext): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const settings = buildDefaultSettings({
-	mode: "plan", // Plan mode avoids tool calls — cleaner streaming tests
+	mode: "act", // Plain streamed chat (prompts use CHAT_ONLY); Plan mode now proposes vault changes via submit_plan
 });
 
 runTest(

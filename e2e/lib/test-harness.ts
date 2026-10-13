@@ -332,6 +332,8 @@ export async function runTest(
 
 	} catch (err) {
 		console.error("\nFatal error:", err);
+		// Record it so a crashed run can't report all-green and exit 0
+		results.push({ name: "Fatal error", passed: false, detail: err instanceof Error ? err.message : String(err) });
 	} finally {
 		if (collector) await collector.dispose().catch(() => {});
 		if (browser) await browser.close().catch(() => {});

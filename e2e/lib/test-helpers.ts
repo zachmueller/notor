@@ -264,6 +264,97 @@ export async function waitForResponse(
 }
 
 /**
+ * Bring the first Notor chat leaf to the front if it's hidden. Notes opened by
+ * tools (e.g. write_note) and the plan review tab open as main-area tabs in
+ * front of the chat tab, leaving its header and toolbar buttons unclickable.
+ */
+export async function revealChatView(page: Page): Promise<void> {
+	const revealed = await page.evaluate(() => {
+		const workspace = (window as any).app?.workspace;
+		const leaf = workspace?.getLeavesOfType?.("notor-chat-view")?.[0];
+		if (!leaf) return false;
+		const container = leaf.view?.containerEl as HTMLElement | undefined;
+		if (container && container.offsetParent !== null) return false;
+		void workspace.revealLeaf(leaf);
+		return true;
+	});
+	if (revealed) await page.waitForTimeout(500);
+}
+
+/**
+ * Suffix for prompts whose answer must stream as plain chat text. Without it a
+ * "write an essay" prompt can turn into a note (Act mode) or a `submit_plan`
+ * review (Plan mode) instead of a long streamed reply.
+ */
+export const CHAT_ONLY =
+	" Answer directly in this chat as plain text — do not create or edit notes, submit a plan, or use any tools.";
+
+/**
+ * Wait for the response to finish, a plan review to become pending, or a
+ * generic approval gate to appear. In Plan mode the model may call
+ * `submit_plan` for a task that changes the vault, which suspends the run
+ * (stop button stays visible) until the user decides — so `waitForResponse`
+ * alone would time out.
+ */
+export async function waitForResponseOrPlanReview(
+	page: Page,
+	timeoutMs = RESPONSE_TIMEOUT_MS,
+	pollMs = POLL_INTERVAL_MS,
+): Promise<"done" | "plan" | "approval" | "timeout"> {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		await page.waitForTimeout(pollMs);
+		const state = await page.evaluate(() => {
+			// The review card exists only while the review is pending
+			if (document.querySelector(".notor-plan-review-prompt")) return "plan";
+			if (document.querySelector(".notor-approve-btn")) return "approval";
+			const send = document.querySelector(".notor-send-btn");
+			const stop = document.querySelector(".notor-stop-btn");
+			const idle = !!send && !send.classList.contains("notor-hidden") && (!stop || stop.classList.contains("notor-hidden"));
+			return idle ? "done" : "waiting";
+		});
+		if (state !== "waiting") return state as "done" | "plan" | "approval";
+	}
+	return "timeout";
+}
+
+/**
+ * Reject the pending plan review from its chat card, close the plan tab, and
+ * wait for the model's follow-up to finish. Returns false if no review was
+ * pending or the response didn't finish.
+ */
+export async function rejectPendingPlan(page: Page): Promise<boolean> {
+	await revealChatView(page);
+	const rejected = await page.evaluate(() => {
+		const btn = document.querySelector(".notor-plan-review-prompt .notor-plan-review-reject") as HTMLButtonElement | null;
+		btn?.click();
+		return !!btn;
+	});
+	if (!rejected) return false;
+	await page.evaluate(() => (window as any).app?.workspace?.detachLeavesOfType?.("notor-plan-view"));
+	await revealChatView(page);
+	return waitForResponse(page);
+}
+
+/**
+ * Send a message in Plan mode. The model may answer directly (e.g. a blocked
+ * write) or propose the change with `submit_plan`; a submitted plan is
+ * rejected so the vault stays unchanged and the conversation stays in Plan.
+ */
+export async function sendPlanModeMessage(
+	page: Page,
+	message: string,
+): Promise<{ responded: boolean; planSubmitted: boolean }> {
+	await sendMessageNoWait(page, message);
+	const outcome = await waitForResponseOrPlanReview(page);
+	if (outcome === "plan") {
+		console.log("    → Model submitted a plan for review — rejecting it");
+		return { responded: await rejectPendingPlan(page), planSubmitted: true };
+	}
+	return { responded: outcome === "done", planSubmitted: false };
+}
+
+/**
  * Send a chat message and wait for the response.
  * The input is a contenteditable div.
  *
@@ -273,6 +364,13 @@ export async function waitForResponse(
  * prematurely send a partial message.
  */
 export async function sendMessage(page: Page, message: string): Promise<boolean> {
+	await sendMessageNoWait(page, message);
+	return waitForResponse(page);
+}
+
+/** Send a chat message without waiting for the response (see {@link sendMessage}). */
+export async function sendMessageNoWait(page: Page, message: string): Promise<void> {
+	await revealChatView(page);
 	const found = await page.evaluate((msg) => {
 		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
 		if (!el) return false;
@@ -292,8 +390,6 @@ export async function sendMessage(page: Page, message: string): Promise<boolean>
 	await page.waitForTimeout(600);
 
 	console.log(`    → Sent: "${message.substring(0, 80)}${message.length > 80 ? "..." : ""}"`);
-
-	return waitForResponse(page);
 }
 
 /**
@@ -310,6 +406,7 @@ export async function sendMessageWithApprovalHandling(
 	timeoutMs = RESPONSE_TIMEOUT_MS,
 	pollMs = POLL_INTERVAL_MS,
 ): Promise<{ responded: boolean; approved: boolean }> {
+	await revealChatView(page);
 	const found = await page.evaluate((msg) => {
 		const el = document.querySelector(".notor-text-input") as HTMLElement | null;
 		if (!el) return false;
@@ -396,6 +493,7 @@ export async function getLastToolCallNames(page: Page): Promise<string[]> {
  * Start a fresh conversation.
  */
 export async function newConversation(page: Page): Promise<void> {
+	await revealChatView(page);
 	const btn = await page.$(".notor-chat-header-btn[aria-label='New conversation']");
 	if (btn) {
 		await btn.click();
@@ -407,6 +505,7 @@ export async function newConversation(page: Page): Promise<void> {
  * Switch mode to Plan or Act.
  */
 export async function setMode(page: Page, mode: "Plan" | "Act"): Promise<void> {
+	await revealChatView(page);
 	const toggle = await page.$(".notor-mode-toggle");
 	if (!toggle) throw new Error("Mode toggle not found");
 
@@ -428,6 +527,7 @@ export async function setMode(page: Page, mode: "Plan" | "Act"): Promise<void> {
  * reach the DOM. Returns null when the chip or menu is missing.
  */
 export async function openPersonaMenu(page: Page): Promise<string[] | null> {
+	await revealChatView(page);
 	await page.evaluate(() => (window as any).app?.vault?.setConfig?.("nativeMenus", false));
 	const chip = await page.$(".notor-persona-label");
 	if (!chip) return null;
@@ -465,6 +565,18 @@ export async function selectPersona(page: Page, personaName: string | null): Pro
 }
 
 /**
+ * Read the persona chip. With no persona active it shows "🎭 default" with the
+ * `notor-persona-label--default` class (it is never hidden).
+ */
+export async function getPersonaChip(page: Page): Promise<{ text: string; isDefault: boolean } | null> {
+	return page.evaluate(() => {
+		const el = document.querySelector(".notor-persona-label");
+		if (!el) return null;
+		return { text: el.textContent?.trim() ?? "", isDefault: el.classList.contains("notor-persona-label--default") };
+	});
+}
+
+/**
  * Force-abort any in-progress LLM response and wait for the chat input to
  * become editable again. Call this at the start of tests that require a clean
  * input state, especially after tests that may leave a response in flight.
@@ -481,6 +593,7 @@ export async function ensureCleanState(page: Page): Promise<void> {
 	if (!isResponding) return;
 
 	console.log("  ⚠ Response in progress — aborting...");
+	await revealChatView(page);
 
 	// Try clicking the stop button
 	const stopBtn = await page.$(".notor-stop-btn:not(.notor-hidden)");
@@ -545,6 +658,9 @@ export function buildDefaultSettings(overrides?: Record<string, unknown>): Recor
 			update_frontmatter: false, manage_tags: false, execute_command: false,
 			read_file: false, read_docx: false, write_docx: false, ask_user: true,
 		},
+		// Plan mode (the plugin default) answers questions directly but proposes
+		// vault changes via submit_plan — use CHAT_ONLY / Act mode for long
+		// streamed replies and sendPlanModeMessage for write requests.
 		mode: "plan",
 		open_notes_on_access: true,
 		history_path: ".obsidian/plugins/notor/history/",

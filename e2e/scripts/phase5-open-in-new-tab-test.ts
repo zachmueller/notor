@@ -810,7 +810,7 @@ async function tests(ctx: TestContext): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const settings = buildDefaultSettings({
-	mode: "plan", // Plan mode avoids tool calls — cleaner tests
+	mode: "plan", // Trivial "reply briefly" prompts — Plan mode only submits plans for vault changes
 });
 
 runTest(

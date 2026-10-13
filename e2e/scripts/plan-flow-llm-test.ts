@@ -32,7 +32,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { buildDefaultSettings, setMode, VAULT_PATH, waitForResponse, waitForSelector } from "../lib/test-helpers";
+import { buildDefaultSettings, sendMessageNoWait, setMode, VAULT_PATH, waitForResponse, waitForResponseOrPlanReview, waitForSelector } from "../lib/test-helpers";
 import type { LogEntry } from "../lib/log-collector";
 
 // ---------------------------------------------------------------------------
@@ -41,38 +41,6 @@ import type { LogEntry } from "../lib/log-collector";
 
 const NOTE = "Plan-Flow-LLM-Test.md";
 const NOTE_LINE = "planned and done";
-
-async function sendMessageNoWait(page: Page, message: string): Promise<void> {
-	await page.evaluate((msg) => {
-		const el = document.querySelector(".notor-text-input") as HTMLElement;
-		el.focus();
-		el.textContent = msg;
-		el.dispatchEvent(new Event("input", { bubbles: true }));
-	}, message);
-	await page.waitForTimeout(300);
-	await page.focus(".notor-text-input");
-	await page.keyboard.press("Enter");
-	await page.waitForTimeout(600);
-	console.log(`    → Sent: "${message.slice(0, 80)}…"`);
-}
-
-/** Poll for the plan-review card; also report a generic approval gate if one appears first. */
-async function waitForReviewCard(page: Page, timeoutMs = 120_000): Promise<"card" | "approval" | "done" | "timeout"> {
-	const start = Date.now();
-	while (Date.now() - start < timeoutMs) {
-		const state = await page.evaluate(() => {
-			if (document.querySelector(".notor-plan-review-prompt")) return "card";
-			if (document.querySelector(".notor-approve-btn")) return "approval";
-			const send = document.querySelector(".notor-send-btn");
-			const stop = document.querySelector(".notor-stop-btn");
-			const idle = send && !send.classList.contains("notor-hidden") && (!stop || stop.classList.contains("notor-hidden"));
-			return idle ? "done" : "waiting";
-		});
-		if (state !== "waiting") return state as "card" | "approval" | "done";
-		await page.waitForTimeout(1_000);
-	}
-	return "timeout";
-}
 
 function systemPrompts(logs: LogEntry[]): string[] {
 	return logs
@@ -94,8 +62,8 @@ async function testPlanRoundTrip(ctx: TestContext): Promise<void> {
 		"This changes the vault, so plan it first.",
 	);
 
-	const first = await waitForReviewCard(page);
-	if (first !== "card") {
+	const first = await waitForResponseOrPlanReview(page, 120_000);
+	if (first !== "plan") {
 		const shot = await ctx.screenshot("02-no-review-card");
 		ctx.fail("Model calls submit_plan and the review card renders", `state=${first}`, shot);
 		return;

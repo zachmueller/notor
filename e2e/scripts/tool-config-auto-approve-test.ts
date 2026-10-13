@@ -18,20 +18,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { runTest, type TestContext } from "../lib/test-harness";
-import {
-	waitForSelector,
-	sendMessage,
-	getLastAssistantMessage,
-	getLastToolCallNames,
-	waitForResponse,
-	newConversation,
-	setMode,
-	selectPersona,
-	buildDefaultSettings,
-	VAULT_PATH,
-	RESPONSE_TIMEOUT_MS,
-	POLL_INTERVAL_MS,
-} from "../lib/test-helpers";
+import { waitForSelector, sendMessage, getLastAssistantMessage, getLastToolCallNames, waitForResponse, newConversation, setMode, selectPersona, buildDefaultSettings, VAULT_PATH, RESPONSE_TIMEOUT_MS, POLL_INTERVAL_MS, getPersonaChip } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Vault setup
@@ -194,12 +181,15 @@ async function tests(ctx: TestContext): Promise<void> {
 				break;
 			}
 
-			// Check if response is complete (LLM may not have called write_note)
-			const inputEnabled = await page.evaluate(() => {
-				const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-				return el !== null && el.getAttribute("contenteditable") === "true";
+			// Check if response is complete (LLM may not have called write_note).
+			// The input stays editable while streaming, so use the send/stop buttons.
+			const responseComplete = await page.evaluate(() => {
+				const sendBtn = document.querySelector(".notor-send-btn");
+				const stopBtn = document.querySelector(".notor-stop-btn");
+				return !!sendBtn && !sendBtn.classList.contains("notor-hidden")
+					&& (!stopBtn || stopBtn.classList.contains("notor-hidden"));
 			});
-			if (inputEnabled) {
+			if (responseComplete) {
 				responded = true;
 				break;
 			}
@@ -509,18 +499,16 @@ async function tests(ctx: TestContext): Promise<void> {
 	{
 		const deactivated = await selectPersona(page, null);
 		if (deactivated) {
-			const label = await page.$(".notor-persona-label");
-			const isHidden = !label || (await label.evaluate((el) => el.classList.contains("notor-hidden")));
-			const text = label ? await label.textContent() : "";
+			const chip = await getPersonaChip(page);
 			const shot = await ctx.screenshot("09-deactivated");
-			if (isHidden || !text?.trim()) {
-				ctx.pass("Deactivate persona", "Persona label hidden after selecting None", shot);
+			if (chip?.isDefault) {
+				ctx.pass("Deactivate persona", `Default persona chip shown: "${chip.text}"`, shot);
 			} else {
-				ctx.fail("Deactivate persona", `Label still visible: "${text?.trim()}"`, shot);
+				ctx.fail("Deactivate persona", `Chip: ${JSON.stringify(chip)} — expected the default persona chip`, shot);
 			}
 		} else {
 			const shot = await ctx.screenshot("09-deactivate-failed");
-			ctx.fail("Deactivate persona", "Could not select None from persona dropdown", shot);
+			ctx.fail("Deactivate persona", "Could not select None from the persona menu", shot);
 		}
 	}
 
