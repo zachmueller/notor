@@ -728,7 +728,24 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 	async newConversation(opts?: { signal?: AbortSignal }): Promise<void> {
 		await this.lifecycle.newConversation(opts);
-		if (!opts?.signal?.aborted) await this.refreshDisplayConfig();
+		if (opts?.signal?.aborted) return;
+		this.syncViewToConversation();
+		await this.refreshDisplayConfig();
+	}
+
+	/**
+	 * Point the view at the displayed conversation: its id (persisted for
+	 * workspace restore), header title and favorite star. Done for every
+	 * switch here — including internal ones like the "Draft saved" notice's
+	 * switch-back — rather than only by the panel's UI handlers.
+	 */
+	private syncViewToConversation(): void {
+		const view = this.viewRouter.getView();
+		const conv = this.conversationManager.getActiveConversation();
+		if (!view || !conv) return;
+		view.setActiveConversationId(conv.id);
+		view.updateHeaderTitle(conv.id, conv.title ?? null);
+		view.updateHeaderFavorite(conv.id, !!conv.is_favorite);
 	}
 
 	async forkConversation(
@@ -829,12 +846,16 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 	async switchConversation(filename: string, opts?: { signal?: AbortSignal }): Promise<void> {
 		await this.lifecycle.switchConversation(filename, opts);
-		if (!opts?.signal?.aborted) await this.refreshDisplayConfig();
+		if (opts?.signal?.aborted) return;
+		this.syncViewToConversation();
+		await this.refreshDisplayConfig();
 	}
 
 	async switchToConversationById(conversationId: string, opts?: { signal?: AbortSignal }): Promise<boolean> {
 		const switched = await this.lifecycle.switchToConversationById(conversationId, opts);
-		if (switched && !opts?.signal?.aborted) await this.refreshDisplayConfig();
+		if (!switched || opts?.signal?.aborted) return switched;
+		this.syncViewToConversation();
+		await this.refreshDisplayConfig();
 		return switched;
 	}
 

@@ -91,16 +91,8 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 	});
 
 	// H-005: Wire conversation-by-ID switching
-	view.setOnSwitchToConversationById(async (conversationId: string) => {
-		const result = await orchestrator.switchToConversationById(conversationId);
-		if (result) {
-			view.setActiveConversationId(conversationId);
-			const conv = orchestrator.getConversationManager().getActiveConversation();
-			view.updateHeaderTitle(conversationId, conv?.title ?? null);
-			view.updateHeaderFavorite(conversationId, !!conv?.is_favorite);
-		}
-		return result;
-	});
+	// (the orchestrator syncs the view's id/header on every switch)
+	view.setOnSwitchToConversationById((conversationId: string) => orchestrator.switchToConversationById(conversationId));
 
 	// Wire persona manager to view (A-013: picker + label)
 	const personaManager = plugin.getPersonaManager();
@@ -224,13 +216,6 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 			plugin.updateMcpHubSettings();
 
 			return orchestrator.newConversation();
-		}).then(() => {
-			const conv = orchestrator.getConversationManager().getActiveConversation();
-			if (conv) {
-				view.setActiveConversationId(conv.id);
-				view.updateHeaderTitle(conv.id, conv.title ?? null);
-				view.updateHeaderFavorite(conv.id, !!conv.is_favorite);
-			}
 		}).catch((e) => {
 			log.error("Failed to create new conversation", { error: String(e) });
 			new Notice(`Failed to create conversation: ${e instanceof Error ? e.message : String(e)}`);
@@ -250,12 +235,6 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 	// Switch conversation
 	view.setOnSwitchConversation((filename: string) => {
 		orchestrator.switchConversation(filename).then(() => {
-			const conv = orchestrator.getConversationManager().getActiveConversation();
-			if (conv) {
-				view.setActiveConversationId(conv.id);
-				view.updateHeaderTitle(conv.id, conv.title ?? null);
-				view.updateHeaderFavorite(conv.id, !!conv.is_favorite);
-			}
 			plugin.getStaleTracker().clear?.();
 			plugin.getVaultRuleManager().clearAccessedNotes();
 		}).catch((e) => {
@@ -270,9 +249,6 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 
 		await orchestrator.switchConversation(result.filename);
 
-		view.setActiveConversationId(result.conversation.id);
-		view.updateHeaderTitle(result.conversation.id, result.conversation.title ?? null);
-		view.updateHeaderFavorite(result.conversation.id, !!result.conversation.is_favorite);
 		plugin.getStaleTracker().clear?.();
 		plugin.getVaultRuleManager().clearAccessedNotes();
 
@@ -287,9 +263,6 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 
 		await orchestrator.switchConversation(result.filename);
 
-		view.setActiveConversationId(result.conversation.id);
-		view.updateHeaderTitle(result.conversation.id, result.conversation.title ?? null);
-		view.updateHeaderFavorite(result.conversation.id, !!result.conversation.is_favorite);
 		plugin.getStaleTracker().clear?.();
 		plugin.getVaultRuleManager().clearAccessedNotes();
 
@@ -415,20 +388,8 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 				const nextEntry = entries[0];
 				if (activeConv && nextEntry && filename.includes(activeConv.id)) {
 					await orchestrator.switchConversation(nextEntry.filename);
-					const conv = convManager.getActiveConversation();
-					if (conv) {
-						view.setActiveConversationId(conv.id);
-						view.updateHeaderTitle(conv.id, conv.title ?? null);
-						view.updateHeaderFavorite(conv.id, !!conv.is_favorite);
-					}
 				} else if (entries.length === 0) {
 					await orchestrator.newConversation();
-					const conv = convManager.getActiveConversation();
-					if (conv) {
-						view.setActiveConversationId(conv.id);
-						view.updateHeaderTitle(conv.id, conv.title ?? null);
-						view.updateHeaderFavorite(conv.id, !!conv.is_favorite);
-					}
 				}
 			},
 			"Delete",
