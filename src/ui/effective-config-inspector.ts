@@ -110,6 +110,11 @@ export class EffectiveConfigInspectorView extends ItemView {
 		return Promise.resolve();
 	}
 
+	/** Re-render only if this inspector is showing `orchestrator`'s panel. */
+	refreshFor(orchestrator: ChatOrchestrator): void {
+		if (this.orchestrator === orchestrator) this.refresh();
+	}
+
 	/** Re-render the inspector with the latest effective config. */
 	refresh(): void {
 		if (!this.contentEl_) return;

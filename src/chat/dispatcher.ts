@@ -125,6 +125,9 @@ export class ToolDispatcher {
 	/** Temp output spiller for dispatcher-level spillover of large tool results. */
 	private spiller?: import("../shell/temp-output-spiller").TempOutputSpiller;
 
+	/** Fired after any tool is registered or unregistered. */
+	private onToolsChanged?: () => void;
+
 	// -----------------------------------------------------------------------
 	// Configuration
 	// -----------------------------------------------------------------------
@@ -133,6 +136,16 @@ export class ToolDispatcher {
 	registerTool(tool: DispatchableTool): void {
 		this.tools.set(tool.name, tool);
 		log.debug("Registered tool", { name: tool.name, mode: tool.mode });
+		this.onToolsChanged?.();
+	}
+
+	/**
+	 * Set a listener fired after any tool is registered or unregistered (e.g. to
+	 * refresh the inspector once async extension / MCP registration lands).
+	 * Fires once per tool, so callers registering in bulk should debounce.
+	 */
+	setOnToolsChanged(callback: () => void): void {
+		this.onToolsChanged = callback;
 	}
 
 	/**
@@ -148,6 +161,7 @@ export class ToolDispatcher {
 		const existed = this.tools.delete(name);
 		if (existed) {
 			log.debug("Unregistered tool", { name });
+			this.onToolsChanged?.();
 		}
 		return existed;
 	}

@@ -4,7 +4,7 @@
  *
  * Validates the Effective Config Inspector leaf view (FR-88):
  *  1. Opens via command palette
- *  2. Shows empty state when no conversation is active
+ *  2. Shows the fresh conversation's config (global defaults) before any message
  *  3. Renders effective config table after a message is sent
  *  4. Displays correct field values and source attribution
  *  5. Updates live when persona is switched
@@ -208,31 +208,26 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 3: No conversation — empty state message ───────────────────
-	console.log("\n── Test 3: No conversation — empty state message ──");
+	// ── Test 3: Fresh conversation — config shown before any message ─
+	// The panel always has a (new or restored) conversation, so the inspector
+	// resolves its config up front rather than waiting for the first turn.
+	console.log("\n── Test 3: Fresh conversation — global defaults before any message ──");
 	{
-		const emptyMsg = await page.evaluate(() => {
-			const el = document.querySelector(".notor-config-inspector-empty");
-			return el ? el.textContent : null;
-		});
-		const shot = await ctx.screenshot("03-empty-state");
+		const state = await page.evaluate(() => ({
+			emptyText: document.querySelector(".notor-config-inspector-empty")?.textContent?.trim() ?? null,
+			rowCount: document.querySelectorAll(".notor-config-inspector-table tbody tr").length,
+			sourceLinkCount: document.querySelectorAll(".notor-config-inspector-source-link").length,
+		}));
+		const shot = await ctx.screenshot("03-fresh-conversation");
 
-		if (emptyMsg) {
-			if (emptyMsg.includes("conversation") || emptyMsg.includes("orchestrator")) {
-				ctx.pass("No conversation empty state", `Shows: "${emptyMsg}"`, shot);
-			} else {
-				ctx.pass("No conversation empty state (partial)", `Empty element found: "${emptyMsg}"`, shot);
-			}
+		if (state.rowCount > 0 && state.sourceLinkCount === 0) {
+			ctx.pass("Fresh conversation config", `Table shows ${state.rowCount} rows at global defaults (no source links)`, shot);
 		} else {
-			const inspectorContent = await page.evaluate(() => {
-				const el = document.querySelector(".notor-config-inspector-content, .notor-config-inspector");
-				return el ? el.textContent?.trim() : null;
-			});
-			if (inspectorContent && (inspectorContent.includes("conversation") || inspectorContent.includes("orchestrator"))) {
-				ctx.pass("No conversation empty state", `Content mentions conversation state: "${inspectorContent.substring(0, 100)}"`, shot);
-			} else {
-				ctx.fail("No conversation empty state", `Expected empty state message. Content: "${inspectorContent?.substring(0, 100) ?? "(none)"}"`, shot);
-			}
+			ctx.fail(
+				"Fresh conversation config",
+				`rows=${state.rowCount}, sourceLinks=${state.sourceLinkCount}, empty="${state.emptyText ?? "(none)"}"`,
+				shot,
+			);
 		}
 	}
 

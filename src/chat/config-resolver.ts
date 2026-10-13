@@ -24,6 +24,7 @@ export class ConfigResolver {
 	private activeParsedConfigs: ParsedToolConfig[] = [];
 	private effectiveToolConfig: EffectiveToolConfig | null = null;
 	private getToolDefinitionsCallback?: (config?: EffectiveToolConfig) => ToolDefinition[];
+	private onDisplayConfigChanged?: () => void;
 
 	constructor(
 		private settings: NotorSettings,
@@ -144,6 +145,12 @@ export class ConfigResolver {
 	updateDisplayConfig(effective: EffectiveToolConfig, parsedConfigs: ParsedToolConfig[]): void {
 		this.activeParsedConfigs = parsedConfigs;
 		this.effectiveToolConfig = effective;
+		this.onDisplayConfigChanged?.();
+	}
+
+	/** Set the listener notified whenever the display config changes (inspector refresh). */
+	setOnDisplayConfigChanged(callback: () => void): void {
+		this.onDisplayConfigChanged = callback;
 	}
 
 	/**

@@ -113,9 +113,11 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		if (persona && persona.name === panelPersonaName) {
 			view.updatePersonaLabel(persona);
 			orchestrator.setActivePersona(persona);
+			void orchestrator.refreshDisplayConfig();
 		} else if (persona === null && panelPersonaName !== null) {
 			view.updatePersonaLabel(null);
 			orchestrator.setActivePersona(null);
+			void orchestrator.refreshDisplayConfig();
 		}
 	});
 
@@ -152,6 +154,9 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 
 		plugin.settings.active_persona = persona?.name ?? "";
 		void plugin.saveData(plugin.settings);
+
+		// The persona's tool config changes what the inspector should show
+		void orchestrator.refreshDisplayConfig();
 	});
 
 
@@ -170,6 +175,7 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		if (!conv) return;
 		convManager.setWorkflowMetadata({ workflow_deactivated: true });
 		view.updateWorkflowLabel({ ...conv, workflow_deactivated: true });
+		void orchestrator.refreshDisplayConfig();
 	});
 
 	// Workflow chip — switch: apply the chosen workflow fully into the current

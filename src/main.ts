@@ -8,7 +8,7 @@
  * tab, and initializes all managers with clean unload support.
  */
 
-import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TAbstractFile, normalizePath, parseYaml } from "obsidian";
+import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TAbstractFile, debounce, normalizePath, parseYaml } from "obsidian";
 import { createDefaultSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
@@ -1845,6 +1845,11 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 
 			this._toolDispatcher.setSettings(this.settings);
 			this._toolDispatcher.setSpiller(this._tempOutputSpiller);
+			// Built-in (extension) and MCP tools register asynchronously, often
+			// after panels have loaded — recompute every panel's inspector config.
+			this._toolDispatcher.setOnToolsChanged(debounce(() => {
+				for (const orchestrator of this._orchestrators.values()) void orchestrator.refreshDisplayConfig();
+			}, 250, true));
 
 			this._toolDispatcher.setActivePersonaName(
 				this.settings.active_persona || null
@@ -2109,6 +2114,7 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		orchestrator.setCheckpointManager(checkpointManager);
 		orchestrator.setSharedCheckpointManager(() => this._sharedCheckpointManager);
 		orchestrator.setStaleTracker(() => this.getStaleTracker());
+		orchestrator.setOnDisplayConfigChanged(() => this.refreshInspectorsFor(orchestrator));
 
 		log.info("Orchestrator created via unified factory");
 		return orchestrator;
@@ -2963,6 +2969,14 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		if (leaf) {
 			await leaf.setViewState({ type: INSPECTOR_VIEW_TYPE, active: true });
 			void workspace.revealLeaf(leaf);
+		}
+	}
+
+	/** Re-render open inspector views that are showing this orchestrator's panel. */
+	private refreshInspectorsFor(orchestrator: ChatOrchestrator): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(INSPECTOR_VIEW_TYPE)) {
+			// Deferred (background) leaves have no inspector instance yet
+			if (leaf.view instanceof EffectiveConfigInspectorView) leaf.view.refreshFor(orchestrator);
 		}
 	}
 

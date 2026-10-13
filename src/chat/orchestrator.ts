@@ -66,6 +66,21 @@ import type { TemplateVariableRegistry } from "../template-vars";
 const log = logger("ChatOrchestrator");
 
 /**
+ * Rebuild a minimal workflow assembly from the tool configs persisted on the
+ * conversation header (only `toolConfigs` is read by resolveEffectiveConfig).
+ * Null when there are none or the user deactivated the workflow via the chip.
+ */
+function workflowAssemblyFromHeader(conv: Conversation): WorkflowAssemblyResult | null {
+	if (!conv.workflow_tool_configs?.length || conv.workflow_deactivated === true) return null;
+	return {
+		assembledMessage: "",
+		workflowName: conv.workflow_name ?? "",
+		attachments: [],
+		toolConfigs: conv.workflow_tool_configs,
+	};
+}
+
+/**
  * Cross-orchestrator session guard — prevents two orchestrators from
  * creating sessions for the same conversation concurrently.
  *
@@ -712,7 +727,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 	// -----------------------------------------------------------------------
 
 	async newConversation(opts?: { signal?: AbortSignal }): Promise<void> {
-		return this.lifecycle.newConversation(opts);
+		await this.lifecycle.newConversation(opts);
+		if (!opts?.signal?.aborted) await this.refreshDisplayConfig();
 	}
 
 	async forkConversation(
@@ -812,11 +828,14 @@ export class ChatOrchestrator implements ToolSessionContext {
 	}
 
 	async switchConversation(filename: string, opts?: { signal?: AbortSignal }): Promise<void> {
-		return this.lifecycle.switchConversation(filename, opts);
+		await this.lifecycle.switchConversation(filename, opts);
+		if (!opts?.signal?.aborted) await this.refreshDisplayConfig();
 	}
 
 	async switchToConversationById(conversationId: string, opts?: { signal?: AbortSignal }): Promise<boolean> {
-		return this.lifecycle.switchToConversationById(conversationId, opts);
+		const switched = await this.lifecycle.switchToConversationById(conversationId, opts);
+		if (switched && !opts?.signal?.aborted) await this.refreshDisplayConfig();
+		return switched;
 	}
 
 	// -----------------------------------------------------------------------
@@ -872,6 +891,39 @@ export class ChatOrchestrator implements ToolSessionContext {
 	// -----------------------------------------------------------------------
 	// Tool config resolution (extracted to src/chat/config-resolver.ts — B4)
 	// -----------------------------------------------------------------------
+
+	/** Notify when the inspector-facing config changes (main.ts refreshes inspector views). */
+	setOnDisplayConfigChanged(callback: () => void): void {
+		this.configResolver.setOnDisplayConfigChanged(callback);
+	}
+
+	/**
+	 * Recompute the inspector-facing config for the displayed conversation from
+	 * the panel's persona, matched vault rules and the header's workflow
+	 * overrides. Turns refresh it each iteration; this covers new/switched
+	 * conversations and persona or workflow-chip changes, which otherwise left
+	 * the inspector showing the previous conversation's config. A running
+	 * session owns the display config (synced on switch), so it is left alone.
+	 */
+	async refreshDisplayConfig(): Promise<void> {
+		const conv = this.conversationManager.getActiveConversation();
+		if (!conv || this.sessionManager.getActiveSession(conv.id)) return;
+		try {
+			const matchedRules = this.vaultRuleManager
+				? await this.vaultRuleManager.getMatchedRules()
+				: undefined;
+			const { effective, parsedConfigs } = await this.configResolver.resolveEffectiveConfig(
+				matchedRules,
+				workflowAssemblyFromHeader(conv),
+				this.activePersona,
+			);
+			// The panel may have moved to another conversation while resolving
+			if (this.conversationManager.getActiveConversation()?.id !== conv.id) return;
+			this.configResolver.updateDisplayConfig(effective, parsedConfigs);
+		} catch (e) {
+			log.warn("Failed to refresh inspector config", { error: String(e) });
+		}
+	}
 
 	// -----------------------------------------------------------------------
 	// Send/receive loop
@@ -1131,20 +1183,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 		// WorkflowAssemblyResult only lives for the first execution session
 		// (created by executeWorkflow); follow-up messages flow through here, so
 		// without this the workflow's <notor_tool_config> overrides would decay
-		// to [] after turn one. We persist toolConfigs on the conversation header
-		// and rebuild a minimal assembly from them (only toolConfigs is read by
-		// resolveEffectiveConfig). Skipped when the user has deactivated the
-		// workflow via the chip (workflow_deactivated === true).
-		const workflowAssembly: WorkflowAssemblyResult | null =
-			(snapshotConv.workflow_tool_configs && snapshotConv.workflow_tool_configs.length > 0
-				&& snapshotConv.workflow_deactivated !== true)
-				? {
-					assembledMessage: "",
-					workflowName: snapshotConv.workflow_name ?? "",
-					attachments: [],
-					toolConfigs: snapshotConv.workflow_tool_configs,
-				}
-				: null;
+		// to [] after turn one.
+		const workflowAssembly = workflowAssemblyFromHeader(snapshotConv);
 
 		// Resolve initial effective config
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
