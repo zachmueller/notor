@@ -8,7 +8,7 @@
  * @see specs/ZZ-misc/multi-conversation-robustness-implementation-tasks.md — B4
  */
 
-import type { Persona, VaultRule, WorkflowAssemblyResult } from "../types";
+import type { ConversationMode, Persona, VaultRule, WorkflowAssemblyResult } from "../types";
 import type { ToolDefinition } from "../providers/provider";
 import type { SystemPromptBuilder } from "./system-prompt";
 import type { ToolDispatcher } from "./dispatcher";
@@ -17,8 +17,18 @@ import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types
 import { mergeToolConfigs } from "../tool-config/merger";
 import { buildGlobalPathScopes } from "../settings/path-scoping";
 import { logger } from "../utils/logger";
+import { SUBMIT_PLAN_TOOL_NAME } from "../tools/submit-plan";
 
 const log = logger("ConfigResolver");
+
+/**
+ * Drop tools the model should not see in the given mode. `submit_plan` hands a
+ * plan back for review — only meaningful in Plan mode; offering it in Act mode
+ * invites the model to plan instead of doing.
+ */
+export function filterToolsForMode(toolDefinitions: ToolDefinition[], mode?: ConversationMode): ToolDefinition[] {
+	return mode === "act" ? toolDefinitions.filter((t) => t.name !== SUBMIT_PLAN_TOOL_NAME) : toolDefinitions;
+}
 
 export class ConfigResolver {
 	private activeParsedConfigs: ParsedToolConfig[] = [];
@@ -45,6 +55,7 @@ export class ConfigResolver {
 		matchedRules?: VaultRule[],
 		workflowAssembly?: WorkflowAssemblyResult | null,
 		activePersona?: Persona | null,
+		mode?: ConversationMode,
 	): Promise<{
 		effective: EffectiveToolConfig;
 		toolDefinitions: ToolDefinition[];
@@ -124,8 +135,8 @@ export class ConfigResolver {
 			globalPathScopes,
 		);
 
-		// Compute filtered tool definitions
-		const toolDefinitions = this.getToolDefinitionsCallback?.(effective) ?? [];
+		// Compute filtered tool definitions (mode-specific tools only in their mode)
+		const toolDefinitions = filterToolsForMode(this.getToolDefinitionsCallback?.(effective) ?? [], mode);
 
 		log.debug("Effective tool config resolved", {
 			totalConfigs: allConfigs.length,

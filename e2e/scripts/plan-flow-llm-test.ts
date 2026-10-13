@@ -13,7 +13,8 @@
  *      (no generic Approve/Reject gate for submit_plan itself)
  *   3. Plan-mode system prompt instructs the model to submit a plan
  *   4. "Approve & auto-accept edits" → mode toggle shows Act and the next
- *      assembled system prompt says "Current mode: Act"
+ *      assembled system prompt says "Current mode: Act" and no longer lists
+ *      submit_plan (Plan-mode only)
  *   5. The write tool runs without an approval prompt and creates the note
  *   6. The auto-accept badge clears when the response finishes
  *   7. No unexpected errors logged
@@ -115,10 +116,19 @@ async function testPlanRoundTrip(ctx: TestContext): Promise<void> {
 	await waitForResponse(page, 30_000);
 
 	const later = systemPrompts(ctx.collector.getStructuredLogs()).slice(promptsBefore);
-	if (later.some((p) => p.includes("## Current mode: Act (full access)"))) {
+	const actPrompts = later.filter((p) => p.includes("## Current mode: Act (full access)"));
+	if (actPrompts.length > 0) {
 		ctx.pass("Next system prompt is assembled in Act mode", `${later.length} prompt(s) after approval`);
 	} else {
 		ctx.fail("Next system prompt is assembled in Act mode", `${later.length} prompt(s) after approval, none in Act mode`);
+	}
+	// submit_plan is a Plan-mode tool: listed in Plan, filtered out once in Act
+	const planListsTool = planPrompt?.includes("### submit_plan") ?? false;
+	const actListsTool = actPrompts.some((p) => p.includes("### submit_plan"));
+	if (planListsTool && actPrompts.length > 0 && !actListsTool) {
+		ctx.pass("submit_plan offered in Plan mode only", "listed in the Plan prompt, absent from Act prompts");
+	} else {
+		ctx.fail("submit_plan offered in Plan mode only", `inPlan=${planListsTool}, inAct=${actListsTool}, actPrompts=${actPrompts.length}`);
 	}
 	if (sawBadge) ctx.pass("Auto-accept badge shown during execution", "badge visible");
 	else ctx.fail("Auto-accept badge shown during execution", "badge never visible");

@@ -1003,7 +1003,7 @@ export class WorkflowExecutor {
 				: undefined;
 
 			const { effective, toolDefinitions, parsedConfigs } =
-				await this.deps.configResolver.resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona);
+				await this.deps.configResolver.resolveEffectiveConfig(matchedRules, session.workflowAssembly, session.pinnedPersona, mode);
 			session.effectiveConfig = effective;
 			session.parsedConfigs = parsedConfigs;
 

@@ -1391,6 +1391,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 					matchedRules,
 					session.workflowAssembly,
 					session.pinnedPersona,
+					mode,
 				);
 				session.effectiveConfig = effective;
 				session.parsedConfigs = parsedConfigs;
