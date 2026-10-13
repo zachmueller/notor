@@ -405,3 +405,28 @@ describe("BedrockProvider — transient failure classification", () => {
 		expect(seen).toBe(controller.signal);
 	});
 });
+
+describe("BedrockProvider — listModels foundation-model filtering", () => {
+	it("skips speech models, which Converse can't call (Nova Sonic)", async () => {
+		const provider = makeProvider();
+		Object.assign(provider as unknown as Record<string, unknown>, {
+			fetchInferenceProfilesPage: async () => ({
+				inferenceProfileSummaries: [
+					{ inferenceProfileId: "us.amazon.nova-2-sonic-v1:0", status: "ACTIVE" },
+					{ inferenceProfileId: "us.amazon.nova-pro-v1:0", status: "ACTIVE" },
+				],
+			}),
+			fetchFoundationModels: async () => ({
+				modelSummaries: [
+					// Speech-only input — no text prompt possible
+					{ modelId: "amazon.nova-2-sonic-v1:0", modelName: "Nova 2 Sonic", inputModalities: ["SPEECH"], outputModalities: ["SPEECH", "TEXT"] },
+					// Takes text, but only over the bidirectional stream API
+					{ modelId: "amazon.nova-2-5-sonic", modelName: "Nova 2.5 Sonic", inputModalities: ["SPEECH", "TEXT"], outputModalities: ["SPEECH", "TEXT"] },
+					{ modelId: "qwen.qwen3-32b-v1:0", modelName: "Qwen3 32B", inputModalities: ["TEXT"], outputModalities: ["TEXT"] },
+				],
+			}),
+		});
+		const ids = (await provider.listModels()).map((m) => m.id);
+		expect(ids).toEqual(["us.amazon.nova-pro-v1:0", "qwen.qwen3-32b-v1:0"]);
+	});
+});

@@ -949,7 +949,9 @@ export class BedrockProvider implements LLMProvider {
 			/^[^.]+\.stability\./,    // Stable Diffusion image models
 			/^[^.]+\.twelvelabs\./,   // Video/multimodal embedding models
 			/^[^.]+\.cohere\.embed/,  // Embedding-only models
+			/^[^.]+\.amazon\.nova-[^.]*sonic/, // Speech-to-speech models (bidirectional stream only, no Converse)
 			/^amazon\.titan-embed/,   // Amazon Titan embedding models
+			/^amazon\.nova-[^.]*sonic/, // Foundation model form
 			/^stability\./,           // Foundation model form of Stability models
 			/^twelvelabs\./,          // Foundation model form
 			/^cohere\.embed/,         // Foundation model form
@@ -1005,6 +1007,8 @@ export class BedrockProvider implements LLMProvider {
 			const modelId = model.modelId ?? "";
 			if (!modelId) continue;
 			if (model.modelLifecycle?.status === "LEGACY") continue;
+			// Speech-in models (Nova Sonic) emit TEXT but can't take a text prompt via Converse
+			if (model.inputModalities && !model.inputModalities.includes("TEXT")) continue;
 			if (NON_CHAT_ID_PATTERNS.some((p) => p.test(modelId))) continue;
 			if (coveredBaseKeys.has(modelId)) continue;
 
