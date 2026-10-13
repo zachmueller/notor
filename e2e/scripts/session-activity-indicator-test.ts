@@ -68,16 +68,15 @@ async function waitForStopButton(page: any, timeoutMs = 15_000): Promise<boolean
 	return false;
 }
 
-/** Wait until the contenteditable input is re-enabled. */
-async function waitForInputEnabled(page: any, timeoutMs = 30_000): Promise<boolean> {
+/**
+ * Wait until the conversation's session ends. (The input stays editable while
+ * streaming, so it can't signal completion.)
+ */
+async function waitForSessionEnd(page: any, conversationId: string, timeoutMs = 30_000): Promise<boolean> {
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
 		await page.waitForTimeout(500);
-		const enabled = await page.evaluate(() => {
-			const el = document.querySelector(".notor-text-input") as HTMLElement | null;
-			return el !== null && el.getAttribute("contenteditable") === "true";
-		});
-		if (enabled) return true;
+		if (!(await hasActiveSession(page, conversationId))) return true;
 	}
 	return false;
 }
@@ -88,7 +87,7 @@ async function getConversationId(page: any): Promise<string | null> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			return plugin.getOrchestrator().getConversationManager().getActiveConversation()?.id ?? null;
+			return plugin.getActiveOrchestrator().getConversationManager().getActiveConversation()?.id ?? null;
 		} catch {
 			return null;
 		}
@@ -101,7 +100,7 @@ async function hasActiveSession(page: any, conversationId: string): Promise<bool
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return false;
 		try {
-			return plugin.getOrchestrator().hasActiveSession(convId);
+			return plugin.getActiveOrchestrator().hasActiveSession(convId);
 		} catch {
 			return false;
 		}
@@ -114,7 +113,7 @@ async function getActiveSessionCount(page: any): Promise<number> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return -1;
 		try {
-			return plugin.getOrchestrator().getActiveSessions().length;
+			return plugin.getActiveOrchestrator().getActiveSessions().length;
 		} catch {
 			return -1;
 		}
@@ -142,7 +141,7 @@ async function switchToConversation(page: any, filename: string): Promise<boolea
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return false;
 		try {
-			await plugin.getOrchestrator().switchConversation(fname);
+			await plugin.getActiveOrchestrator().switchConversation(fname);
 			return true;
 		} catch {
 			return false;
@@ -569,7 +568,7 @@ async function testBadgeReturnsToZeroAfterCompletion(ctx: TestContext): Promise<
 			console.log("  Session still active — waiting for completion or stopping...");
 
 			// Wait up to 60 seconds for natural completion
-			const completed = await waitForInputEnabled(page, 60_000);
+			const completed = await waitForSessionEnd(page, convId, 60_000);
 			if (!completed) {
 				console.log("  Response did not complete in 60s — using ensureCleanState to abort");
 				await ensureCleanState(page);

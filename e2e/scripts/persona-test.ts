@@ -5,17 +5,19 @@
  * Validates the complete persona system (Group A) through simulated user
  * actions via Playwright + CDP:
  *
- *  1. Persona picker appears in settings popover with discovered personas
- *  2. Selecting a persona shows the persona label near the input area
- *  3. Selecting "None" hides the persona label
- *  4. Invalid persona (broken YAML) is excluded from picker
- *  5. Missing personas directory handled gracefully (only "None" shown)
- *  6. Persona rescan on settings popover open
- *  7. Provider/model reference section visible in settings
- *  8. Structured logs confirm persona discovery and activation
- *  9. Persona restore on plugin load (if active_persona is set)
- * 10. Persona label updates on persona change
- * 14. Replace mode persona — system prompt assembled without global base
+ *  2. Default persona chip ("🎭 default") sits after the mode toggle
+ *  3. Persona chip opens the persona menu
+ *  4. Menu lists discovered personas; broken YAML / empty dirs excluded
+ *  5. Selecting a persona updates the chip and the conversation header
+ *  6. Panel persona state and settings.active_persona reflect the switch
+ *  7. Structured logs confirm persona discovery (runs on menu open)
+ *  8. Selecting "None (deactivate)" restores the default chip
+ *  9. Panel persona state cleared on deactivation
+ * 10. Broken persona excluded with a parse warning
+ * 11. Persona with provider/model overrides
+ * 12. Deactivation reverts to defaults
+ * 13. No persona-related error logs
+ * 14. Replace mode persona — panel persona has prompt_mode "replace"
  * 15. Provider/model reference section visible in Settings tab
  *
  * Prerequisites:
@@ -29,7 +31,30 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { waitForSelector, buildDefaultSettings } from "../lib/test-helpers";
+import type { Page } from "playwright-core";
+import { waitForSelector, buildDefaultSettings, openPersonaMenu, closeMenu, selectPersona } from "../lib/test-helpers";
+
+/** The active panel's persona state: orchestrator, conversation header and settings. */
+async function getPanelPersonaState(page: Page): Promise<{
+	activePersona: string | null;
+	promptMode: string | null;
+	convPersona: string | null;
+	settingsPersona: string;
+} | null> {
+	return page.evaluate(() => {
+		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
+		const orchestrator = plugin?.getActiveOrchestrator?.();
+		if (!orchestrator) return null;
+		const persona = orchestrator.getActivePersona();
+		const conv = orchestrator.getConversationManager().getActiveConversation();
+		return {
+			activePersona: persona?.name ?? null,
+			promptMode: persona?.prompt_mode ?? null,
+			convPersona: conv?.persona_name ?? null,
+			settingsPersona: plugin.settings.active_persona ?? "",
+		};
+	});
+}
 
 /**
  * Ensure test persona files exist in the test vault.
@@ -142,183 +167,62 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 3: Settings popover opens with persona picker ──────────────
-	console.log("\nTest 3: Settings popover has persona picker");
+	// ── Test 3: Persona chip opens the persona menu ─────────────────────
+	console.log("\nTest 3: Persona chip opens the persona menu");
+	const menuTitles = await openPersonaMenu(page);
 	{
-		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-		if (settingsBtn) {
-			await settingsBtn.click();
-			await page.waitForTimeout(1500); // Allow async persona rescan
-
-			const popover = await page.$(".notor-settings-popover");
-			if (popover) {
-				const shot = await ctx.screenshot("03-settings-popover");
-
-				// Find persona section — look for the label "Persona"
-				const personaLabel = await page.evaluate(() => {
-					const labels = document.querySelectorAll(".notor-settings-popover .notor-settings-label");
-					for (const label of labels) {
-						if (label.textContent?.trim() === "Persona") return true;
-					}
-					return false;
-				});
-
-				if (personaLabel) {
-					ctx.pass("Persona picker in settings popover", "Found 'Persona' label in settings popover", shot);
-				} else {
-					ctx.fail("Persona picker in settings popover", "No 'Persona' label found in settings popover", shot);
-				}
-			} else {
-				ctx.fail("Persona picker in settings popover", "Settings popover did not open");
-			}
-
-			// Close popover
-			await settingsBtn.click();
-			await page.waitForTimeout(300);
+		const shot = await ctx.screenshot("03-persona-menu");
+		if (menuTitles?.includes("None (deactivate)")) {
+			ctx.pass("Persona chip menu", `Menu opened with ${menuTitles.length} item(s)`, shot);
 		} else {
-			ctx.fail("Persona picker in settings popover", "Settings button not found");
+			ctx.fail("Persona chip menu", `Menu items: ${JSON.stringify(menuTitles)}`, shot);
 		}
+		await closeMenu(page);
 	}
 
-	// ── Test 4: Persona dropdown lists researcher and organizer ─────────
-	console.log("\nTest 4: Persona dropdown lists correct personas");
+	// ── Test 4: Persona menu lists researcher and organizer ─────────────
+	console.log("\nTest 4: Persona menu lists correct personas");
 	{
-		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-		if (settingsBtn) {
-			await settingsBtn.click();
-			await page.waitForTimeout(1500);
-
-			// Find the persona select dropdown (not the provider/model selects)
-			const options = await page.evaluate(() => {
-				const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-				// The persona select is the last one (after provider and model selects)
-				for (const select of selects) {
-					const opts = Array.from(select.querySelectorAll("option")).map((o) => o.textContent?.trim() ?? "");
-					// Persona select has "None" as first option
-					if (opts.includes("None")) {
-						return opts;
-					}
-				}
-				return null;
-			});
-
-			if (options) {
-				const hasNone = options.includes("None");
-				const hasResearcher = options.includes("researcher");
-				const hasOrganizer = options.includes("organizer");
-				const hasBroken = options.includes("broken");
-
-				const shot = await ctx.screenshot("04-persona-dropdown");
-
-				if (hasNone && hasResearcher && hasOrganizer && !hasBroken) {
-					ctx.pass(
-						"Persona dropdown correct",
-						`Options: [${options.join(", ")}] — None ✓, researcher ✓, organizer ✓, broken excluded ✓`,
-						shot
-					);
-				} else {
-					ctx.fail(
-						"Persona dropdown correct",
-						`Options: [${options.join(", ")}] — None=${hasNone}, researcher=${hasResearcher}, organizer=${hasOrganizer}, broken=${hasBroken}`,
-						shot
-					);
-				}
-			} else {
-				ctx.fail("Persona dropdown correct", "Could not find persona select with 'None' option");
-			}
-
-			// Close popover
-			await settingsBtn.click();
-			await page.waitForTimeout(300);
+		const titles = menuTitles ?? [];
+		const hasResearcher = titles.includes("researcher");
+		const hasOrganizer = titles.includes("organizer");
+		const hasBroken = titles.includes("broken");
+		const hasEmptyDir = titles.includes("empty-dir");
+		const detail = `Items: [${titles.join(", ")}] — researcher=${hasResearcher}, organizer=${hasOrganizer}, broken=${hasBroken}, empty-dir=${hasEmptyDir}`;
+		if (hasResearcher && hasOrganizer && !hasBroken && !hasEmptyDir) {
+			ctx.pass("Persona menu correct", detail);
 		} else {
-			ctx.fail("Persona dropdown correct", "Settings button not found");
+			ctx.fail("Persona menu correct", detail);
 		}
 	}
 
 	// ── Test 5: Select researcher persona → label appears ───────────────
 	console.log("\nTest 5: Select researcher persona → label appears");
 	{
-		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-		if (settingsBtn) {
-			await settingsBtn.click();
-			await page.waitForTimeout(1500);
-
-			// Select "researcher" in the persona dropdown
-			const selected = await page.evaluate(() => {
-				const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-				for (const select of selects) {
-					const opts = Array.from(select.querySelectorAll("option"));
-					const noneOpt = opts.find((o) => o.textContent?.trim() === "None");
-					if (noneOpt) {
-						// This is the persona select
-						const researcherOpt = opts.find((o) => o.textContent?.trim() === "researcher");
-						if (researcherOpt) {
-							(select as HTMLSelectElement).value = researcherOpt.value;
-							select.dispatchEvent(new Event("change", { bubbles: true }));
-							return true;
-						}
-					}
-				}
-				return false;
-			});
-
-			if (selected) {
-				// Wait for activation (async discovery + activation)
-				await page.waitForTimeout(2000);
-
-				// Close the popover so we can see the label
-				await settingsBtn.click();
-				await page.waitForTimeout(500);
-
-				// Check for persona label
-				const label = await page.$(".notor-persona-label");
-				if (label) {
-					const isHidden = await label.evaluate((el) => el.classList.contains("notor-hidden"));
-					const text = await label.textContent();
-					const shot = await ctx.screenshot("05-researcher-selected");
-
-					if (!isHidden && text?.includes("researcher")) {
-						ctx.pass("Researcher persona label visible", `Label shows: "${text?.trim()}"`, shot);
-					} else {
-						ctx.fail("Researcher persona label visible", `hidden=${isHidden}, text="${text?.trim()}"`, shot);
-					}
-				} else {
-					const shot = await ctx.screenshot("05-no-label");
-					ctx.fail("Researcher persona label visible", "No .notor-persona-label element found", shot);
-				}
+		if (await selectPersona(page, "researcher")) {
+			const text = (await page.textContent(".notor-persona-label"))?.trim() ?? "";
+			const state = await getPanelPersonaState(page);
+			const shot = await ctx.screenshot("05-researcher-selected");
+			if (text.includes("researcher") && state?.convPersona === "researcher") {
+				ctx.pass("Researcher persona selected", `Label "${text}", conversation persona_name="${state.convPersona}"`, shot);
 			} else {
-				await settingsBtn.click();
-				await page.waitForTimeout(300);
-				ctx.fail("Select researcher persona", "Could not find and select researcher option");
+				ctx.fail("Researcher persona selected", `Label "${text}", state=${JSON.stringify(state)}`, shot);
 			}
 		} else {
-			ctx.fail("Select researcher persona", "Settings button not found");
+			ctx.fail("Select researcher persona", "researcher not found in persona menu");
 		}
 	}
 
-	// ── Test 6: Structured logs confirm persona activation ──────────────
-	console.log("\nTest 6: Structured logs confirm persona activation");
+	// ── Test 6: Panel state confirms persona activation ─────────────────
+	// Chip switches are panel-scoped (orchestrator + JSONL header), not
+	// PersonaManager.activatePersona(), so assert on state rather than logs.
+	console.log("\nTest 6: Panel state confirms persona activation");
 	{
-		const allLogs = ctx.collector.getStructuredLogs();
-		const activationLogs = allLogs.filter(
-			(entry) =>
-				entry.source === "PersonaManager" &&
-				entry.message.includes("Persona activated")
-		);
-
-		if (activationLogs.length > 0) {
-			const lastActivation = activationLogs[activationLogs.length - 1];
-			ctx.pass(
-				"Persona activation logged",
-				`Found ${activationLogs.length} activation log(s), last: "${lastActivation.message}" with data: ${JSON.stringify(lastActivation.data)}`
-			);
+		const state = await getPanelPersonaState(page);
+		if (state?.activePersona === "researcher" && state.settingsPersona === "researcher") {
+			ctx.pass("Persona activation applied", `Panel persona "${state.activePersona}", settings.active_persona "${state.settingsPersona}"`);
 		} else {
-			// Check for any PersonaManager logs at all
-			const pmLogs = allLogs.filter((e) => e.source === "PersonaManager");
-			ctx.fail(
-				"Persona activation logged",
-				`No "Persona activated" log found. PersonaManager logs: ${pmLogs.length}`
-			);
+			ctx.fail("Persona activation applied", `state=${JSON.stringify(state)}`);
 		}
 	}
 
@@ -329,7 +233,7 @@ async function tests(ctx: TestContext) {
 		const discoveryLogs = allLogs.filter(
 			(entry) =>
 				entry.source === "PersonaDiscovery" &&
-				(entry.message.includes("Discovered") || entry.message.includes("discovered"))
+				(entry.message.includes("Discovered") || entry.message.includes("discovered") || entry.message.includes("discovery complete"))
 		);
 
 		if (discoveryLogs.length > 0) {
@@ -338,7 +242,6 @@ async function tests(ctx: TestContext) {
 				`Found ${discoveryLogs.length} discovery log(s): "${discoveryLogs[0].message}"`
 			);
 		} else {
-			// Discovery may log at debug level — check for any PersonaDiscovery logs
 			const pdLogs = allLogs.filter((e) => e.source === "PersonaDiscovery");
 			if (pdLogs.length > 0) {
 				ctx.pass("Persona discovery logged", `Found ${pdLogs.length} PersonaDiscovery log(s) (may be debug level)`);
@@ -348,77 +251,32 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 8: Select "None" → label disappears ────────────────────────
-	console.log("\nTest 8: Select 'None' → persona label disappears");
+	// ── Test 8: Select "None" → default chip ────────────────────────────
+	console.log("\nTest 8: Select 'None' → default persona chip");
 	{
-		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-		if (settingsBtn) {
-			await settingsBtn.click();
-			await page.waitForTimeout(1500);
-
-			// Select "None" in the persona dropdown
-			const deactivated = await page.evaluate(() => {
-				const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-				for (const select of selects) {
-					const opts = Array.from(select.querySelectorAll("option"));
-					const noneOpt = opts.find((o) => o.textContent?.trim() === "None");
-					if (noneOpt) {
-						(select as HTMLSelectElement).value = noneOpt.value;
-						select.dispatchEvent(new Event("change", { bubbles: true }));
-						return true;
-					}
-				}
-				return false;
-			});
-
-			if (deactivated) {
-				await page.waitForTimeout(1000);
-
-				// Close popover
-				await settingsBtn.click();
-				await page.waitForTimeout(500);
-
-				// Check label is hidden
-				const label = await page.$(".notor-persona-label");
-				if (!label) {
-					ctx.pass("Label hidden after None selected", "No persona label element present");
-				} else {
-					const isHidden = await label.evaluate((el) => el.classList.contains("notor-hidden"));
-					const text = await label.textContent();
-					const shot = await ctx.screenshot("08-none-selected");
-					if (isHidden || !text?.trim()) {
-						ctx.pass("Label hidden after None selected", `Label hidden=${isHidden}, text="${text?.trim()}"`, shot);
-					} else {
-						ctx.fail("Label hidden after None selected", `Label still visible: "${text?.trim()}"`, shot);
-					}
-				}
+		if (await selectPersona(page, null)) {
+			const label = await page.$(".notor-persona-label");
+			const isDefault = label ? await label.evaluate((el) => el.classList.contains("notor-persona-label--default")) : false;
+			const text = label ? (await label.textContent())?.trim() : "";
+			const shot = await ctx.screenshot("08-none-selected");
+			if (isDefault && text === "🎭 default") {
+				ctx.pass("Default chip after None selected", `Label "${text}"`, shot);
 			} else {
-				await settingsBtn.click();
-				await page.waitForTimeout(300);
-				ctx.fail("Select None persona", "Could not find None option in persona select");
+				ctx.fail("Default chip after None selected", `default=${isDefault}, text="${text}"`, shot);
 			}
 		} else {
-			ctx.fail("Select None persona", "Settings button not found");
+			ctx.fail("Select None persona", "\"None (deactivate)\" not found in persona menu");
 		}
 	}
 
-	// ── Test 9: Structured logs confirm deactivation ────────────────────
-	console.log("\nTest 9: Structured logs confirm persona deactivation");
+	// ── Test 9: Panel state confirms deactivation ───────────────────────
+	console.log("\nTest 9: Panel state confirms persona deactivation");
 	{
-		const allLogs = ctx.collector.getStructuredLogs();
-		const deactivationLogs = allLogs.filter(
-			(entry) =>
-				entry.source === "PersonaManager" &&
-				entry.message.includes("deactivated")
-		);
-
-		if (deactivationLogs.length > 0) {
-			ctx.pass(
-				"Persona deactivation logged",
-				`Found ${deactivationLogs.length} deactivation log(s): "${deactivationLogs[deactivationLogs.length - 1].message}"`
-			);
+		const state = await getPanelPersonaState(page);
+		if (state && state.activePersona === null && state.convPersona === null) {
+			ctx.pass("Persona deactivation applied", "Panel persona and conversation persona_name cleared");
 		} else {
-			ctx.fail("Persona deactivation logged", "No 'deactivated' log found from PersonaManager");
+			ctx.fail("Persona deactivation applied", `state=${JSON.stringify(state)}`);
 		}
 	}
 
@@ -442,146 +300,59 @@ async function tests(ctx: TestContext) {
 				`Found ${warningLogs.length} warning(s): "${warningLogs[0].message}"`
 			);
 		} else {
-			// The broken persona might parse as valid with an unusual value
-			// Check if "broken" appears in the picker options
-			// (it shouldn't, but if it does, that's a failure)
-			const allDiscoveryLogs = allLogs.filter((e) => e.source === "PersonaDiscovery");
-			if (allDiscoveryLogs.length > 0) {
-				ctx.pass(
-					"Broken persona handling",
-					`PersonaDiscovery ran (${allDiscoveryLogs.length} logs) — broken persona exclusion may depend on YAML parser behavior`
-				);
-			} else {
-				ctx.fail("Broken persona excluded with warning", "No PersonaDiscovery logs found at all");
-			}
+			ctx.fail("Broken persona excluded with warning", "No PersonaDiscovery parse warning found");
 		}
 	}
 
 	// ── Test 11: Select organizer persona (has provider/model overrides) ─
 	console.log("\nTest 11: Select organizer persona (provider/model overrides)");
 	{
-		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-		if (settingsBtn) {
-			await settingsBtn.click();
-			await page.waitForTimeout(1500);
-
-			const selected = await page.evaluate(() => {
-				const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-				for (const select of selects) {
-					const opts = Array.from(select.querySelectorAll("option"));
-					const noneOpt = opts.find((o) => o.textContent?.trim() === "None");
-					if (noneOpt) {
-						const organizerOpt = opts.find((o) => o.textContent?.trim() === "organizer");
-						if (organizerOpt) {
-							(select as HTMLSelectElement).value = organizerOpt.value;
-							select.dispatchEvent(new Event("change", { bubbles: true }));
-							return true;
-						}
-					}
-				}
-				return false;
+		if (await selectPersona(page, "organizer")) {
+			// Dismiss any Obsidian Notice toasts that may block clicks
+			// (e.g. "Provider 'anthropic' not available; using default.")
+			await page.evaluate(() => {
+				document.querySelectorAll(".notice-container .notice").forEach((n) => (n as HTMLElement).click());
 			});
+			await page.waitForTimeout(300);
 
-			if (selected) {
-				await page.waitForTimeout(2000);
-
-				// Dismiss any Obsidian Notice toasts that may block clicks
-				// (e.g. "Provider 'anthropic' not available; using default.")
-				await page.evaluate(() => {
-					document.querySelectorAll(".notice-container .notice").forEach((n) => (n as HTMLElement).click());
-				});
-				await page.waitForTimeout(300);
-
-				// Close popover
-				await settingsBtn.click();
-				await page.waitForTimeout(500);
-
-				// Check label shows organizer
-				const label = await page.$(".notor-persona-label");
-				const text = label ? await label.textContent() : "";
-				const shot = await ctx.screenshot("11-organizer-selected");
-
-				if (text?.includes("organizer")) {
-					ctx.pass("Organizer persona activated", `Label shows: "${text?.trim()}"`, shot);
-				} else {
-					ctx.fail("Organizer persona activated", `Label text: "${text?.trim()}"`, shot);
-				}
-
-				// Check logs for provider/model fallback notice
-				// (Anthropic is likely not configured, so we expect a fallback)
-				const allLogs = ctx.collector.getStructuredLogs();
-				const fallbackLogs = allLogs.filter(
-					(entry) =>
-						entry.source === "PersonaManager" &&
-						(entry.message.includes("not available") ||
-							entry.message.includes("fallback") ||
-							entry.message.includes("using default"))
-				);
-
-				if (fallbackLogs.length > 0) {
-					ctx.pass(
-						"Provider/model fallback logged",
-						`Found ${fallbackLogs.length} fallback log(s): "${fallbackLogs[0].message}"`
-					);
-				} else {
-					// Fallback may only surface as Notice — check for switch logs
-					const switchLogs = allLogs.filter(
-						(e) => e.source === "PersonaManager" && e.message.includes("Switch")
-					);
-					ctx.pass(
-						"Provider/model override attempted",
-						`${switchLogs.length} switch log(s) found — provider may or may not be configured`
-					);
-				}
+			const text = (await page.textContent(".notor-persona-label"))?.trim() ?? "";
+			const shot = await ctx.screenshot("11-organizer-selected");
+			if (text.includes("organizer")) {
+				ctx.pass("Organizer persona activated", `Label shows: "${text}"`, shot);
 			} else {
-				await settingsBtn.click();
-				await page.waitForTimeout(300);
-				ctx.fail("Select organizer persona", "Could not find organizer option");
+				ctx.fail("Organizer persona activated", `Label text: "${text}"`, shot);
+			}
+
+			// Anthropic is likely not configured, so the resolver logs a fallback
+			const fallbackLogs = ctx.collector.getStructuredLogs().filter(
+				(entry) =>
+					entry.source === "PersonaProviderResolver" &&
+					(entry.message.includes("not available") ||
+						entry.message.includes("falling back") ||
+						entry.message.includes("using active provider"))
+			);
+			if (fallbackLogs.length > 0) {
+				ctx.pass("Provider/model fallback logged", `Found ${fallbackLogs.length} fallback log(s): "${fallbackLogs[0].message}"`);
+			} else {
+				ctx.pass("Provider/model override attempted", "No fallback logged — preferred provider may be configured");
 			}
 		} else {
-			ctx.fail("Select organizer persona", "Settings button not found");
+			ctx.fail("Select organizer persona", "organizer not found in persona menu");
 		}
 	}
 
 	// ── Test 12: Deactivate and verify revert to defaults ───────────────
 	console.log("\nTest 12: Deactivate organizer → revert to defaults");
 	{
-		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-		if (settingsBtn) {
-			await settingsBtn.click();
-			await page.waitForTimeout(1500);
-
-			// Select None
-			await page.evaluate(() => {
-				const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-				for (const select of selects) {
-					const opts = Array.from(select.querySelectorAll("option"));
-					const noneOpt = opts.find((o) => o.textContent?.trim() === "None");
-					if (noneOpt) {
-						(select as HTMLSelectElement).value = noneOpt.value;
-						select.dispatchEvent(new Event("change", { bubbles: true }));
-						return;
-					}
-				}
-			});
-			await page.waitForTimeout(1000);
-
-			// Close popover
-			await settingsBtn.click();
-			await page.waitForTimeout(500);
-
-			// Verify label hidden
-			const label = await page.$(".notor-persona-label");
-			const isHidden = !label || (await label.evaluate((el) => el.classList.contains("notor-hidden")));
-			const shot = await ctx.screenshot("12-reverted");
-
-			if (isHidden) {
-				ctx.pass("Persona deactivated and reverted", "Label hidden after deactivation", shot);
-			} else {
-				ctx.fail("Persona deactivated and reverted", "Label still visible after deactivation", shot);
-			}
+		const selected = await selectPersona(page, null);
+		const label = await page.$(".notor-persona-label");
+		const isDefault = label ? await label.evaluate((el) => el.classList.contains("notor-persona-label--default")) : false;
+		const state = await getPanelPersonaState(page);
+		const shot = await ctx.screenshot("12-reverted");
+		if (selected && isDefault && state?.activePersona === null) {
+			ctx.pass("Persona deactivated and reverted", "Default chip shown and panel persona cleared", shot);
 		} else {
-			ctx.fail("Deactivate organizer", "Settings button not found");
+			ctx.fail("Persona deactivated and reverted", `selected=${selected}, default=${isDefault}, state=${JSON.stringify(state)}`, shot);
 		}
 	}
 
@@ -589,136 +360,42 @@ async function tests(ctx: TestContext) {
 	console.log("\nTest 13: No error-level logs during persona operations");
 	{
 		const errors = ctx.collector.getLogsByLevel("error");
-		if (errors.length === 0) {
-			ctx.pass("No error logs", "Zero error-level structured log entries");
-		} else {
-			// Filter out expected errors (e.g., provider connection errors)
-			const personaErrors = errors.filter(
-				(e) =>
-					e.source === "PersonaManager" ||
-					e.source === "PersonaDiscovery" ||
-					e.source === "PersonaPicker"
+		const personaErrors = errors.filter(
+			(e) =>
+				e.source === "PersonaManager" ||
+				e.source === "PersonaDiscovery" ||
+				e.source === "PersonaProviderResolver"
+		);
+		if (personaErrors.length === 0) {
+			ctx.pass(
+				"No persona-related errors",
+				`${errors.length} total error(s), none from the persona system`
 			);
-			if (personaErrors.length === 0) {
-				ctx.pass(
-					"No persona-related errors",
-					`${errors.length} total error(s) but none from persona system (likely provider connection errors)`
-				);
-			} else {
-				ctx.fail(
-					"No persona-related errors",
-					`${personaErrors.length} error(s) from persona system: ${personaErrors.map((e) => e.message).join("; ")}`
-				);
-			}
+		} else {
+			ctx.fail(
+				"No persona-related errors",
+				`${personaErrors.length} error(s) from persona system: ${personaErrors.map((e) => e.message).join("; ")}`
+			);
 		}
 	}
 
 	// ── Test 14: Replace mode — select replacer persona and verify ──────
-	console.log("\nTest 14: Replace mode persona — system prompt uses replace mode");
+	console.log("\nTest 14: Replace mode persona — panel persona uses replace mode");
 	{
-		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-		if (settingsBtn) {
-			await settingsBtn.click();
-			await page.waitForTimeout(1500);
-
-			// Select "replacer" in the persona dropdown
-			const selected = await page.evaluate(() => {
-				const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-				for (const select of selects) {
-					const opts = Array.from(select.querySelectorAll("option"));
-					const noneOpt = opts.find((o: any) => o.textContent?.trim() === "None");
-					if (noneOpt) {
-						const replacerOpt = opts.find((o: any) => o.textContent?.trim() === "replacer");
-						if (replacerOpt) {
-							(select as HTMLSelectElement).value = (replacerOpt as HTMLOptionElement).value;
-							select.dispatchEvent(new Event("change", { bubbles: true }));
-							return true;
-						}
-					}
-				}
-				return false;
-			});
-
-			if (selected) {
-				await page.waitForTimeout(2000);
-
-				// Close popover
-				await settingsBtn.click();
-				await page.waitForTimeout(500);
-
-				// Verify label shows replacer
-				const label = await page.$(".notor-persona-label");
-				const labelText = label ? await label.textContent() : "";
-				const shot = await ctx.screenshot("14-replacer-selected");
-
-				if (labelText?.includes("replacer")) {
-					ctx.pass("Replacer persona label visible", `Label shows: "${labelText?.trim()}"`, shot);
-				} else {
-					ctx.fail("Replacer persona label visible", `Label text: "${labelText?.trim()}"`, shot);
-				}
-
-				// Check structured logs for replace mode assembly
-				const allLogs = ctx.collector.getStructuredLogs();
-				const replaceModeLogs = allLogs.filter(
-					(entry) =>
-						entry.source === "SystemPromptBuilder" &&
-						entry.message.includes("replace mode")
-				);
-
-				if (replaceModeLogs.length > 0) {
-					ctx.pass(
-						"Replace mode system prompt logged",
-						`Found ${replaceModeLogs.length} replace mode log(s): "${replaceModeLogs[0].message}" with data: ${JSON.stringify(replaceModeLogs[0].data)}`
-					);
-				} else {
-					// Replace mode log is emitted when system prompt is assembled during
-					// an LLM call. It may not appear if no message was sent. Verify the
-					// persona was activated with prompt_mode=replace via PersonaManager logs.
-					const activationLogs = allLogs.filter(
-						(e) =>
-							e.source === "PersonaManager" &&
-							e.message.includes("Persona activated") &&
-							JSON.stringify(e.data).includes("replacer")
-					);
-
-					if (activationLogs.length > 0) {
-						ctx.pass(
-							"Replace mode persona activated",
-							`Persona "replacer" activated — replace mode log will appear on next LLM call. Activation: ${JSON.stringify(activationLogs[0].data)}`
-						);
-					} else {
-						ctx.fail(
-							"Replace mode persona activated",
-							"No replace mode or replacer activation logs found"
-						);
-					}
-				}
-
-				// Deactivate replacer to clean up
-				await settingsBtn.click();
-				await page.waitForTimeout(1500);
-				await page.evaluate(() => {
-					const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-					for (const select of selects) {
-						const opts = Array.from(select.querySelectorAll("option"));
-						const noneOpt = opts.find((o: any) => o.textContent?.trim() === "None");
-						if (noneOpt) {
-							(select as HTMLSelectElement).value = (noneOpt as HTMLOptionElement).value;
-							select.dispatchEvent(new Event("change", { bubbles: true }));
-							return;
-						}
-					}
-				});
-				await page.waitForTimeout(1000);
-				await settingsBtn.click();
-				await page.waitForTimeout(300);
+		if (await selectPersona(page, "replacer")) {
+			const text = (await page.textContent(".notor-persona-label"))?.trim() ?? "";
+			const state = await getPanelPersonaState(page);
+			const shot = await ctx.screenshot("14-replacer-selected");
+			if (text.includes("replacer") && state?.activePersona === "replacer" && state.promptMode === "replace") {
+				ctx.pass("Replace mode persona active", `Label "${text}", prompt_mode="${state.promptMode}"`, shot);
 			} else {
-				await settingsBtn.click();
-				await page.waitForTimeout(300);
-				ctx.fail("Select replacer persona", "Could not find replacer option in persona dropdown");
+				ctx.fail("Replace mode persona active", `Label "${text}", state=${JSON.stringify(state)}`, shot);
 			}
+
+			// Deactivate replacer to clean up
+			await selectPersona(page, null);
 		} else {
-			ctx.fail("Select replacer persona", "Settings button not found");
+			ctx.fail("Select replacer persona", "replacer not found in persona menu");
 		}
 	}
 

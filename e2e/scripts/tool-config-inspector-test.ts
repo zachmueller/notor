@@ -18,7 +18,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import type { Page } from "playwright-core";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { waitForSelector, VAULT_PATH } from "../lib/test-helpers";
+import { waitForSelector, VAULT_PATH, selectPersona } from "../lib/test-helpers";
 
 // ---------------------------------------------------------------------------
 // Custom helpers — these call revealLeaf before interacting since the
@@ -38,36 +38,7 @@ async function revealChatView(page: Page): Promise<void> {
 
 async function selectPersonaLocal(page: Page, personaName: string | null): Promise<boolean> {
 	await revealChatView(page);
-
-	const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-	if (!settingsBtn) return false;
-
-	await settingsBtn.click();
-	await page.waitForTimeout(1500);
-
-	const selected = await page.evaluate((name) => {
-		const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-		for (const select of selects) {
-			const opts = Array.from(select.querySelectorAll("option"));
-			const noneOpt = opts.find((o) => o.textContent?.trim() === "None");
-			if (noneOpt) {
-				const targetValue = name === null ? "None" : name;
-				const targetOpt = opts.find((o) => o.textContent?.trim() === targetValue);
-				if (targetOpt) {
-					(select as HTMLSelectElement).value = (targetOpt as HTMLOptionElement).value;
-					select.dispatchEvent(new Event("change", { bubbles: true }));
-					return true;
-				}
-			}
-		}
-		return false;
-	}, personaName);
-
-	await page.waitForTimeout(2000);
-	await settingsBtn.click();
-	await page.waitForTimeout(500);
-
-	return selected;
+	return selectPersona(page, personaName);
 }
 
 async function sendMessageLocal(page: Page, text: string): Promise<void> {

@@ -51,10 +51,11 @@ async function testHtmlExportContainsJsonl(ctx: TestContext): Promise<void> {
 		// Access orchestrator
 		let orchestrator;
 		try {
-			orchestrator = plugin.getOrchestrator();
+			orchestrator = plugin.getActiveOrchestrator();
 		} catch {
 			return null;
 		}
+		if (!orchestrator) return null;
 
 		const convManager = orchestrator.getConversationManager();
 		const conversation = convManager.getActiveConversation();
@@ -278,7 +279,7 @@ async function testImportCreatesConversation(ctx: TestContext): Promise<void> {
 		if (!plugin) return { error: "Plugin not found" };
 
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const hm = plugin.getHistoryManager();
 
 			// We need to call extractJsonlFromHtml and reassignIds.

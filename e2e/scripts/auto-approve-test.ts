@@ -27,7 +27,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { runTest, type TestContext } from "../lib/test-harness";
-import { waitForSelector, buildDefaultSettings, VAULT_PATH } from "../lib/test-helpers";
+import { waitForSelector, buildDefaultSettings, VAULT_PATH, selectPersona } from "../lib/test-helpers";
 
 /**
  * Ensure test persona files exist in the test vault.
@@ -83,59 +83,27 @@ async function tests(ctx: TestContext) {
 		}
 	}
 
-	// ── Test 2: Activate organizer persona via settings popover ─────────
+	// ── Test 2: Activate organizer persona via the persona chip ─────────
 	console.log("\nTest 2: Activate organizer persona");
 	{
-		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-		if (settingsBtn) {
-			await settingsBtn.click();
-			await page.waitForTimeout(1500);
-
-			const selected = await page.evaluate(() => {
-				const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-				for (const select of selects) {
-					const opts = Array.from(select.querySelectorAll("option"));
-					const noneOpt = opts.find((o) => o.textContent?.trim() === "None");
-					if (noneOpt) {
-						const organizerOpt = opts.find((o) => o.textContent?.trim() === "organizer");
-						if (organizerOpt) {
-							(select as HTMLSelectElement).value = organizerOpt.value;
-							select.dispatchEvent(new Event("change", { bubbles: true }));
-							return true;
-						}
-					}
-				}
-				return false;
+		if (await selectPersona(page, "organizer")) {
+			// Dismiss any Obsidian Notice toasts that may block clicks
+			await page.evaluate(() => {
+				document.querySelectorAll(".notice-container .notice").forEach((n) => (n as HTMLElement).click());
 			});
+			await page.waitForTimeout(300);
 
-			if (selected) {
-				await page.waitForTimeout(2000);
+			const label = await page.$(".notor-persona-label");
+			const text = label ? await label.textContent() : "";
+			const shot = await ctx.screenshot("02-organizer-activated");
 
-				// Dismiss any Obsidian Notice toasts that may block clicks
-				await page.evaluate(() => {
-					document.querySelectorAll(".notice-container .notice").forEach((n) => (n as HTMLElement).click());
-				});
-				await page.waitForTimeout(300);
-
-				await settingsBtn.click();
-				await page.waitForTimeout(500);
-
-				const label = await page.$(".notor-persona-label");
-				const text = label ? await label.textContent() : "";
-				const shot = await ctx.screenshot("02-organizer-activated");
-
-				if (text?.includes("organizer")) {
-					ctx.pass("Organizer persona activated", `Label: "${text?.trim()}"`, shot);
-				} else {
-					ctx.fail("Organizer persona activated", `Label: "${text?.trim()}"`, shot);
-				}
+			if (text?.includes("organizer")) {
+				ctx.pass("Organizer persona activated", `Label: "${text?.trim()}"`, shot);
 			} else {
-				await settingsBtn.click();
-				await page.waitForTimeout(300);
-				ctx.fail("Select organizer persona", "Could not find organizer option");
+				ctx.fail("Organizer persona activated", `Label: "${text?.trim()}"`, shot);
 			}
 		} else {
-			ctx.fail("Open settings popover", "Settings button not found");
+			ctx.fail("Select organizer persona", "organizer not found in persona menu");
 		}
 	}
 
@@ -157,7 +125,7 @@ async function tests(ctx: TestContext) {
 				`Active persona logs: ${dispatcherLogs.length}`
 			);
 		} else {
-			// Persona name change is also logged by PersonaManager
+			// Chip switches are panel-scoped; PersonaManager only logs workflow switches
 			const pmLogs = allLogs.filter(
 				(e) => e.source === "PersonaManager" && e.message.includes("activated")
 			);
@@ -178,40 +146,15 @@ async function tests(ctx: TestContext) {
 	// ── Test 4: Deactivate persona ─────────────────────────────────────
 	console.log("\nTest 4: Deactivate persona → revert to global-only");
 	{
-		const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-		if (settingsBtn) {
-			await settingsBtn.click();
-			await page.waitForTimeout(1500);
+		const selected = await selectPersona(page, null);
+		const label = await page.$(".notor-persona-label");
+		const isDefault = label ? await label.evaluate((el) => el.classList.contains("notor-persona-label--default")) : false;
+		const shot = await ctx.screenshot("04-deactivated");
 
-			await page.evaluate(() => {
-				const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-				for (const select of selects) {
-					const opts = Array.from(select.querySelectorAll("option"));
-					const noneOpt = opts.find((o) => o.textContent?.trim() === "None");
-					if (noneOpt) {
-						(select as HTMLSelectElement).value = noneOpt.value;
-						select.dispatchEvent(new Event("change", { bubbles: true }));
-						return;
-					}
-				}
-			});
-			await page.waitForTimeout(1000);
-
-			await settingsBtn.click();
-			await page.waitForTimeout(500);
-
-			// Verify persona label hidden
-			const label = await page.$(".notor-persona-label");
-			const isHidden = !label || (await label.evaluate((el) => el.classList.contains("notor-hidden")));
-			const shot = await ctx.screenshot("04-deactivated");
-
-			if (isHidden) {
-				ctx.pass("Persona deactivated", "Label hidden after deactivation", shot);
-			} else {
-				ctx.fail("Persona deactivated", "Label still visible", shot);
-			}
+		if (selected && isDefault) {
+			ctx.pass("Persona deactivated", "Default persona chip shown after deactivation", shot);
 		} else {
-			ctx.fail("Deactivate persona", "Settings button not found");
+			ctx.fail("Persona deactivated", `selected=${selected}, default chip=${isDefault}`, shot);
 		}
 	}
 

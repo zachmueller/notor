@@ -5,12 +5,12 @@
  * Validates the Phase 1D features from the thread-safe streaming
  * implementation: persona/provider/model display-restoration on
  * conversation switch, inspector config scoping, conversation header
- * mutation on picker change, and session cleanup on destroy.
+ * mutation on persona chip change, and session cleanup on destroy.
  *
  * Scenarios:
  *   1. Persona label + provider/model restored on conversation switch
  *   2. Graceful fallback when conversation's persona no longer exists
- *   3. Header mutation persists provider/model on picker change
+ *   3. Header mutation persists provider/model on persona chip change
  *   4. Inspector shows correct config for displayed conversation
  *   5. Inspector updates when switching between conversations
  *   6. Inspector shows persona config after switch to persona conversation
@@ -59,7 +59,7 @@ async function getConversationHeader(page: any): Promise<{
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const conv = orchestrator.getConversationManager().getActiveConversation();
 			if (!conv) return null;
 			return {
@@ -91,7 +91,7 @@ async function getDisplayedProvider(page: any): Promise<string | null> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			const view = plugin.getOrchestrator()?.view;
+			const view = plugin.getActiveOrchestrator()?.getView();
 			// Access the private displayedProviderId field
 			return (view as any)?.displayedProviderId ?? null;
 		} catch {
@@ -106,7 +106,7 @@ async function getDisplayedModel(page: any): Promise<string | null> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return null;
 		try {
-			const view = plugin.getOrchestrator()?.view;
+			const view = plugin.getActiveOrchestrator()?.getView();
 			return (view as any)?.displayedModelValue ?? null;
 		} catch {
 			return null;
@@ -120,7 +120,7 @@ async function switchToConversation(page: any, filename: string): Promise<boolea
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return false;
 		try {
-			await plugin.getOrchestrator().switchConversation(fname);
+			await plugin.getActiveOrchestrator().switchConversation(fname);
 			return true;
 		} catch {
 			return false;
@@ -183,7 +183,7 @@ async function getActiveSessionCount(page: any): Promise<number> {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return -1;
 		try {
-			return plugin.getOrchestrator().getActiveSessions().length;
+			return plugin.getActiveOrchestrator().getActiveSessions().length;
 		} catch {
 			return -1;
 		}
@@ -405,10 +405,10 @@ async function testGracefulFallbackDeletedPersona(ctx: TestContext): Promise<voi
 	// Select deleteme persona
 	const selected = await selectPersona(page, "deleteme");
 	if (!selected) {
-		// The persona might not appear in the picker if discovery is slow.
+		// The persona might not appear in the persona menu if discovery is slow.
 		// Fall back: create a conversation and manually set persona_name in header.
 		const shot = await ctx.screenshot("02-deleteme-not-found");
-		ctx.fail("Fallback deleted persona: select", "Could not select deleteme persona from picker", shot);
+		ctx.fail("Fallback deleted persona: select", "Could not select deleteme persona from the persona menu", shot);
 		return;
 	}
 	await page.waitForTimeout(1_000);
@@ -492,8 +492,8 @@ async function testGracefulFallbackDeletedPersona(ctx: TestContext): Promise<voi
 	}
 }
 
-async function testHeaderMutationOnPickerChange(ctx: TestContext): Promise<void> {
-	console.log("\nTest 3: Header mutation persists provider/model on picker change");
+async function testHeaderMutationOnPersonaChange(ctx: TestContext): Promise<void> {
+	console.log("\nTest 3: Header mutation persists provider/model on persona chip change");
 	const { page } = ctx;
 
 	// Start a new conversation and send a message
@@ -525,7 +525,7 @@ async function testHeaderMutationOnPickerChange(ctx: TestContext): Promise<void>
 	const diskHeaderBefore = readJSONLHeader(basename);
 	console.log(`  Header before: provider=${diskHeaderBefore?.provider_id}, model=${diskHeaderBefore?.model_id}`);
 
-	// Now select a persona via the picker — this should update the conversation header
+	// Now select a persona via the persona chip — this should update the conversation header
 	const personaSelected = await selectPersona(page, "researcher");
 	if (!personaSelected) {
 		const shot = await ctx.screenshot("03-persona-not-selected");
@@ -541,7 +541,7 @@ async function testHeaderMutationOnPickerChange(ctx: TestContext): Promise<void>
 	if (diskHeaderAfter?.persona_name === "researcher") {
 		ctx.pass(
 			"Header mutation: persona persisted",
-			`JSONL header persona_name updated to "researcher" on picker change`,
+			`JSONL header persona_name updated to "researcher" on persona chip change`,
 			shot,
 		);
 	} else {
@@ -865,7 +865,7 @@ async function testDestroyAbortsActiveSessions(ctx: TestContext): Promise<void> 
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "plugin not found" };
 		try {
-			const orchestrator = plugin.getOrchestrator();
+			const orchestrator = plugin.getActiveOrchestrator();
 			const countBefore = orchestrator.getActiveSessions().length;
 
 			// Call destroy with a short timeout
@@ -924,7 +924,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	// --- Step 1f: Display-restore ---
 	await testDisplayRestorePersonaProviderModel(ctx);
 	await testGracefulFallbackDeletedPersona(ctx);
-	await testHeaderMutationOnPickerChange(ctx);
+	await testHeaderMutationOnPersonaChange(ctx);
 
 	// --- Step 1g: Inspector scoping ---
 	await testInspectorShowsCorrectConfig(ctx);

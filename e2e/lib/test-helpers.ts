@@ -423,41 +423,45 @@ export async function setMode(page: Page, mode: "Plan" | "Act"): Promise<void> {
 }
 
 /**
- * Select a persona from the settings popover dropdown.
- * Pass `null` to deactivate (select "None").
+ * Open the persona chip's context menu and return its item titles, leaving the
+ * menu open. Switches Obsidian to DOM menus first — native macOS menus never
+ * reach the DOM. Returns null when the chip or menu is missing.
+ */
+export async function openPersonaMenu(page: Page): Promise<string[] | null> {
+	await page.evaluate(() => (window as any).app?.vault?.setConfig?.("nativeMenus", false));
+	const chip = await page.$(".notor-persona-label");
+	if (!chip) return null;
+	await chip.click();
+	// The menu appears after async persona discovery
+	if (!(await waitForSelector(page, ".menu .menu-item-title", 5_000))) return null;
+	return page.$$eval(".menu .menu-item-title", (els) => els.map((el) => el.textContent?.trim() ?? ""));
+}
+
+/** Dismiss an open Obsidian menu. */
+export async function closeMenu(page: Page): Promise<void> {
+	await page.keyboard.press("Escape");
+	await page.waitForTimeout(300);
+}
+
+/**
+ * Select a persona for the active panel via the persona chip's menu.
+ * Pass `null` to deactivate ("None (deactivate)").
  */
 export async function selectPersona(page: Page, personaName: string | null): Promise<boolean> {
-	const settingsBtn = await page.$(".notor-chat-header-btn[aria-label='Chat settings']");
-	if (!settingsBtn) return false;
+	const titles = await openPersonaMenu(page);
+	if (!titles) return false;
 
-	await settingsBtn.click();
-	await page.waitForTimeout(1500);
-
-	const selected = await page.evaluate((name) => {
-		const selects = document.querySelectorAll(".notor-settings-popover .notor-settings-select");
-		for (const select of selects) {
-			const opts = Array.from(select.querySelectorAll("option"));
-			const noneOpt = opts.find((o) => o.textContent?.trim() === "None");
-			if (noneOpt) {
-				const targetValue = name === null ? "None" : name;
-				const targetOpt = opts.find((o) => o.textContent?.trim() === targetValue);
-				if (targetOpt) {
-					(select as HTMLSelectElement).value = (targetOpt as HTMLOptionElement).value;
-					select.dispatchEvent(new Event("change", { bubbles: true }));
-					return true;
-				}
-			}
-		}
+	// Titles are the persona name, prefixed by its chip emoji when set
+	const target = personaName ?? "None (deactivate)";
+	const index = titles.findIndex((t) => t === target || t.endsWith(` ${target}`));
+	if (index < 0) {
+		await closeMenu(page);
 		return false;
-	}, personaName);
+	}
 
-	await page.waitForTimeout(2000);
-
-	// Close popover
-	await settingsBtn.click();
-	await page.waitForTimeout(500);
-
-	return selected;
+	await page.locator(".menu .menu-item-title").nth(index).click();
+	await page.waitForTimeout(1_000);
+	return true;
 }
 
 /**
