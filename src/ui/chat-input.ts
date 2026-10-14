@@ -66,6 +66,10 @@ export interface ChatInputDeps {
 	interceptSend?: (content: string) => boolean;
 	/** True while a plan review is pending for the displayed conversation. */
 	isPlanReviewPending?: () => boolean;
+	/** Compiled batch of pending inline comments ("" when none), sent ahead of the typed text. */
+	compilePendingComments?: () => string;
+	/** Called once the pending comment batch has been handed to a send path. */
+	onPendingCommentsSent?: () => void;
 }
 
 export class ChatInput {
@@ -77,6 +81,7 @@ export class ChatInput {
 	private modeToggleEl!: HTMLButtonElement;
 	private autoAcceptBadgeEl!: HTMLElement;
 	private responding = false;
+	private hasPendingComments = false;
 	private attachmentChipContainerEl!: HTMLElement;
 
 	private userDragHeight: number | null = null;
@@ -371,17 +376,6 @@ export class ChatInput {
 		return this.textInputEl.textContent ?? "";
 	}
 
-	/**
-	 * Insert text at the start of the input without disturbing existing
-	 * attachment / workflow token spans (unlike {@link setInputText}, which
-	 * replaces all children).
-	 */
-	prependInputText(text: string): void {
-		const node = activeDocument.createTextNode(text);
-		this.textInputEl.insertBefore(node, this.textInputEl.firstChild);
-		this.recalcInputHeight();
-	}
-
 	triggerSend(): void {
 		void this.handleSend();
 	}
@@ -400,8 +394,24 @@ export class ChatInput {
 	refreshPlanReviewState(): void {
 		if (!this.textInputEl) return;
 		const pending = this.deps.isPlanReviewPending?.() ?? false;
-		this.textInputEl.setAttribute("data-placeholder", pending ? "Reply to request changes to the plan…" : "Ask Notor...");
+		this.refreshPlaceholder();
 		if (this.responding) this.sendButtonEl.toggleClass("notor-hidden", !pending);
+	}
+
+	/** Invite an optional note in the placeholder while inline comments are pending. */
+	setHasPendingComments(has: boolean): void {
+		this.hasPendingComments = has;
+		this.refreshPlaceholder();
+	}
+
+	private refreshPlaceholder(): void {
+		if (!this.textInputEl) return;
+		const placeholder = this.deps.isPlanReviewPending?.()
+			? "Reply to request changes to the plan…"
+			: this.hasPendingComments
+				? "Add a note to send with your comments…"
+				: "Ask Notor...";
+		this.textInputEl.setAttribute("data-placeholder", placeholder);
 	}
 
 	/** Show/hide the "Auto-accepting edits" badge next to the mode toggle. */
@@ -605,12 +615,17 @@ export class ChatInput {
 	}
 
 	private async handleSend(): Promise<void> {
+		// Pending inline comments go out ahead of whatever was typed.
+		const comments = this.deps.compilePendingComments?.() ?? "";
+		const withComments = (text: string) => (comments && text ? `${comments}\n\n${text}` : comments || text);
+
 		// A pending plan review takes typed replies as feedback, even mid-run.
 		if (this.deps.interceptSend) {
-			const content = this.getInputContentExcludingWorkflowToken();
+			const content = withComments(this.getInputContentExcludingWorkflowToken());
 			if (content && this.deps.interceptSend(content)) {
 				this.textInputEl.textContent = "";
 				this.recalcInputHeight();
+				if (comments) this.deps.onPendingCommentsSent?.();
 				return;
 			}
 		}
@@ -619,7 +634,7 @@ export class ChatInput {
 		this.deps.setAutoScroll(true);
 
 		const pendingWorkflow = this.deps.getPendingWorkflow();
-		const content = this.getInputContentExcludingWorkflowToken();
+		const content = withComments(this.getInputContentExcludingWorkflowToken());
 
 		if (!content && this.deps.getPendingAttachments().length === 0 && !pendingWorkflow) return;
 
@@ -632,6 +647,7 @@ export class ChatInput {
 		this.textInputEl.textContent = "";
 		this.userDragHeight = null;
 		this.textInputEl.setCssProps({ '--notor-input-height': 'auto', '--notor-input-max-height': '' });
+		if (comments) this.deps.onPendingCommentsSent?.();
 
 		try {
 			if (pendingWorkflow && this.deps.onSendWorkflow) {

@@ -8,13 +8,15 @@
  * Scenarios:
  *   1. Right-click a selection in an assistant message → "Comment on selection"
  *      → inline textarea → Save → passage highlighted
- *   2. A second comment (on another response) → send bar shows "2 comments"
+ *   2. A second comment (on another response), saved with Cmd/Ctrl+Enter through
+ *      Obsidian's real keymap → bar shows "2 comments" (no "Send comments" button)
  *   3. Comments persist in the JSONL header (pending_comments)
  *   4. Switch away and back → highlights restored, send bar still shows 2
- *   5. "Send comments" sends the quoted-text batch (plus typed note) through
- *      the normal send path, then clears highlights, bar and header field
+ *   5. The regular Send button sends the quoted-text batch (plus typed note)
+ *      through the normal send path, then clears highlights, bar and header field
  *   6. "Comment on selection" is not offered for user messages
- *   7. No errors logged
+ *   7. The bar's × discards pending comments
+ *   8. No errors logged
  *
  * @see src/comments/comment-layer.ts, src/ui/chat-view.ts
  * @see ai/notor/ideas — "Inline comment annotations on AI responses with batch follow-up"
@@ -105,6 +107,19 @@ async function savePopover(ctx: TestContext, body: string): Promise<boolean> {
 		save.click();
 		return true;
 	}, body);
+}
+
+/** Type into the open popover and save with the platform's Mod+Enter (real key events). */
+async function savePopoverWithKeyboard(ctx: TestContext, body: string): Promise<boolean> {
+	const focused = await ctx.page.evaluate(() => {
+		const ta = document.querySelector<HTMLTextAreaElement>(".notor-comment-popover-input");
+		ta?.focus();
+		return !!ta;
+	});
+	if (!focused) return false;
+	await ctx.page.keyboard.type(body);
+	await ctx.page.keyboard.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter");
+	return true;
 }
 
 async function uiState(ctx: TestContext): Promise<{ marks: string[]; barHidden: boolean; barLabel: string }> {
@@ -201,19 +216,40 @@ async function testCommentViaContextMenu(ctx: TestContext): Promise<void> {
 }
 
 async function testSecondComment(ctx: TestContext): Promise<void> {
-	console.log("\nTest 2: Second comment on another response shows the send bar");
+	console.log("\nTest 2: Second comment (saved with Mod+Enter) shows the pending bar");
 	await rightClickSelection(ctx, 1, "dreaming of bones");
 	await ctx.page.waitForTimeout(300);
 	await clickMenuItem(ctx, "Comment on selection");
 	await ctx.page.waitForTimeout(300);
-	await savePopover(ctx, "What kind of bones?");
+	await savePopoverWithKeyboard(ctx, "What kind of bones?");
 	await ctx.page.waitForTimeout(500);
+	const popoverOpen = await ctx.page.evaluate(() => !!document.querySelector(".notor-comment-popover"));
+	if (popoverOpen) {
+		const shot = await ctx.screenshot("02-mod-enter-ignored");
+		ctx.fail("Mod+Enter saves the comment", "Popover still open after Mod+Enter", shot);
+		await savePopover(ctx, "What kind of bones?");
+		await ctx.page.waitForTimeout(500);
+	} else {
+		ctx.pass("Mod+Enter saves the comment", "Popover closed");
+	}
+
 	const state = await uiState(ctx);
 	const shot = await ctx.screenshot("02-send-bar");
 	if (!state.barHidden && state.barLabel === "2 comments" && state.marks.length === 2) {
-		ctx.pass("Send bar shows two comments", state.barLabel, shot);
+		ctx.pass("Pending bar shows two comments", state.barLabel, shot);
 	} else {
-		ctx.fail("Send bar shows two comments", JSON.stringify(state), shot);
+		ctx.fail("Pending bar shows two comments", JSON.stringify(state), shot);
+	}
+
+	const bar = await ctx.page.evaluate(() => ({
+		sendBtn: !!document.querySelector(".notor-comment-send-bar-send"),
+		clearIcon: !!document.querySelector(".notor-comment-send-bar-clear svg"),
+		placeholder: document.querySelector(".notor-text-input")?.getAttribute("data-placeholder") ?? "",
+	}));
+	if (!bar.sendBtn && bar.clearIcon && bar.placeholder === "Add a note to send with your comments…") {
+		ctx.pass("Bar has no Send comments button, × clears, input invites a note", JSON.stringify(bar));
+	} else {
+		ctx.fail("Bar has no Send comments button, × clears, input invites a note", JSON.stringify(bar));
 	}
 }
 
@@ -261,7 +297,7 @@ async function testUserMessageHasNoItem(ctx: TestContext): Promise<void> {
 }
 
 async function testSendBatch(ctx: TestContext, fx: Fixture): Promise<void> {
-	console.log("\nTest 5: Send comments compiles the batch and clears state");
+	console.log("\nTest 5: The regular Send button sends the batch and clears state");
 	await ctx.page.evaluate(() => {
 		const view = (window as any).app.plugins.plugins["notor"].getActiveOrchestrator().getView();
 		(window as any).__sentContent = null;
@@ -271,7 +307,7 @@ async function testSendBatch(ctx: TestContext, fx: Fixture): Promise<void> {
 		const input = document.querySelector(".notor-text-input") as HTMLElement;
 		input.textContent = "Overall this reads well.";
 		input.dispatchEvent(new Event("input", { bubbles: true }));
-		(document.querySelector(".notor-comment-send-bar-send") as HTMLButtonElement).click();
+		(document.querySelector(".notor-send-btn") as HTMLButtonElement).click();
 	});
 	await ctx.page.waitForTimeout(1_000);
 	const sent = await ctx.page.evaluate(() => (window as any).__sentContent as string | null);
@@ -309,8 +345,27 @@ async function testSendBatch(ctx: TestContext, fx: Fixture): Promise<void> {
 	}
 }
 
+async function testClearButton(ctx: TestContext): Promise<void> {
+	console.log("\nTest 7: The bar's × discards pending comments");
+	await rightClickSelection(ctx, 0, "lazy dog");
+	await ctx.page.waitForTimeout(300);
+	await clickMenuItem(ctx, "Comment on selection");
+	await ctx.page.waitForTimeout(300);
+	await savePopover(ctx, "Why lazy?");
+	await ctx.page.waitForTimeout(500);
+	const before = await uiState(ctx);
+	await ctx.page.evaluate(() => (document.querySelector(".notor-comment-send-bar-clear") as HTMLButtonElement | null)?.click());
+	await ctx.page.waitForTimeout(500);
+	const after = await uiState(ctx);
+	if (before.marks.length === 1 && after.marks.length === 0 && after.barHidden) {
+		ctx.pass("× discards pending comments", JSON.stringify({ before, after }));
+	} else {
+		ctx.fail("× discards pending comments", JSON.stringify({ before, after }));
+	}
+}
+
 async function testNoErrors(ctx: TestContext): Promise<void> {
-	console.log("\nTest 7: No errors logged");
+	console.log("\nTest 8: No errors logged");
 	const errors = ctx.collector.getLogsByLevel("error");
 	if (errors.length === 0) {
 		ctx.pass("No errors logged", "0 error-level logs");
@@ -333,6 +388,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	await testSurvivesSwitch(ctx, fx);
 	await testUserMessageHasNoItem(ctx);
 	await testSendBatch(ctx, fx);
+	await testClearButton(ctx);
 	await testNoErrors(ctx);
 }
 

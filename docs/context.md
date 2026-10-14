@@ -53,7 +53,7 @@ Right-clicking on the message list opens a context menu:
 
 Select a passage in an AI response, right-click, and choose **Comment on selection** to attach a comment in a small inline editor (**Cmd/Ctrl+Enter** saves, **Escape** cancels). Commented passages are highlighted; click a highlight to edit or delete its comment.
 
-Add as many comments as you like across one or more responses. A bar above the chat input shows the count with **Send comments** and **Clear**. **Send comments** sends a single follow-up message that quotes each passage followed by your comment; anything already typed in the input is appended as a general note. Pending comments are saved with the conversation, so they survive switching conversations and reloading Obsidian. They are not copied when you fork a conversation.
+Add as many comments as you like across one or more responses. A bar above the chat input shows the count; select **×** to discard them all. Pending comments go out with your next message — select **Send** or press **Enter** — as one message that quotes each passage followed by your comment, with anything you typed in the input appended as a general note. You can send the comments on their own with an empty input. Pending comments are saved with the conversation, so they survive switching conversations and reloading Obsidian. They are not copied when you fork a conversation.
 
 ## Citation popovers
 

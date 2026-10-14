@@ -128,6 +128,7 @@ export class PlanView extends ItemView {
 			onChange: (comments) => this.renderComments(comments),
 			compileIntro: () => "Comments on the plan:",
 			orphanNote: "(passage no longer in the plan)",
+			app: this.app,
 		});
 
 		this.unsubscribers.push(

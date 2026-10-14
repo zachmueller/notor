@@ -88,6 +88,15 @@ export class Modal {
 	onClose(): void {}
 }
 
+/** Keymap scope stub — handlers are recorded but never dispatched. */
+export class Scope {
+	constructor(public parent?: Scope) {}
+	register(_modifiers: string[] | null, _key: string | null, _func: unknown): unknown {
+		return {};
+	}
+	unregister(_handler: unknown): void {}
+}
+
 export class FuzzySuggestModal<T> {
 	app: unknown;
 	resultContainerEl: unknown = {};

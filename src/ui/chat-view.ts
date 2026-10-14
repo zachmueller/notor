@@ -1089,6 +1089,8 @@ export class NotorChatView extends ItemView {
 			onForkToNewPanel: this.onForkToNewPanel,
 			interceptSend: this.planReviewHooks?.interceptSend,
 			isPlanReviewPending: this.planReviewHooks?.isPending,
+			compilePendingComments: () => this.commentLayer?.compile() ?? "",
+			onPendingCommentsSent: () => void this.commentLayer?.clear(),
 		});
 		this.chatInput.build();
 
@@ -1513,7 +1515,10 @@ export class NotorChatView extends ItemView {
 				load: () => this.pendingCommentsStorage?.load() ?? [],
 				save: (comments) => this.pendingCommentsStorage?.save(comments),
 			},
-			onChange: (comments) => this.commentSendBar?.update(comments.length),
+			onChange: (comments) => {
+				this.commentSendBar?.update(comments.length);
+				this.chatInput.setHasPendingComments(comments.length > 0);
+			},
 			onHighlightsApplied: () => this.findInMessages?.refresh(),
 			scopeLabel: (id) => {
 				const idx = this.listCommentScopes().findIndex((s) => s.scopeId === id);
@@ -1521,30 +1526,13 @@ export class NotorChatView extends ItemView {
 			},
 			compileIntro: (multi) =>
 				multi ? "Comments on your previous responses:" : "Comments on your previous response:",
+			app: this.app,
 		});
 
 		const inputArea = this.chatInput.getInputAreaEl();
 		this.commentSendBar = new CommentSendBar(inputArea, inputArea.querySelector(".notor-input-wrapper"), {
-			onSend: () => this.sendPendingComments(),
 			onClear: () => void this.commentLayer?.clear(),
 		});
-		this.commentSendBar.setResponding(this.isResponding);
-	}
-
-	/**
-	 * Send the compiled comment batch through the normal send path. Any text
-	 * already typed in the input follows the batch as a general note;
-	 * attachments and workflow tokens in the input are preserved.
-	 */
-	private sendPendingComments(): void {
-		const layer = this.commentLayer;
-		if (!layer || layer.count === 0 || this.isResponding) return;
-		const batch = layer.compile();
-		if (!batch) return;
-		const existing = this.chatInput.getInputText().trim();
-		this.chatInput.prependInputText(existing ? `${batch}\n\n` : batch);
-		this.chatInput.triggerSend();
-		void layer.clear();
 	}
 
 	private buildMessageList(container: HTMLElement): void {
@@ -1705,7 +1693,6 @@ export class NotorChatView extends ItemView {
 	setRespondingState(responding: boolean): void {
 		this.isResponding = responding;
 		this.chatInput.setRespondingState(responding);
-		this.commentSendBar?.setResponding(responding);
 	}
 
 	updateModeDisplay(mode: ConversationMode): void {

@@ -6,7 +6,14 @@
  * above when it would overflow the viewport. Cmd/Ctrl+Enter saves, Escape
  * cancels; an outside click cancels only while the textarea is empty so typed
  * text is never silently lost.
+ *
+ * Obsidian's keymap handles keydown on `window` in the capture phase and
+ * swallows any key bound to a hotkey (Mod+Enter is, so Cmd+Enter on macOS
+ * never reached the textarea). While open, the popover pushes its own
+ * {@link Scope} so it wins those keys.
  */
+
+import { Scope, type App } from "obsidian";
 
 export interface CommentPopoverOptions {
 	/** Viewport rect of the selection or mark the popover anchors to. */
@@ -29,7 +36,10 @@ export class CommentPopover {
 	private textarea: HTMLTextAreaElement | null = null;
 	private teardown: (() => void) | null = null;
 
-	constructor(private readonly doc: Document) {}
+	constructor(
+		private readonly doc: Document,
+		private readonly app?: App,
+	) {}
 
 	get isOpen(): boolean {
 		return this.el !== null;
@@ -109,9 +119,25 @@ export class CommentPopover {
 		// Defer so the click that opened the popover doesn't immediately close it.
 		const win = this.doc.defaultView ?? window;
 		const timer = win.setTimeout(() => this.doc.addEventListener("mousedown", onOutside, true), 0);
+
+		let scope: Scope | null = null;
+		if (this.app) {
+			scope = new Scope(this.app.scope);
+			scope.register(["Mod"], "Enter", () => {
+				doSave();
+				return false;
+			});
+			scope.register(null, "Escape", () => {
+				doCancel();
+				return false;
+			});
+			this.app.keymap.pushScope(scope);
+		}
+
 		this.teardown = () => {
 			win.clearTimeout(timer);
 			this.doc.removeEventListener("mousedown", onOutside, true);
+			if (scope) this.app?.keymap.popScope(scope);
 		};
 
 		this.position(opts.rect);

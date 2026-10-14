@@ -4627,9 +4627,9 @@
 	color: var(--text-muted);
 }
 
-.notor-comment-send-bar button {
-	font-size: var(--font-ui-smaller);
-	padding: 2px 8px;
+.notor-comment-send-bar-clear {
+	padding: 2px;
+	height: auto;
 }
 
 /* ==========================================================================

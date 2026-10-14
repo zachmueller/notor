@@ -14,6 +14,7 @@
  * every operation, so it coexists with find-in-messages highlights.
  */
 
+import type { App } from "obsidian";
 import { buildFlatText, collectTextNodes, unwrapMarks, wrapRange } from "../ui/highlight-ranges";
 import { captureAnchor, resolveAnchor } from "./anchor";
 import { compileComments, type CompileGroup, type CompileOptions } from "./compile";
@@ -47,6 +48,8 @@ export interface CommentLayerOptions {
 	/** Orphan note override for compile. */
 	orphanNote?: string;
 	placeholder?: string;
+	/** Lets the inline editor claim Mod+Enter / Escape from Obsidian's hotkeys. */
+	app?: App;
 }
 
 /** Selector for one comment's marks (ids are UUIDs, so no escaping is needed). */
@@ -71,7 +74,7 @@ export class CommentLayer {
 
 	constructor(private readonly opts: CommentLayerOptions) {
 		this.doc = opts.root.ownerDocument;
-		this.popover = new CommentPopover(this.doc);
+		this.popover = new CommentPopover(this.doc, opts.app);
 
 		const onClick = (e: MouseEvent) => this.handleMarkClick(e);
 		opts.root.addEventListener("click", onClick);
