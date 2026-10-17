@@ -57,6 +57,7 @@ import type { StepPromptBuilder } from "./step-prompt-builder";
 import type { StepConversationStore } from "./step-conversation-store";
 import type { CodeStepExecutor } from "./code-step-executor";
 import type { CircuitEvent, Circuit, StepDefinition } from "./types";
+import { canonicalTopic } from "./types";
 
 const log = logger("StepTurnExecutor");
 
@@ -442,7 +443,9 @@ export class StepTurnExecutor {
 		errorMessage?: string,
 	): { topic: string; payload: string; structured?: unknown } {
 		if (ctx.pendingEmission) {
-			return ctx.pendingEmission;
+			// Canonicalize CIRCUIT_* aliases here too: a user-customized emit_event
+			// override in {notor_dir}/tools/ may not carry the alias table.
+			return { ...ctx.pendingEmission, topic: canonicalTopic(ctx.pendingEmission.topic) };
 		}
 		if (stopReason === "completed") {
 			if (step.defaultPublishes) {

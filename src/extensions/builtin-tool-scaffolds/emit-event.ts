@@ -42,14 +42,14 @@ import { scaffold } from "./_scaffold-helper";
  */
 export const EMIT_EVENT = scaffold(
 	"emit_event",
-	"Publish an orchestration event to advance the flow to its next step.",
+	"Publish a circuit event to advance the circuit to its next step.",
 	// `read`, not `write`: capture-only control-flow primitive that must run in
 	// any conversation mode (incl. Plan). See the file header for why.
 	"read",
 	`params:
   topic:
     type: string
-    description: "Event topic name (e.g. tasks.ready, review.passed, FLOW_COMPLETE)."
+    description: "Event topic name (e.g. tasks.ready, review.passed, CIRCUIT_COMPLETE). CIRCUIT_COMPLETE/CANCELLED/ERROR and FLOW_COMPLETE/CANCELLED/ERROR are equivalent."
   payload:
     type: string
     description: "Evidence or context handed to the next step."
@@ -61,7 +61,18 @@ if (typeof params.payload !== "string") {
   return { __toolError: true, error: "Missing required parameter: payload" };
 }
 
-const topic = (params.topic).trim();
+// Topic aliases → canonical spelling (CIRCUIT_* ≡ FLOW_*). Inlined because
+// scaffold code cannot import; keep in sync with TOPIC_ALIASES in
+// src/circuits/types.ts.
+const TOPIC_ALIASES = {
+  CIRCUIT_COMPLETE: "FLOW_COMPLETE",
+  CIRCUIT_CANCELLED: "FLOW_CANCELLED",
+  CIRCUIT_ERROR: "FLOW_ERROR",
+  "circuit.tasks_remaining": "flow.tasks_remaining",
+  "circuit.requirements_unmet": "flow.requirements_unmet",
+};
+const rawTopic = (params.topic).trim();
+const topic = Object.prototype.hasOwnProperty.call(TOPIC_ALIASES, rawTopic) ? TOPIC_ALIASES[rawTopic] : rawTopic;
 const payload = params.payload;
 
 // The per-step orchestration carriage is threaded onto utils from
@@ -71,7 +82,7 @@ const ctx = utils.orchestrationContext;
 if (!ctx) {
   return {
     __toolError: true,
-    error: "emit_event can only be called from within an orchestration step turn.",
+    error: "emit_event can only be called from within a circuit step turn.",
   };
 }
 

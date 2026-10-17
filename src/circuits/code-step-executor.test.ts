@@ -424,3 +424,26 @@ describe("CodeStepExecutor — helper dispatch from a code step", () => {
 		expect(JSON.parse(result.emission.payload).error).toMatch(/denied/);
 	});
 });
+
+describe("CodeStepExecutor — circuit vocabulary aliases", () => {
+	it("binds `circuit` to the same helper object as `orchestration`", async () => {
+		const { executor } = makeExecutor();
+		const code = `return circuit.emit(circuit === orchestration ? "same.helper" : "different.helper");`;
+		const result = await executor.execute(request(step({ bodyContent: fenced("ts", code) })));
+		expect(result.emission.topic).toBe("same.helper");
+	});
+
+	it("canonicalizes circuit.emit(CIRCUIT_COMPLETE) to FLOW_COMPLETE", async () => {
+		const { executor } = makeExecutor();
+		const code = `return circuit.emit("CIRCUIT_COMPLETE", "done", { ok: true });`;
+		const result = await executor.execute(request(step({ bodyContent: fenced("ts", code) })));
+		expect(result.emission).toEqual({ topic: "FLOW_COMPLETE", payload: "done", structured: { ok: true } });
+	});
+
+	it("canonicalizes a hand-built { topic: CIRCUIT_ERROR } return too", async () => {
+		const { executor } = makeExecutor();
+		const code = `return { topic: "CIRCUIT_ERROR", payload: "bad" };`;
+		const result = await executor.execute(request(step({ bodyContent: fenced("ts", code) })));
+		expect(result.emission.topic).toBe("FLOW_ERROR");
+	});
+});

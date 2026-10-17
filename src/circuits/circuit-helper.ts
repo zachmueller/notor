@@ -31,6 +31,7 @@ import { logger, type Logger } from "../utils/logger";
 import type { SessionLog } from "./session-log";
 import { TaskRegistry, type TaskNote, type TaskStatus } from "./task-registry";
 import type { CircuitEvent } from "./types";
+import { canonicalTopic } from "./types";
 
 const log = logger("CircuitHelper");
 
@@ -57,7 +58,7 @@ export interface CodeStepEvent {
  * `orchestration.emit(...)` constructs it (authors never build it by hand).
  */
 export interface CodeStepResult {
-	/** Next event topic (may be terminal: FLOW_COMPLETE / FLOW_CANCELLED / FLOW_ERROR). */
+	/** Next event topic (may be terminal: FLOW_COMPLETE / FLOW_CANCELLED / FLOW_ERROR, or a CIRCUIT_* alias, canonicalized). */
 	topic: string;
 	/** Next event payload (defaults to ""). */
 	payload: string;
@@ -284,7 +285,7 @@ export function buildCircuitHelper(args: BuildCircuitHelperArgs): CircuitHelper 
 
 	return {
 		emit(topic: string, payload?: string, structured?: unknown): CodeStepResult {
-			const result: CodeStepResult = { topic, payload: payload ?? "" };
+			const result: CodeStepResult = { topic: canonicalTopic(topic), payload: payload ?? "" };
 			if (structured !== undefined) result.structured = structured;
 			return result;
 		},

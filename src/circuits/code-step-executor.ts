@@ -8,7 +8,8 @@
  * (`stripTypes()` + `new AsyncFunction(...names, code)` from
  * `src/extensions/compiler.ts`) — there is **no second compiler**. The fence is
  * compiled with {@link CODE_STEP_ARG_NAMES}
- * (`["app", "obsidian", "utils", "libs", "event", "orchestration"]`).
+ * (`["app", "obsidian", "utils", "libs", "event", "orchestration", "circuit"]`;
+ * `circuit` is the same helper object as `orchestration`).
  *
  * A code step creates **no conversation and consumes zero tokens**; it is **not
  * an LLM turn**, so it draws on neither half of the shared `RunContext.budget`
@@ -59,6 +60,7 @@ import type { ToolPolicyContext } from "../chat/tool-policy";
 import type { StepTurnRequest, StepTurnResult } from "./step-turn-executor";
 import type { TaskRegistry } from "./task-registry";
 import { CODE_STEP_ARG_NAMES } from "./types";
+import { canonicalTopic } from "./types";
 
 const log = logger("CodeStepExecutor");
 
@@ -220,7 +222,8 @@ export class CodeStepExecutor {
 						runtime.utils,
 						runtime.libs,
 						codeEvent,
-						helper,
+						helper, // `orchestration`
+						helper, // `circuit` (same object)
 					),
 				timeoutSeconds,
 			);
@@ -245,7 +248,8 @@ export class CodeStepExecutor {
 	): { topic: string; payload: string; structured?: unknown } {
 		if (isCodeStepResult(returned)) {
 			const emission: { topic: string; payload: string; structured?: unknown } = {
-				topic: returned.topic,
+				// Covers hand-built `{ topic }` returns too, not only `circuit.emit()`.
+				topic: canonicalTopic(returned.topic),
 				payload: typeof returned.payload === "string" ? returned.payload : "",
 			};
 			if (returned.structured !== undefined) emission.structured = returned.structured;

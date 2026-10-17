@@ -46,6 +46,7 @@ import {
 	DEFAULT_MAX_RUNTIME_MINUTES,
 } from "./constants";
 import {
+	canonicalTopic,
 	FLOW_COMPLETE,
 	isTerminalTopic,
 	USER_INPUT_REQUIRED,
@@ -126,6 +127,10 @@ function isValidatorExemptTopic(topic: string): boolean {
 // ---------------------------------------------------------------------------
 // Frontmatter coercion helpers (mirror workflow-discovery.ts)
 // ---------------------------------------------------------------------------
+
+function canonicalTopicOrNull(topic: string | null): string | null {
+	return topic === null ? null : canonicalTopic(topic);
+}
 
 function parseStringOrNull(value: unknown): string | null {
 	if (value === undefined || value === null) return null;
@@ -259,8 +264,10 @@ export class StepNoteParser {
 			);
 		}
 
-		const triggers = parseStringArray(fm["notor-step-triggers"]);
-		const publishes = parseStringArray(fm["notor-step-publishes"]);
+		// Topic fields are canonicalized (CIRCUIT_* → FLOW_*) so routing and the
+		// static validators compare one spelling.
+		const triggers = parseStringArray(fm["notor-step-triggers"]).map(canonicalTopic);
+		const publishes = parseStringArray(fm["notor-step-publishes"]).map(canonicalTopic);
 
 		const rawMode = fm["notor-step-mode"];
 		const mode: "conversation" | "code" = rawMode === "code" ? "code" : "conversation";
@@ -292,7 +299,7 @@ export class StepNoteParser {
 			description: parseStringOrNull(fm["notor-step-description"]) ?? "",
 			triggers,
 			publishes,
-			defaultPublishes: parseStringOrNull(fm["notor-step-default-publishes"]),
+			defaultPublishes: canonicalTopicOrNull(parseStringOrNull(fm["notor-step-default-publishes"])),
 			persona: parseStringOrNull(fm["notor-step-persona"]),
 			model: parseStringOrNull(fm["notor-step-model"]),
 			mode,
@@ -406,7 +413,7 @@ export class CircuitDefinitionParser {
 				`Circuit '${dir.path}' is missing required ${describeAliasedKey("name")}.`,
 			);
 		}
-		const startingEvent = parseStringOrNull(fm["notor-starting-event"]);
+		const startingEvent = canonicalTopicOrNull(parseStringOrNull(fm["notor-starting-event"]));
 		if (!startingEvent) {
 			throw new CircuitParseError(`Flow '${name}' is missing required 'notor-starting-event'.`);
 		}
@@ -423,7 +430,7 @@ export class CircuitDefinitionParser {
 			description: parseStringOrNull(readAliasedKey(fm, "description")) ?? "",
 			flowDir: dir.path,
 			startingEvent,
-			completionEvent: parseStringOrNull(fm["notor-completion-event"]) ?? FLOW_COMPLETE,
+			completionEvent: canonicalTopicOrNull(parseStringOrNull(fm["notor-completion-event"])) ?? FLOW_COMPLETE,
 			maxIterations: parseFiniteNumberOrDefault(
 				fm["notor-max-iterations"],
 				DEFAULT_MAX_ITERATIONS,
@@ -432,8 +439,8 @@ export class CircuitDefinitionParser {
 				fm["notor-max-runtime-minutes"],
 				DEFAULT_MAX_RUNTIME_MINUTES,
 			),
-			requiredEvents: parseStringArray(fm["notor-required-events"]),
-			fanoutTopics: parseStringArray(fm["notor-fanout-topics"]),
+			requiredEvents: parseStringArray(fm["notor-required-events"]).map(canonicalTopic),
+			fanoutTopics: parseStringArray(fm["notor-fanout-topics"]).map(canonicalTopic),
 			steps,
 			guardrails: parseStringArray(fm["notor-guardrails"]),
 			schedule: parseSchedule(fm["notor-schedule"], name),

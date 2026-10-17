@@ -208,6 +208,13 @@ describe("StepTurnExecutor — FR-117a emission matrix (F3)", () => {
 		expect(emission).toEqual({ topic: "explicit.topic", payload: "hand-picked" });
 	});
 
+	it("canonicalizes a captured CIRCUIT_* alias to FLOW_* (covers user-overridden emit_event)", async () => {
+		setResult({ stopReason: "completed" });
+		const ctx = carriage({ pendingEmission: { topic: "CIRCUIT_COMPLETE", payload: "done" } });
+		const { emission } = await makeExecutor().execute(makeRequest(step(), ctx));
+		expect(emission).toEqual({ topic: "FLOW_COMPLETE", payload: "done" });
+	});
+
 	it("completed + default_publishes → the default topic (empty payload)", async () => {
 		setResult({ stopReason: "completed" });
 		const { emission } = await makeExecutor().execute(makeRequest(step({ defaultPublishes: "work.done" }), carriage()));

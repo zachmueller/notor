@@ -22,8 +22,8 @@
  *  1. `code-assist` — TDD build loop: conversation steps + a code-step verifier
  *     that routes on the test outcome. Invocable (returns a structured summary).
  *  2. `research` — multi-phase research loop ending in a **code step** that emits
- *     `FLOW_COMPLETE` with a **structured** payload (the reliable-returns path).
- *  3. `review` — composition demo: a code step calls `code-assist` via `run_flow`,
+ *     `CIRCUIT_COMPLETE` (≡ `FLOW_COMPLETE`) with a **structured** payload (the reliable-returns path).
+ *  3. `review` — composition demo: a code step calls `code-assist` via `run_circuit`,
  *     then a conversation step composes the final review.
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-7-composability.md — POL-002
@@ -51,11 +51,11 @@ export interface ReferenceCircuit {
 const CODE_ASSIST: ReferenceCircuit = {
 	slug: "code-assist",
 	definition: `---
-notor-type: orchestration-flow
-notor-flow-name: "Code Assist"
-notor-flow-description: "TDD-style implementation loop: plan, build, verify, review, finalize."
+notor-type: circuit
+notor-circuit-name: "Code Assist"
+notor-circuit-description: "TDD-style implementation loop: plan, build, verify, review, finalize."
 notor-starting-event: build.start
-notor-completion-event: FLOW_COMPLETE
+notor-completion-event: CIRCUIT_COMPLETE
 notor-max-iterations: 100
 notor-max-runtime-minutes: 120
 notor-required-events:
@@ -69,9 +69,9 @@ notor-steps:
 notor-guardrails:
   - "Verification is mandatory — tests must pass before review."
   - "YAGNI — implement only what the task requires."
-notor-flow-invocable: true
-notor-flow-inputs: "A natural-language feature description plus the absolute path to the target repo."
-notor-flow-returns: "A summary of what was implemented and the list of files changed."
+notor-circuit-invocable: true
+notor-circuit-inputs: "A natural-language feature description plus the absolute path to the target repo."
+notor-circuit-returns: "A summary of what was implemented and the list of files changed."
 notor-handoff-isolation: isolated
 notor-max-depth: 3
 notor-max-cost-usd: 5.00
@@ -80,14 +80,14 @@ notor-max-cost-usd: 5.00
 # Code Assist
 
 A TDD-style implementation loop. Provide a feature description and the target repo
-path as the objective. The flow plans the work, implements it, verifies with the
+path as the objective. The circuit plans the work, implements it, verifies with the
 test suite (a deterministic code step), reviews, and finalizes.
 
 (This body is documentation only — it is never injected into a step's prompt.)
 `,
 	steps: {
 		"planner.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "📋 Planner"
 notor-step-description: "Decomposes the objective and owns the task queue."
 notor-step-triggers:
@@ -104,12 +104,12 @@ notor-step-persona: null
 You own decomposition and the task queue. Do **not** implement; do **not** review.
 
 1. Read \`plan.md\` and \`progress.md\` from the session scratchpad (if present).
-2. Break the objective into discrete, testable tasks with \`orchestration_task_ensure\`.
+2. Break the objective into discrete, testable tasks with \`circuit_task_ensure\`.
 3. Write the complete plan to \`plan.md\` in the scratchpad (overwrite the whole file — never append).
 4. Emit \`build.ready\` with the next task and the repo path as the payload.
 `,
 		"builder.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "🛠️ Builder"
 notor-step-description: "Implements the next task against the repo."
 notor-step-triggers:
@@ -122,15 +122,15 @@ notor-step-persona: null
 
 ## BUILDER MODE
 
-Implement the next task. Mark it \`orchestration_task_start\` before you begin and
-\`orchestration_task_close\` when done.
+Implement the next task. Mark it \`circuit_task_start\` before you begin and
+\`circuit_task_close\` when done.
 
 1. Read \`plan.md\` from the scratchpad to see the planned work.
 2. Implement the change in the target repo (the repo path is in the incoming event payload).
 3. When the implementation is complete, emit \`build.done\` with the repo path as the payload.
 `,
 		"verify-tests.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "🔍 Verify Tests"
 notor-step-description: "Runs the test suite and routes deterministically on the result."
 notor-step-mode: code
@@ -158,19 +158,19 @@ const result = await utils.executeShellCommand("npm test", {
 
 // ShellExecuteResult.stdout is COMBINED stdout+stderr (no separate stderr field).
 if (result.exitCode === 0 && !result.timedOut) {
-  await orchestration.scratchpad.write("last-test-run.txt", result.stdout);
-  return orchestration.emit("tests.passed", repoPath);
+  await circuit.scratchpad.write("last-test-run.txt", result.stdout);
+  return circuit.emit("tests.passed", repoPath);
 }
 
 // Failure: forward the full context so the planner can re-plan a fix.
-return orchestration.emit(
+return circuit.emit(
   "tests.failed",
   JSON.stringify({ exitCode: result.exitCode, timedOut: result.timedOut, output: result.stdout }),
 );
 \`\`\`
 `,
 		"critic.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "🧐 Critic"
 notor-step-description: "Adversarial review of the implementation."
 notor-step-triggers:
@@ -190,35 +190,35 @@ Adversarially review the implementation. Do **not** write code.
 3. When satisfied, emit \`review.approved\` with a one-line verdict as the payload.
 `,
 		"finalizer.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "✅ Finalizer"
-notor-step-description: "Closes remaining tasks and completes the flow with a structured summary."
+notor-step-description: "Closes remaining tasks and completes the circuit with a structured summary."
 notor-step-mode: code
 notor-step-triggers:
   - review.approved
 notor-step-publishes:
-  - FLOW_COMPLETE
-notor-step-default-publishes: FLOW_COMPLETE
+  - CIRCUIT_COMPLETE
+notor-step-default-publishes: CIRCUIT_COMPLETE
 ---
 
 # Finalizer
 
-Closes any lingering tasks and completes the flow, returning a **structured** summary
-(the reliable-returns path for a \`run_flow\` caller).
+Closes any lingering tasks and completes the circuit, returning a **structured** summary
+(the reliable-returns path for a \`run_circuit\` caller).
 
 \`\`\`typescript
-// Close any still-open/running tasks so FLOW_COMPLETE enforcement passes.
-const open = await orchestration.tasks.list({ status: "open" });
-const running = await orchestration.tasks.list({ status: "running" });
+// Close any still-open/running tasks so CIRCUIT_COMPLETE enforcement passes.
+const open = await circuit.tasks.list({ status: "open" });
+const running = await circuit.tasks.list({ status: "running" });
 for (const t of [...open, ...running]) {
-  await orchestration.tasks.close(t.key);
+  await circuit.tasks.close(t.key);
 }
 
-const plan = (await orchestration.scratchpad.read("plan.md")) ?? "";
+const plan = (await circuit.scratchpad.read("plan.md")) ?? "";
 const summary = "Implementation complete and reviewed.";
 
 // Terminal code step → the 3rd arg is lifted onto the run's structured return.
-return orchestration.emit("FLOW_COMPLETE", summary, {
+return circuit.emit("CIRCUIT_COMPLETE", summary, {
   summary,
   plan,
 });
@@ -234,11 +234,11 @@ return orchestration.emit("FLOW_COMPLETE", summary, {
 const RESEARCH: ReferenceCircuit = {
 	slug: "research",
 	definition: `---
-notor-type: orchestration-flow
-notor-flow-name: "Research"
-notor-flow-description: "Multi-phase research loop: explore, synthesize, verify, summarize."
+notor-type: circuit
+notor-circuit-name: "Research"
+notor-circuit-description: "Multi-phase research loop: explore, synthesize, verify, summarize."
 notor-starting-event: research.start
-notor-completion-event: FLOW_COMPLETE
+notor-completion-event: CIRCUIT_COMPLETE
 notor-max-iterations: 60
 notor-max-runtime-minutes: 60
 notor-required-events:
@@ -251,9 +251,9 @@ notor-steps:
 notor-guardrails:
   - "Cite a source for every factual claim."
   - "Write findings to the scratchpad — never rely on conversation context."
-notor-flow-invocable: true
-notor-flow-inputs: "A single research question as a plain string."
-notor-flow-returns: "A short markdown report with at least one cited source per angle."
+notor-circuit-invocable: true
+notor-circuit-inputs: "A single research question as a plain string."
+notor-circuit-returns: "A short markdown report with at least one cited source per angle."
 notor-handoff-isolation: isolated
 notor-max-depth: 2
 notor-max-cost-usd: 3.00
@@ -261,16 +261,16 @@ notor-max-cost-usd: 3.00
 
 # Research
 
-Give it a research question as the objective. The flow plans angles, gathers findings
+Give it a research question as the objective. The circuit plans angles, gathers findings
 into the scratchpad, verifies something was gathered, then a terminal **code step**
-emits the completion event with a **structured** report (so a \`run_flow\` caller
+emits the completion event with a **structured** report (so a \`run_circuit\` caller
 receives \`structured\`, not loose text).
 
 (This body is documentation only.)
 `,
 	steps: {
 		"explore.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "🔭 Explore"
 notor-step-description: "Plans research angles and gathers initial findings."
 notor-step-triggers:
@@ -290,7 +290,7 @@ notor-step-persona: null
 4. Emit \`explore.done\` with a one-line summary as the payload.
 `,
 		"synthesize.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "🧪 Synthesize"
 notor-step-description: "Synthesizes findings into a coherent draft."
 notor-step-triggers:
@@ -309,7 +309,7 @@ notor-step-persona: null
 4. Emit \`synthesize.done\` with a one-line summary as the payload.
 `,
 		"verify.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "✅ Verify Findings"
 notor-step-description: "Verifies findings were actually gathered before summarizing."
 notor-step-mode: code
@@ -317,8 +317,8 @@ notor-step-triggers:
   - synthesize.done
 notor-step-publishes:
   - verify.passed
-  - FLOW_CANCELLED
-notor-step-default-publishes: FLOW_CANCELLED
+  - CIRCUIT_CANCELLED
+notor-step-default-publishes: CIRCUIT_CANCELLED
 ---
 
 # Verify Findings
@@ -327,35 +327,35 @@ Routes to the summarizer only if the scratchpad actually has findings; otherwise
 (bypassing completion-task enforcement).
 
 \`\`\`typescript
-const findings = await orchestration.scratchpad.read("findings.md");
+const findings = await circuit.scratchpad.read("findings.md");
 if (!findings || findings.trim().length === 0) {
-  return orchestration.emit("FLOW_CANCELLED", "No findings were gathered — nothing to summarize.");
+  return circuit.emit("CIRCUIT_CANCELLED", "No findings were gathered — nothing to summarize.");
 }
-return orchestration.emit("verify.passed", JSON.stringify({ bytes: findings.length }));
+return circuit.emit("verify.passed", JSON.stringify({ bytes: findings.length }));
 \`\`\`
 `,
 		"summarize.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "📝 Summarize"
 notor-step-description: "Emits the final report as a structured terminal return."
 notor-step-mode: code
 notor-step-triggers:
   - verify.passed
 notor-step-publishes:
-  - FLOW_COMPLETE
-notor-step-default-publishes: FLOW_COMPLETE
+  - CIRCUIT_COMPLETE
+notor-step-default-publishes: CIRCUIT_COMPLETE
 ---
 
 # Summarize
 
-Reads the synthesized draft and completes the flow with a **structured** report — the
-reliable-returns path a \`run_flow\` caller prefers over loose text.
+Reads the synthesized draft and completes the circuit with a **structured** report — the
+reliable-returns path a \`run_circuit\` caller prefers over loose text.
 
 \`\`\`typescript
-const draft = (await orchestration.scratchpad.read("draft.md")) ?? "";
-const findings = (await orchestration.scratchpad.read("findings.md")) ?? "";
+const draft = (await circuit.scratchpad.read("draft.md")) ?? "";
+const findings = (await circuit.scratchpad.read("findings.md")) ?? "";
 
-return orchestration.emit("FLOW_COMPLETE", "Research complete.", {
+return circuit.emit("CIRCUIT_COMPLETE", "Research complete.", {
   report: draft,
   findings,
 });
@@ -365,17 +365,17 @@ return orchestration.emit("FLOW_COMPLETE", "Research complete.", {
 };
 
 // ---------------------------------------------------------------------------
-// 3. review — composition demo (run_flow caller) + a report step
+// 3. review — composition demo (run_circuit caller) + a report step
 // ---------------------------------------------------------------------------
 
 const REVIEW: ReferenceCircuit = {
 	slug: "review",
 	definition: `---
-notor-type: orchestration-flow
-notor-flow-name: "Review"
-notor-flow-description: "Composition demo: dispatch a child flow via run_flow, then compose a report."
+notor-type: circuit
+notor-circuit-name: "Review"
+notor-circuit-description: "Composition demo: dispatch a child circuit via run_circuit, then compose a report."
 notor-starting-event: review.start
-notor-completion-event: FLOW_COMPLETE
+notor-completion-event: CIRCUIT_COMPLETE
 notor-max-iterations: 40
 notor-max-runtime-minutes: 120
 notor-required-events:
@@ -384,16 +384,16 @@ notor-steps:
   - "[[dispatch]]"
   - "[[report]]"
 notor-guardrails:
-  - "Base the report only on the child flow's actual returned result."
-notor-flow-invocable: false
+  - "Base the report only on the child circuit's actual returned result."
+notor-circuit-invocable: false
 notor-max-depth: 3
 notor-max-cost-usd: 8.00
 ---
 
 # Review
 
-Demonstrates **composition** (the \`run_flow\` caller side). A code-step \`dispatch\`
-invokes the \`Code Assist\` flow via \`run_flow\` and writes its result to the scratchpad;
+Demonstrates **composition** (the \`run_circuit\` caller side). A code-step \`dispatch\`
+invokes the \`Code Assist\` circuit via \`run_circuit\` and writes its result to the scratchpad;
 a conversation \`report\` step then composes the final review from that result.
 
 Requires \`Code Assist\` to be invocable (it is, by default).
@@ -402,9 +402,9 @@ Requires \`Code Assist\` to be invocable (it is, by default).
 `,
 	steps: {
 		"dispatch.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "🚚 Dispatch"
-notor-step-description: "Invokes the Code Assist child flow via run_flow."
+notor-step-description: "Invokes the Code Assist child circuit via run_circuit."
 notor-step-mode: code
 notor-step-triggers:
   - review.start
@@ -415,39 +415,39 @@ notor-step-default-publishes: dispatch.done
 
 # Dispatch
 
-Invokes the \`Code Assist\` flow as a child via \`run_flow\` (a child session on a child
+Invokes the \`Code Assist\` circuit as a child via \`run_circuit\` (a child session on a child
 run-loop), then forwards its result to the report step via the scratchpad.
 
 \`\`\`typescript
-// run_flow is orchestration-context-only; here we are inside a flow step, so it spawns
+// run_circuit is circuit-context-only; here we are inside a circuit step, so it spawns
 // a child run. The child's result (structured preferred, else text) comes back as text.
-const childResult = await orchestration.callTool("run_flow", {
-  flow: "Code Assist",
+const childResult = await circuit.callTool("run_circuit", {
+  circuit: "Code Assist",
   payload: event.payload, // the feature description + repo path forwarded from review.start
 });
 
-await orchestration.scratchpad.write("child-result.md", childResult);
-return orchestration.emit("dispatch.done", "Child flow returned.");
+await circuit.scratchpad.write("child-result.md", childResult);
+return circuit.emit("dispatch.done", "Child circuit returned.");
 \`\`\`
 `,
 		"report.md": `---
-notor-type: orchestration-step
+notor-type: circuit-step
 notor-step-name: "🧾 Report"
-notor-step-description: "Composes the final review from the child flow's result."
+notor-step-description: "Composes the final review from the child circuit's result."
 notor-step-triggers:
   - dispatch.done
 notor-step-publishes:
-  - FLOW_COMPLETE
-notor-step-default-publishes: FLOW_COMPLETE
+  - CIRCUIT_COMPLETE
+notor-step-default-publishes: CIRCUIT_COMPLETE
 notor-step-persona: null
 ---
 
 ## REPORT MODE
 
-1. Read \`child-result.md\` from the scratchpad — this is the \`Code Assist\` child flow's
+1. Read \`child-result.md\` from the scratchpad — this is the \`Code Assist\` child circuit's
    returned result.
-2. Compose a concise review of what the child flow accomplished.
-3. Emit \`FLOW_COMPLETE\` with your review as the payload.
+2. Compose a concise review of what the child circuit accomplished.
+3. Emit \`CIRCUIT_COMPLETE\` with your review as the payload.
 `,
 	},
 };

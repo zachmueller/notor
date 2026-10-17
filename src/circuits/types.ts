@@ -215,9 +215,44 @@ export const FLOW_ERROR = "FLOW_ERROR";
 /** The three terminal topics, as a readonly tuple. */
 export const TERMINAL_TOPICS = [FLOW_COMPLETE, FLOW_CANCELLED, FLOW_ERROR] as const;
 
-/** True if `topic` is one of the three terminal constants. */
+/** Circuit-vocabulary alias of {@link FLOW_COMPLETE} (fully equivalent). */
+export const CIRCUIT_COMPLETE = "CIRCUIT_COMPLETE";
+/** Circuit-vocabulary alias of {@link FLOW_CANCELLED} (fully equivalent). */
+export const CIRCUIT_CANCELLED = "CIRCUIT_CANCELLED";
+/** Circuit-vocabulary alias of {@link FLOW_ERROR} (fully equivalent). */
+export const CIRCUIT_ERROR = "CIRCUIT_ERROR";
+
+/**
+ * Topic aliases → canonical topic. Authors may write either spelling (in
+ * `notor-step-publishes`, `notor-completion-event`, `emit_event`, `circuit.emit`,
+ * ...); everything is canonicalized at parse time and at the two emission
+ * boundaries, so the engine, validators, session logs, and persisted
+ * `stop_reason` only ever see the `FLOW_*` / `flow.*` spelling.
+ *
+ * Keep in sync with the inlined copy in the `emit_event` scaffold
+ * (`extensions/builtin-tool-scaffolds/emit-event.ts`), which cannot import.
+ */
+export const TOPIC_ALIASES: Readonly<Record<string, string>> = Object.freeze({
+	[CIRCUIT_COMPLETE]: FLOW_COMPLETE,
+	[CIRCUIT_CANCELLED]: FLOW_CANCELLED,
+	[CIRCUIT_ERROR]: FLOW_ERROR,
+	"circuit.tasks_remaining": "flow.tasks_remaining",
+	"circuit.requirements_unmet": "flow.requirements_unmet",
+});
+
+/**
+ * Canonicalize a topic alias (`CIRCUIT_COMPLETE` → `FLOW_COMPLETE`, ...).
+ * Every non-alias topic is returned unchanged (not even trimmed).
+ */
+export function canonicalTopic(topic: string): string {
+	const key = topic.trim();
+	return Object.prototype.hasOwnProperty.call(TOPIC_ALIASES, key) ? TOPIC_ALIASES[key]! : topic;
+}
+
+/** True if `topic` is one of the three terminal topics, under either spelling. */
 export function isTerminalTopic(topic: string): boolean {
-	return topic === FLOW_COMPLETE || topic === FLOW_CANCELLED || topic === FLOW_ERROR;
+	const t = canonicalTopic(topic);
+	return t === FLOW_COMPLETE || t === FLOW_CANCELLED || t === FLOW_ERROR;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +286,7 @@ export const USER_INPUT_RECEIVED = "user.input.received";
 /**
  * The argument list a code step's compiled `AsyncFunction` receives — mirrors
  * `TOOL_ARG_NAMES` but swaps the last two args (`settings`, `shared`/`params`)
- * for `event` and `orchestration`. Declared here as the single source; consumed
+ * for `event` and `orchestration` (plus its alias `circuit`). Declared here as the single source; consumed
  * by the `CodeStepExecutor` (Phase 3, INT-010).
  *
  * @see specs/ZZ-misc/orchestration/contracts/orchestration-helper.md
@@ -263,4 +298,7 @@ export const CODE_STEP_ARG_NAMES = [
 	"libs",
 	"event",
 	"orchestration",
+	// Circuit-vocabulary alias: bound to the SAME helper object as
+	// `orchestration`, which stays available forever.
+	"circuit",
 ] as const;

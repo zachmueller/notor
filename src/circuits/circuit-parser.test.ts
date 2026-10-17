@@ -515,3 +515,51 @@ describe("CircuitDefinitionParser — circuit vocabulary aliases", () => {
 		expect(results[0]!.warnings.some((w) => w.kind === "name_collision")).toBe(true);
 	});
 });
+
+describe("CircuitDefinitionParser — circuit topic aliases", () => {
+	it("canonicalizes CIRCUIT_* in completion event, publishes, and default publishes", async () => {
+		const files = validFlowFiles({ "notor-completion-event": "CIRCUIT_COMPLETE" });
+		const finisher = files[`${FLOW_DIR}/steps/finisher.md`]!;
+		finisher.frontmatter = {
+			...finisher.frontmatter,
+			"notor-step-publishes": ["CIRCUIT_COMPLETE"],
+			"notor-step-default-publishes": "CIRCUIT_COMPLETE",
+		};
+		const { flow, warnings } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.completionEvent).toBe(FLOW_COMPLETE);
+		expect(flow.steps[1]!.publishes).toEqual([FLOW_COMPLETE]);
+		expect(flow.steps[1]!.defaultPublishes).toBe(FLOW_COMPLETE);
+		expect(warnings).toEqual([]);
+	});
+
+	it("a step publishing CIRCUIT_COMPLETE in a FLOW_COMPLETE circuit is not a false orphan", async () => {
+		const files = validFlowFiles(); // completion defaults to FLOW_COMPLETE
+		const finisher = files[`${FLOW_DIR}/steps/finisher.md`]!;
+		finisher.frontmatter = { ...finisher.frontmatter, "notor-step-publishes": ["CIRCUIT_COMPLETE"] };
+		await expect(parserFor(files).parseCircuitByDir(FLOW_DIR)).resolves.toMatchObject({ warnings: [] });
+	});
+
+	it("a circuit.tasks_remaining trigger parses exactly like flow.tasks_remaining", async () => {
+		const withTrigger = (trigger: string) => {
+			const files = validFlowFiles();
+			files[`${FLOW_DIR}/steps/retry.md`] = {
+				frontmatter: stepFm({
+					"notor-step-name": "Retry",
+					"notor-step-triggers": [trigger],
+					"notor-step-publishes": ["work"],
+				}),
+				body: "Finish remaining tasks.",
+			};
+			const def = files[`${FLOW_DIR}/definition.md`]!;
+			def.frontmatter = {
+				...def.frontmatter,
+				"notor-steps": ["[[planner]]", "[[finisher]]", "[[retry]]"],
+			};
+			return parserFor(files).parseCircuitByDir(FLOW_DIR);
+		};
+		const alias = await withTrigger("circuit.tasks_remaining");
+		const canonical = await withTrigger("flow.tasks_remaining");
+		expect(alias.flow.steps[2]!.triggers).toEqual(["flow.tasks_remaining"]);
+		expect(alias.warnings).toEqual(canonical.warnings);
+	});
+});
