@@ -399,3 +399,119 @@ describe("CircuitDefinitionParser", () => {
 		expect(flow.steps).toHaveLength(2);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Circuit vocabulary aliases + dual roots (orchestrations -> circuits reframe)
+// ---------------------------------------------------------------------------
+
+/** Re-home the two-step fixture under `toDir`, optionally converting it to the circuit vocabulary. */
+function rehome(
+	toDir: string,
+	opts: { circuitVocabulary?: boolean; name?: string } = {},
+): Record<string, FileFixture> {
+	const out: Record<string, FileFixture> = {};
+	for (const [path, fx] of Object.entries(validFlowFiles())) {
+		const fm = { ...(fx.frontmatter ?? {}) };
+		if (opts.circuitVocabulary) {
+			if (fm["notor-type"] === "orchestration-flow") {
+				fm["notor-type"] = "circuit";
+				fm["notor-circuit-name"] = fm["notor-flow-name"];
+				fm["notor-circuit-description"] = fm["notor-flow-description"];
+				delete fm["notor-flow-name"];
+				delete fm["notor-flow-description"];
+			} else if (fm["notor-type"] === "orchestration-step") {
+				fm["notor-type"] = "circuit-step";
+			}
+		}
+		if (opts.name && ("notor-flow-name" in fm || "notor-circuit-name" in fm)) {
+			fm[opts.circuitVocabulary ? "notor-circuit-name" : "notor-flow-name"] = opts.name;
+		}
+		out[path.replace(FLOW_DIR, toDir)] = { ...fx, frontmatter: fm };
+	}
+	return out;
+}
+
+describe("CircuitDefinitionParser — circuit vocabulary aliases", () => {
+	it("parses a circuit-vocabulary definition (notor-type: circuit, circuit-step, notor-circuit-*)", async () => {
+		const files = rehome("notor/circuits/demo", { circuitVocabulary: true });
+		const [result, ...rest] = await parserFor(files).discoverCircuits();
+		expect(rest).toHaveLength(0);
+		expect(result!.flow.name).toBe("Demo");
+		expect(result!.flow.description).toBe("A demo flow");
+		expect(result!.flow.flowDir).toBe("notor/circuits/demo");
+		expect(result!.flow.steps.map((s) => s.name)).toEqual(["Planner", "Finisher"]);
+	});
+
+	it("still parses a legacy-vocabulary flow under orchestrations/", async () => {
+		const results = await parserFor(validFlowFiles()).discoverCircuits();
+		expect(results.map((r) => r.flow.flowDir)).toEqual([FLOW_DIR]);
+	});
+
+	it("discovers both roots, circuits/ first", async () => {
+		const files = {
+			...validFlowFiles(), // notor/orchestrations/demo, name "Demo"
+			...rehome("notor/circuits/other", { circuitVocabulary: true, name: "Other" }),
+		};
+		const results = await parserFor(files).discoverCircuits();
+		expect(results.map((r) => r.flow.name)).toEqual(["Other", "Demo"]);
+	});
+
+	it("new key wins when both new and legacy keys are present", async () => {
+		const files = validFlowFiles({
+			"notor-circuit-name": "New name",
+			"notor-flow-name": "Old name",
+			"notor-circuit-invocable": true,
+			"notor-flow-invocable": false,
+			"notor-on-complete-circuit": "[[Next]]",
+			"notor-on-complete-flow": "[[Old next]]",
+		});
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.name).toBe("New name");
+		expect(flow.invocable).toBe(true);
+		expect(flow.onCompleteFlow).toBe("Next");
+	});
+
+	it("reads every aliased legacy key when only legacy keys are present", async () => {
+		const files = validFlowFiles({
+			"notor-flow-invocable": true,
+			"notor-flow-inputs": "a topic",
+			"notor-flow-returns": "a summary",
+			"notor-flow-allow-concurrent": true,
+		});
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.invocable).toBe(true);
+		expect(flow.flowInputs).toBe("a topic");
+		expect(flow.flowReturns).toBe("a summary");
+		expect(flow.allowConcurrent).toBe(true);
+	});
+
+	it("names both spellings when the name key is missing", async () => {
+		const files = validFlowFiles({ "notor-flow-name": undefined });
+		await expect(parserFor(files).parseCircuitByDir(FLOW_DIR)).rejects.toThrow(
+			/'notor-circuit-name' \(or legacy 'notor-flow-name'\)/,
+		);
+	});
+
+	it("keeps the circuits/ definition on a cross-root name collision and warns", async () => {
+		const files = {
+			...validFlowFiles(), // orchestrations/demo, "Demo"
+			...rehome("notor/circuits/demo", { circuitVocabulary: true }), // circuits/demo, "Demo"
+		};
+		const results = await parserFor(files).discoverCircuits();
+		expect(results).toHaveLength(1);
+		expect(results[0]!.flow.flowDir).toBe("notor/circuits/demo");
+		const collision = results[0]!.warnings.filter((w) => w.kind === "name_collision");
+		expect(collision).toHaveLength(1);
+		expect(collision[0]!.message).toContain("notor/orchestrations/demo");
+	});
+
+	it("dedupes same-name circuits within one root by folder order", async () => {
+		const files = {
+			...rehome("notor/circuits/a", { circuitVocabulary: true, name: "Same" }),
+			...rehome("notor/circuits/b", { circuitVocabulary: true, name: "Same" }),
+		};
+		const results = await parserFor(files).discoverCircuits();
+		expect(results.map((r) => r.flow.flowDir)).toEqual(["notor/circuits/a"]);
+		expect(results[0]!.warnings.some((w) => w.kind === "name_collision")).toBe(true);
+	});
+});

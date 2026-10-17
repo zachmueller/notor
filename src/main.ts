@@ -97,6 +97,7 @@ import type { CircuitHost } from "./circuits/host";
 import { buildUtils } from "./extensions/runtime-context";
 import type { ExtensionUtils } from "./extensions/runtime-context/types";
 import type { Circuit } from "./circuits/types";
+import { CIRCUIT_ROOT_DIR_NAMES } from "./circuits/schema-aliases";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
@@ -335,6 +336,8 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 * `orchestration_enabled` is off.
 	 */
 	private _discoveredCircuits: Circuit[] = [];
+	/** Circuit names already reported as colliding across roots (one Notice per name per load). */
+	private readonly _reportedCircuitCollisions = new Set<string>();
 
 	/** Debounce timer for vault-triggered workflow rescans. */
 	private _workflowRescanTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2507,6 +2510,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			);
 			const parsed = await parser.discoverCircuits();
 			this._discoveredCircuits = parsed.map((p) => p.flow);
+			this.reportCircuitNameCollisions(parsed);
 			log.debug("Flow cache updated", {
 				count: this._discoveredCircuits.length,
 				scheduled: this._discoveredCircuits.filter((f) => f.schedule).map((f) => f.name),
@@ -2542,12 +2546,30 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	}
 
 	/**
-	 * Returns true if a vault-relative path points to a Markdown file inside the
-	 * orchestrations subdirectory (used to trigger a debounced flow rescan).
+	 * Surface cross-root circuit name collisions (same name under `circuits/`
+	 * and `orchestrations/`) as a Notice, once per name per plugin load.
 	 */
-	private isOrchestrationPath(filePath: string): boolean {
-		const orchDir = normalizePath(`${this.settings.notor_dir}/orchestrations`);
-		return filePath.endsWith(".md") && filePath.startsWith(orchDir + "/");
+	private reportCircuitNameCollisions(parsed: { flow: Circuit; warnings: { kind: string; message: string }[] }[]): void {
+		for (const { flow, warnings } of parsed) {
+			if (!warnings.some((w) => w.kind === "name_collision")) continue;
+			if (this._reportedCircuitCollisions.has(flow.name)) continue;
+			this._reportedCircuitCollisions.add(flow.name);
+			for (const w of warnings) {
+				if (w.kind === "name_collision") new Notice(w.message, 10000);
+			}
+		}
+	}
+
+	/**
+	 * Returns true if a vault-relative path points to a Markdown file inside a
+	 * circuit root (`circuits/` or legacy `orchestrations/`), used to trigger a
+	 * debounced circuit rescan.
+	 */
+	private isCircuitPath(filePath: string): boolean {
+		if (!filePath.endsWith(".md")) return false;
+		return CIRCUIT_ROOT_DIR_NAMES.some((dirName) =>
+			filePath.startsWith(normalizePath(`${this.settings.notor_dir}/${dirName}`) + "/"),
+		);
 	}
 
 	/**
@@ -2626,24 +2648,24 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		// cron jobs) fresh when a definition.md under orchestrations/ changes.
 		this.registerEvent(
 			this.app.vault.on("create", (f) => {
-				if (this.isOrchestrationPath(f.path)) this.scheduleFlowRescan();
+				if (this.isCircuitPath(f.path)) this.scheduleFlowRescan();
 			})
 		);
 		this.registerEvent(
 			this.app.vault.on("delete", (f) => {
-				if (this.isOrchestrationPath(f.path)) this.scheduleFlowRescan();
+				if (this.isCircuitPath(f.path)) this.scheduleFlowRescan();
 			})
 		);
 		this.registerEvent(
 			this.app.vault.on("rename", (f, oldPath) => {
-				if (this.isOrchestrationPath(f.path) || this.isOrchestrationPath(oldPath)) {
+				if (this.isCircuitPath(f.path) || this.isCircuitPath(oldPath)) {
 					this.scheduleFlowRescan();
 				}
 			})
 		);
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (f) => {
-				if (this.isOrchestrationPath(f.path)) this.scheduleFlowRescan();
+				if (this.isCircuitPath(f.path)) this.scheduleFlowRescan();
 			})
 		);
 	}

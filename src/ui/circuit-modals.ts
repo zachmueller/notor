@@ -236,7 +236,8 @@ export async function showCircuitPicker(host: CircuitHost): Promise<void> {
 	}
 
 	const flows = parsed.map((p) => p.flow);
-	const emptyMessage = `No orchestration flows found in ${host.settings.notor_dir.replace(/\/$/, "")}/orchestrations/`;
+	const notorRoot = host.settings.notor_dir.replace(/\/$/, "");
+	const emptyMessage = `No circuits found in ${notorRoot}/circuits/ or ${notorRoot}/orchestrations/`;
 
 	new FlowPickerModal(
 		host.app,

@@ -8,9 +8,9 @@
  * rather than inventing new plumbing.
  *
  * `CircuitDefinitionParser` scans each `{notor_dir}/orchestrations/{flow}/definition.md`
- * (discriminator `notor-type: orchestration-flow`), resolves the `notor-steps`
+ * (discriminator `notor-type: circuit`, legacy `orchestration-flow`), resolves the `notor-steps`
  * wikilinks against `{flow-dir}/steps/`, parses each via `StepNoteParser`
- * (discriminator `notor-type: orchestration-step`), and runs two layers of
+ * (discriminator `notor-type: circuit-step`, legacy `orchestration-step`), and runs two layers of
  * load-time validation:
  *
  *  1. **Trigger routing (FR-111).** Each topic maps to exactly one step unless
@@ -52,6 +52,13 @@ import {
 	type Circuit,
 	type StepDefinition,
 } from "./types";
+import {
+	CIRCUIT_ROOT_DIR_NAMES,
+	describeAliasedKey,
+	isCircuitDefinitionType,
+	isCircuitStepType,
+	readAliasedKey,
+} from "./schema-aliases";
 
 const log = logger("FlowParser");
 
@@ -67,9 +74,9 @@ export class CircuitParseError extends Error {
 	}
 }
 
-/** A non-blocking load warning (dead step, definition-lint). */
+/** A non-blocking load warning (dead step, definition-lint, cross-root name collision). */
 export interface CircuitParseWarning {
-	kind: "dead_step" | "definition_lint";
+	kind: "dead_step" | "definition_lint" | "name_collision";
 	message: string;
 }
 
@@ -222,7 +229,7 @@ function parseSchedule(value: unknown, flowName: string): string | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Parses a single step note (discriminator `notor-type: orchestration-step`)
+ * Parses a single step note (discriminator `notor-type: circuit-step`, legacy `orchestration-step`)
  * into a `StepDefinition`. Frontmatter via `metadataCache.getFileCache()`; body
  * via `vault.read()` + `getFrontMatterInfo()` (mirrors `readWorkflowBody`).
  */
@@ -240,8 +247,8 @@ export class StepNoteParser {
 	async parse(file: TFile): Promise<StepDefinition | null> {
 		const cache = this.metadataCache.getFileCache(file);
 		const fm = cache?.frontmatter as Record<string, unknown> | undefined;
-		if (!fm || fm["notor-type"] !== "orchestration-step") {
-			log.warn("Step note missing orchestration-step discriminator", { path: file.path });
+		if (!fm || !isCircuitStepType(fm["notor-type"])) {
+			log.warn("Step note missing circuit-step discriminator", { path: file.path });
 			return null;
 		}
 
@@ -317,47 +324,55 @@ export class CircuitDefinitionParser {
 		this.stepParser = new StepNoteParser(vault, metadataCache);
 	}
 
-	/** `{notor_dir}/orchestrations`. */
-	private orchestrationsRootPath(): string {
-		return `${this.notorDir.replace(/\/$/, "")}/orchestrations`;
+	/** `{notor_dir}/circuits` then legacy `{notor_dir}/orchestrations`, in precedence order. */
+	private rootPaths(): string[] {
+		const base = this.notorDir.replace(/\/$/, "");
+		return CIRCUIT_ROOT_DIR_NAMES.map((dirName) => `${base}/${dirName}`);
 	}
 
 	/**
-	 * Discover every flow under `{notor_dir}/orchestrations/`. Each child
-	 * directory containing a `definition.md` with `notor-type:
-	 * orchestration-flow` is a flow; `sessions/`, `memories.md`, and step dirs
-	 * are skipped. A flow that fails to parse is logged and excluded (one bad
-	 * flow never blocks discovery of the rest).
+	 * Discover every circuit under `{notor_dir}/circuits/` and the legacy
+	 * `{notor_dir}/orchestrations/`. Each child directory containing a
+	 * `definition.md` whose `notor-type` is `circuit` (or legacy
+	 * `orchestration-flow`) is a circuit; `sessions/`, `failures/`,
+	 * `memories.md`, and step dirs are skipped. A circuit that fails to parse is
+	 * logged and excluded (one bad circuit never blocks discovery of the rest).
+	 *
+	 * Circuit names must be unique across both roots. On a collision the first
+	 * definition wins (`circuits/` before `orchestrations/`, then folder order),
+	 * the others are dropped so every name-keyed consumer agrees, and the winner
+	 * carries a `name_collision` warning.
 	 */
 	async discoverCircuits(): Promise<CircuitParseResult[]> {
-		const rootPath = this.orchestrationsRootPath();
-		const root = this.vault.getAbstractFileByPath(rootPath);
-		if (!(root instanceof TFolder)) {
-			log.debug("Orchestrations directory does not exist", { path: rootPath });
-			return [];
-		}
-
 		const results: CircuitParseResult[] = [];
-		for (const child of root.children) {
-			if (!(child instanceof TFolder)) continue;
-			const defPath = `${child.path}/definition.md`;
-			const defFile = this.vault.getAbstractFileByPath(defPath);
-			if (!(defFile instanceof TFile)) continue;
+		for (const rootPath of this.rootPaths()) {
+			const root = this.vault.getAbstractFileByPath(rootPath);
+			if (!(root instanceof TFolder)) {
+				log.debug("Circuit directory does not exist", { path: rootPath });
+				continue;
+			}
 
-			// Only directories whose definition.md carries the discriminator.
-			const cache = this.metadataCache.getFileCache(defFile);
-			if (cache?.frontmatter?.["notor-type"] !== "orchestration-flow") continue;
+			for (const child of root.children) {
+				if (!(child instanceof TFolder)) continue;
+				const defPath = `${child.path}/definition.md`;
+				const defFile = this.vault.getAbstractFileByPath(defPath);
+				if (!(defFile instanceof TFile)) continue;
 
-			try {
-				results.push(await this.parseFlowDir(child));
-			} catch (e) {
-				log.warn("Failed to parse orchestration flow, skipping", {
-					path: child.path,
-					error: e instanceof Error ? e.message : String(e),
-				});
+				// Only directories whose definition.md carries the discriminator.
+				const cache = this.metadataCache.getFileCache(defFile);
+				if (!isCircuitDefinitionType(cache?.frontmatter?.["notor-type"])) continue;
+
+				try {
+					results.push(await this.parseFlowDir(child));
+				} catch (e) {
+					log.warn("Failed to parse circuit, skipping", {
+						path: child.path,
+						error: e instanceof Error ? e.message : String(e),
+					});
+				}
 			}
 		}
-		return results;
+		return dedupeByName(results);
 	}
 
 	/** Parse a single flow by its directory path (used by the picker / runner). */
@@ -379,15 +394,17 @@ export class CircuitDefinitionParser {
 
 		const cache = this.metadataCache.getFileCache(defFile);
 		const fm = cache?.frontmatter as Record<string, unknown> | undefined;
-		if (!fm || fm["notor-type"] !== "orchestration-flow") {
+		if (!fm || !isCircuitDefinitionType(fm["notor-type"])) {
 			throw new CircuitParseError(
-				`definition.md in '${dir.path}' is missing 'notor-type: orchestration-flow'.`,
+				`definition.md in '${dir.path}' is missing 'notor-type: circuit' (or legacy 'orchestration-flow').`,
 			);
 		}
 
-		const name = parseStringOrNull(fm["notor-flow-name"]);
+		const name = parseStringOrNull(readAliasedKey(fm, "name"));
 		if (!name) {
-			throw new CircuitParseError(`Flow '${dir.path}' is missing required 'notor-flow-name'.`);
+			throw new CircuitParseError(
+				`Circuit '${dir.path}' is missing required ${describeAliasedKey("name")}.`,
+			);
 		}
 		const startingEvent = parseStringOrNull(fm["notor-starting-event"]);
 		if (!startingEvent) {
@@ -403,7 +420,7 @@ export class CircuitDefinitionParser {
 
 		const flow: Circuit = {
 			name,
-			description: parseStringOrNull(fm["notor-flow-description"]) ?? "",
+			description: parseStringOrNull(readAliasedKey(fm, "description")) ?? "",
 			flowDir: dir.path,
 			startingEvent,
 			completionEvent: parseStringOrNull(fm["notor-completion-event"]) ?? FLOW_COMPLETE,
@@ -421,18 +438,18 @@ export class CircuitDefinitionParser {
 			guardrails: parseStringArray(fm["notor-guardrails"]),
 			schedule: parseSchedule(fm["notor-schedule"], name),
 			// Composition (Phase 7; inert).
-			invocable: parseBool(fm["notor-flow-invocable"], false),
-			flowInputs: parseStringOrNull(fm["notor-flow-inputs"]),
-			flowReturns: parseStringOrNull(fm["notor-flow-returns"]),
+			invocable: parseBool(readAliasedKey(fm, "invocable"), false),
+			flowInputs: parseStringOrNull(readAliasedKey(fm, "inputs")),
+			flowReturns: parseStringOrNull(readAliasedKey(fm, "returns")),
 			onCompleteFlow: (() => {
-				const raw = parseStringOrNull(fm["notor-on-complete-flow"]);
+				const raw = parseStringOrNull(readAliasedKey(fm, "onComplete"));
 				return raw ? stripWikilink(raw) : null;
 			})(),
 			handoffIsolation: parseHandoffIsolation(fm["notor-handoff-isolation"], name),
 			maxDepth: parseMaxDepth(fm["notor-max-depth"]),
 			maxCostUsd: parseFiniteNumberOrDefault(fm["notor-max-cost-usd"], DEFAULT_MAX_COST_USD),
 			openNotesInEditor: parseBoolOrNull(fm["notor-open-notes-in-editor"]),
-			allowConcurrent: parseBool(fm["notor-flow-allow-concurrent"], false),
+			allowConcurrent: parseBool(readAliasedKey(fm, "allowConcurrent"), false),
 		};
 
 		// Two layers of load-time validation.
@@ -652,4 +669,34 @@ export class CircuitDefinitionParser {
 			);
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Cross-root name collisions
+// ---------------------------------------------------------------------------
+
+/**
+ * Keep the first circuit per name and drop the rest. The winner gets one
+ * `name_collision` warning per dropped duplicate. Order of `results` is the
+ * precedence order (circuits/ before orchestrations/).
+ */
+export function dedupeByName(results: CircuitParseResult[]): CircuitParseResult[] {
+	const winners = new Map<string, CircuitParseResult>();
+	for (const result of results) {
+		const winner = winners.get(result.flow.name);
+		if (!winner) {
+			winners.set(result.flow.name, result);
+			continue;
+		}
+		const message =
+			`Circuit name '${result.flow.name}' is defined in both '${winner.flow.flowDir}' and ` +
+			`'${result.flow.flowDir}'; using '${winner.flow.flowDir}'. Rename one of them to run both.`;
+		winner.warnings.push({ kind: "name_collision", message });
+		log.warn("Duplicate circuit name; keeping the first definition", {
+			name: result.flow.name,
+			kept: winner.flow.flowDir,
+			dropped: result.flow.flowDir,
+		});
+	}
+	return [...winners.values()];
 }
