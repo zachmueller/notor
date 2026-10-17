@@ -15,7 +15,7 @@
 import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";
 import { TAbstractFile } from "obsidian";
 import type { Persona, PersonaPromptMode } from "../types";
-import { BUILTIN_PERSONA_PROFILES } from "./builtin-personas";
+import { BUILTIN_PERSONA_PROFILES, canonicalPersonaName } from "./builtin-personas";
 import { logger } from "../utils/logger";
 import type { TemplateVariableRegistry } from "../template-vars";
 
@@ -70,8 +70,11 @@ export async function discoverPersonas(
 
 	// Add built-in personas that don't have vault files
 	const discoveredNames = new Set(personas.map((p) => p.name));
+	// A vault folder under a built-in's legacy name (e.g. a customized
+	// `orchestration-creator/`) is that user's copy of the renamed built-in.
+	const discoveredCanonical = new Set(personas.map((p) => canonicalPersonaName(p.name)));
 	for (const [name, builtin] of BUILTIN_PERSONA_PROFILES) {
-		if (discoveredNames.has(name)) continue;
+		if (discoveredNames.has(name) || discoveredCanonical.has(name)) continue;
 
 		const persona = buildPersonaFromBuiltin(name, builtin.systemPromptContent, personasRootPath, templateRegistry);
 		personas.push(persona);

@@ -37,7 +37,7 @@
  * the main event-loop thread — no Worker/VM isolation in v1. The `setTimeout`
  * guard can only preempt at an `await` boundary: an unbounded **synchronous**
  * loop never yields and freezes the plugin. Mitigation is authoring guidance
- * (INT-013 / the `orchestration-creator` persona): never write an unbounded sync
+ * (INT-013 / the `circuit-creator` persona): never write an unbounded sync
  * loop; insert `await` yield points in long loops.
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-3-code-steps.md — INT-010

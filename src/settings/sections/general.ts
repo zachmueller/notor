@@ -7,6 +7,7 @@
 import { Setting } from "obsidian";
 import { discoverPersonas } from "../../personas/persona-discovery";
 import type { SettingsContext } from "./context";
+import { canonicalPersonaName } from "../../personas/builtin-personas";
 
 /** Render the "General" settings section. */
 export function renderGeneralSection(
@@ -144,7 +145,11 @@ export function renderGeneralSection(
 					for (const p of personas.sort((a, b) => a.name.localeCompare(b.name))) {
 						dropdown.addOption(p.name, p.chip_emoji ? `${p.chip_emoji} ${p.name}` : p.name);
 					}
-					dropdown.setValue(ctx.settings.default_persona);
+					// A legacy built-in name (e.g. orchestration-creator) selects its renamed entry.
+					const current = ctx.settings.default_persona;
+					const match = personas.find((p) => p.name === current)
+						?? personas.find((p) => canonicalPersonaName(p.name) === canonicalPersonaName(current));
+					dropdown.setValue(match?.name ?? current);
 					dropdown.onChange(async (value) => {
 						ctx.settings.default_persona = value;
 						await ctx.saveSettings();
@@ -153,7 +158,8 @@ export function renderGeneralSection(
 				});
 
 			if (ctx.settings.default_persona) {
-				const selected = personas.find((p) => p.name === ctx.settings.default_persona);
+				const selected = personas.find((p) => p.name === ctx.settings.default_persona)
+					?? personas.find((p) => canonicalPersonaName(p.name) === canonicalPersonaName(ctx.settings.default_persona));
 				if (selected?.preferred_preset && selected.preferred_preset !== ctx.settings.default_preset) {
 					personaContainer.createEl("p", {
 						text: `Note: This persona's preferred preset ("${selected.preferred_preset}") will override your global default preset ("${ctx.settings.default_preset}") for new conversations.`,

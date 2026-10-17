@@ -13,7 +13,7 @@ import { Notice, Setting, TFile, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
 import type { Persona } from "../../types";
 import { discoverPersonas } from "../../personas/persona-discovery";
-import { BUILTIN_PERSONA_NAMES } from "../../personas/builtin-personas";
+import { BUILTIN_PERSONA_NAMES, canonicalPersonaName } from "../../personas/builtin-personas";
 import { promptForCreation, ensureDirectory, type CreationField } from "./shared";
 import { logger } from "../../utils/logger";
 
@@ -149,7 +149,7 @@ function renderPersonaEntry(
 	ctx: SettingsContext,
 	persona: Persona,
 ): void {
-	const isBuiltin = BUILTIN_PERSONA_NAMES.has(persona.name);
+	const isBuiltin = BUILTIN_PERSONA_NAMES.has(canonicalPersonaName(persona.name));
 	const personaManager = ctx.plugin.getPersonaManager();
 
 	const setting = new Setting(containerEl).setName(persona.name);

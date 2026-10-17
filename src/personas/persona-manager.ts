@@ -19,7 +19,7 @@ import type { NotorSettings } from "../settings";
 import type { ProviderRegistry } from "../providers/index";
 import { resolvePreset } from "../presets/preset-resolver";
 import { discoverPersonas, getPersonasRootPath } from "./persona-discovery";
-import { BUILTIN_PERSONA_PROFILES, BUILTIN_PERSONA_NAMES } from "./builtin-personas";
+import { BUILTIN_PERSONA_PROFILES, BUILTIN_PERSONA_NAMES, canonicalPersonaName } from "./builtin-personas";
 import { logger } from "../utils/logger";
 import type { TemplateVariableRegistry } from "../template-vars";
 
@@ -105,7 +105,7 @@ export class PersonaManager {
 	 */
 	async getPersonaByName(name: string): Promise<Persona | null> {
 		const personas = await this.getDiscoveredPersonas();
-		return personas.find((p) => p.name === name) ?? null;
+		return findPersona(personas, name) ?? null;
 	}
 
 	// -----------------------------------------------------------------------
@@ -124,7 +124,7 @@ export class PersonaManager {
 	 */
 	async activatePersona(name: string): Promise<boolean> {
 		const personas = await this.getDiscoveredPersonas();
-		const persona = personas.find((p) => p.name === name);
+		const persona = findPersona(personas, name);
 
 		if (!persona) {
 			log.warn("Persona not found for activation", { name });
@@ -256,7 +256,7 @@ export class PersonaManager {
 	 * Check if a persona name corresponds to a built-in persona.
 	 */
 	isBuiltinPersona(name: string): boolean {
-		return BUILTIN_PERSONA_NAMES.has(name);
+		return BUILTIN_PERSONA_NAMES.has(canonicalPersonaName(name));
 	}
 
 	/**
@@ -270,7 +270,9 @@ export class PersonaManager {
 	 * @throws Error if the name is not a built-in persona
 	 */
 	async ensureBuiltinPersonaVaultFile(name: string): Promise<string> {
-		const builtin = BUILTIN_PERSONA_PROFILES.get(name);
+		// Profile by canonical name; folder by the given name, so a legacy-named
+		// customized folder (e.g. orchestration-creator/) is the one opened.
+		const builtin = BUILTIN_PERSONA_PROFILES.get(canonicalPersonaName(name));
 		if (!builtin) {
 			throw new Error(`"${name}" is not a built-in persona.`);
 		}
@@ -300,7 +302,8 @@ export class PersonaManager {
 	 * @throws Error if the name is not a built-in persona
 	 */
 	async resetBuiltinPersonaToDefault(name: string): Promise<void> {
-		const builtin = BUILTIN_PERSONA_PROFILES.get(name);
+		// Resetting a legacy-named folder writes the renamed built-in's content into it.
+		const builtin = BUILTIN_PERSONA_PROFILES.get(canonicalPersonaName(name));
 		if (!builtin) {
 			throw new Error(`"${name}" is not a built-in persona.`);
 		}
@@ -394,4 +397,15 @@ export class PersonaManager {
 			}
 		}
 	}
+}
+
+/**
+ * Find a persona by name: an exact directory-name match first, else a match
+ * through built-in persona aliases (`orchestration-creator` ↔ `circuit-creator`).
+ */
+function findPersona(personas: Persona[], name: string): Persona | undefined {
+	const exact = personas.find((p) => p.name === name);
+	if (exact) return exact;
+	const canonical = canonicalPersonaName(name);
+	return personas.find((p) => canonicalPersonaName(p.name) === canonical);
 }

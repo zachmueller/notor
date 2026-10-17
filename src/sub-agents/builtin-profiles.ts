@@ -146,7 +146,7 @@ where \`<Section>\` is one of these exact group names (URL-encode spaces as %20)
 - Sub-agents
 - Memory
 - Templates
-- Orchestration
+- Circuits
 - Rules and workflows
 - Tools — also contains shared extension settings and the reload extensions button; per-tool settings (including shell config for execute_command) are accessed via the gear icon on each tool row
 - MCP servers

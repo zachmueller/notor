@@ -7,7 +7,7 @@
  * resolution) and passes the load-time validators (reachable completion,
  * single-subscriber topics, no published-but-unsubscribed non-terminal topic,
  * required-events published). This is the verifiable bar that the
- * orchestration-creator persona (POL-001) emits frontmatter the parser accepts.
+ * circuit-creator persona (formerly orchestration-creator; POL-001) emits frontmatter the parser accepts.
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-7-composability.md — POL-002 / POL-001
  */
