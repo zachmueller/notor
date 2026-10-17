@@ -1,19 +1,19 @@
 import { scaffold } from "./_scaffold-helper";
 
 /**
- * `orchestration_task_list` (INT-002) — list the session's tasks.
+ * `circuit_task_list` (formerly `orchestration_task_list`) (INT-002) — list the session's tasks.
  *
  * Returns the current session's tasks, optionally filtered by status. The only
  * **read**-mode task tool. Resolves the session `tasks/` directory off the
  * per-step `orchestrationContext` and dispatches through
- * `utils.orchestrationTasks`. Gated `featureGroup: "orchestration"`.
+ * `utils.orchestrationTasks`. Gated `featureGroup: "circuits"` (legacy group id `orchestration` still accepted).
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-2-session-nav.md — INT-002
  * @see specs/ZZ-misc/orchestration/contracts/tools.md — Task tools
  */
 export const CIRCUIT_TASK_LIST = scaffold(
-	"orchestration_task_list",
-	"List the current session's orchestration tasks, optionally filtered by status.",
+	"circuit_task_list",
+	"List the current session's circuit tasks, optionally filtered by status. (Formerly orchestration_task_list.)",
 	"read",
 	`params:
   filter:
@@ -26,7 +26,7 @@ export const CIRCUIT_TASK_LIST = scaffold(
     description: "Optional status filter."`,
 	`const ctx = utils.orchestrationContext;
 if (!ctx) {
-  return { __toolError: true, error: "orchestration_task_list can only be called from within an orchestration step turn." };
+  return { __toolError: true, error: "circuit_task_list can only be called from within a circuit step turn." };
 }
 
 const filter = params.filter && typeof params.filter === "object" ? params.filter : undefined;
@@ -44,5 +44,5 @@ return {
     completed: t.completed,
   })),
 };`,
-	"orchestration",
+	"circuits",
 );

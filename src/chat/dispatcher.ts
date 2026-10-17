@@ -18,6 +18,7 @@ import { evaluateToolPolicy, type ToolPolicyContext } from "./tool-policy";
 import { buildVaultReadFilter } from "../tool-config/path-enforcer";
 import type { ParseStreamOpts } from "./stream-utils";
 import { logger } from "../utils/logger";
+import { canonicalToolName } from "../tools/tool-aliases";
 
 const log = logger("ToolDispatcher");
 
@@ -339,8 +340,14 @@ export class ToolDispatcher {
 		runContext?: RunContext,
 		orchestrationContext?: OrchestrationToolContext,
 	): Promise<ToolResult> {
+		// 0. Resolve legacy tool-name aliases (e.g. `run_flow` → `run_circuit`).
+		//    The canonical name drives registry / policy / config lookups; the
+		//    *requested* name (`toolName`) is what we echo back, so the model's
+		//    transcript stays consistent with what it called.
+		const canonicalName = canonicalToolName(toolName);
+
 		// 1. Look up tool in registry
-		const tool = this.tools.get(toolName);
+		const tool = this.tools.get(canonicalName);
 		if (!tool) {
 			log.warn("Tool not found", { toolName });
 			return {
@@ -367,7 +374,7 @@ export class ToolDispatcher {
 		// patterns, path allowlists, plan-mode, denylist, and enabled checks all
 		// run through it. (The legacy inline branch was removed in F2 Phase D once
 		// the tripwire confirmed no context reached dispatch without a ctx.)
-		const decision = evaluateToolPolicy(toolName, parameters, tool, policyCtx);
+		const decision = evaluateToolPolicy(canonicalName, parameters, tool, policyCtx);
 
 		if (!decision.allowed) {
 			toolCall.status = "error";
@@ -395,7 +402,7 @@ export class ToolDispatcher {
 				log.warn("No approval callback set, auto-approving", { toolName });
 			} else {
 				const userDecision = await this.raceApprovalSources(
-					toolCall, toolName, parameters, mode,
+					toolCall, canonicalName, parameters, mode,
 					approvalCb, abortSignal, messageId, approvalHookDispatcher,
 				);
 
@@ -450,7 +457,7 @@ export class ToolDispatcher {
 			// against the effective vault-read access lists, since the hard gate only
 			// inspects a call's own arguments.
 			const pathFilter = buildVaultReadFilter(
-				policyCtx.effectiveConfig.tools[toolName],
+				policyCtx.effectiveConfig.tools[canonicalName],
 				policyCtx.sessionAllowedPaths,
 			);
 			const executeOptions: ToolExecuteOptions = { onProgress, mode, abortSignal, sessionContext, silentNoteOpener: this.silentMode || undefined, noteOpenerEnabled: this.openNotesOverride ?? undefined, interactionCallback: boundInteractionCallback, runContext, orchestrationContext, pathFilter };
@@ -480,6 +487,8 @@ export class ToolDispatcher {
 
 			const duration = Date.now() - startTime;
 			result.duration_ms = duration;
+			// Tools stamp their own canonical name; echo the name the model called.
+			if (result.tool_name !== toolName) result = { ...result, tool_name: toolName };
 
 			// Dispatcher-level spillover: catches MCP tools and extension tools
 			// whose results exceed the output cap. Built-in tools (execute_command,
@@ -542,7 +551,7 @@ export class ToolDispatcher {
 	 * Check if a tool name is a write tool.
 	 */
 	isWriteTool(toolName: string): boolean {
-		const tool = this.tools.get(toolName);
+		const tool = this.tools.get(canonicalToolName(toolName));
 		return tool?.mode === "write";
 	}
 
@@ -555,7 +564,7 @@ export class ToolDispatcher {
 	 * are conservatively treated as non-concurrent.
 	 */
 	hasExplicitUserReadClassification(toolName: string): boolean {
-		const tool = this.tools.get(toolName);
+		const tool = this.tools.get(canonicalToolName(toolName));
 		if (!(tool instanceof McpRegisteredTool)) return false;
 		const config = tool.getServerConfig();
 		const rawName = tool.getRawToolName();
@@ -570,10 +579,10 @@ export class ToolDispatcher {
 	}
 
 	/**
-	 * Check if a tool is registered.
+	 * Check if a tool is registered (legacy alias names count as their canonical tool).
 	 */
 	hasTool(toolName: string): boolean {
-		return this.tools.has(toolName);
+		return this.tools.has(canonicalToolName(toolName));
 	}
 
 }

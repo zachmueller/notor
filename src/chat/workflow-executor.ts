@@ -55,6 +55,7 @@ import { logger } from "../utils/logger";
 import { resolveNote } from "../utils/resolve-note";
 import { retryPolicyFromSettings, withStreamRetry } from "../providers/stream-retry";
 import { errorFromChunk, retryableCodeOfError } from "../providers/network-errors";
+import { canonicalToolName } from "../tools/tool-aliases";
 
 const log = logger("WorkflowExecutor");
 
@@ -1133,7 +1134,7 @@ export class WorkflowExecutor {
 				});
 
 				// Update status to waiting_approval if the tool is not auto-approved
-				const isAutoApproved = session.effectiveConfig.tools[toolName]?.auto_approve ?? false;
+				const isAutoApproved = session.effectiveConfig.tools[canonicalToolName(toolName)]?.auto_approve ?? false;
 
 				if (!isAutoApproved) {
 					concurrencyManager.updateStatus(execution.id, "waiting_approval");

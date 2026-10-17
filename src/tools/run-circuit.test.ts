@@ -90,10 +90,39 @@ function runContext(over: Partial<RunContext> = {}): RunContext {
 }
 
 describe("RunCircuitTool", () => {
+	it("is named run_circuit and requires only payload (legacy flow-only calls pass the policy gate)", () => {
+		const tool = new RunCircuitTool(fakeComposition([]), vi.fn());
+		expect(tool.name).toBe("run_circuit");
+		expect(tool.input_schema.required).toEqual(["payload"]);
+		expect(tool.description).toContain("Formerly run_flow");
+	});
+
+	it("accepts the circuit parameter and prefers it over legacy flow", async () => {
+		const spawn = vi.fn(async () => spawnResult({}));
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha"), flow("Beta")]), spawn);
+		await tool.execute(
+			{ circuit: "Beta", flow: "Alpha", payload: "x" },
+			{ orchestrationContext: orchestrationContext(), runContext: runContext() },
+		);
+		expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ flowName: "Beta" }));
+	});
+
+	it("fails cleanly when neither circuit nor flow is given", async () => {
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), vi.fn());
+		const result = await tool.execute(
+			{ payload: "x" },
+			{ orchestrationContext: orchestrationContext(), runContext: runContext() },
+		);
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/Missing required parameter: circuit/);
+	});
+
 	it("exposes a dynamic flow enum + per-flow inputs in the description", async () => {
 		const tool = new RunCircuitTool(fakeComposition([flow("Alpha"), flow("Beta")]), vi.fn());
 		await tool.refreshInvocableCircuits();
 
+		expect(tool.input_schema.properties?.circuit?.enum).toEqual(["Alpha", "Beta"]);
+		// Legacy `flow` stays declared so old run_flow({ flow, payload }) calls validate.
 		expect(tool.input_schema.properties?.flow?.enum).toEqual(["Alpha", "Beta"]);
 		expect(tool.description).toContain("Alpha: a question");
 		expect(tool.description).toContain("Beta: a question");
@@ -104,7 +133,7 @@ describe("RunCircuitTool", () => {
 		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), spawn as unknown as SpawnChildCircuit);
 		const result = await tool.execute({ flow: "Alpha", payload: "x" }, {} as ToolExecuteOptions);
 		expect(result.success).toBe(false);
-		expect(result.error).toMatch(/within an orchestration flow/i);
+		expect(result.error).toMatch(/within a circuit/i);
 		expect(spawn).not.toHaveBeenCalled();
 	});
 
@@ -115,7 +144,7 @@ describe("RunCircuitTool", () => {
 			{ orchestrationContext: orchestrationContext(), runContext: runContext() },
 		);
 		expect(result.success).toBe(false);
-		expect(result.error).toMatch(/not an invocable flow/i);
+		expect(result.error).toMatch(/is not invocable/i);
 	});
 
 	it("blocks a too-deep spawn over the shared cell / depth (spawn gate)", async () => {

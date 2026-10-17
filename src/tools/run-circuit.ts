@@ -1,9 +1,11 @@
 /**
- * `run_flow` tool (INT-042 / INT-043 / FR-172 / FR-173) — invoke another
- * orchestration flow as a tool and return its result.
+ * `run_circuit` tool (formerly `run_flow`; INT-042 / INT-043 / FR-172 / FR-173) —
+ * invoke another circuit as a tool and return its result. The legacy name still
+ * dispatches here (see `tool-aliases.ts`), and the legacy `flow` parameter is
+ * accepted alongside `circuit`.
  *
- * It is a **single** tool whose `flow` parameter is a dynamic `enum` of discovered
- * invocable flow names (plus a single loose `payload` string) — **not** one tool
+ * It is a **single** tool whose `circuit` parameter is a dynamic `enum` of discovered
+ * invocable circuit names (plus a single loose `payload` string) — **not** one tool
  * per flow, so flow names are enum *values* and cross-flow naming collisions are
  * sidestepped entirely. The dynamic `get description()` / `get input_schema()`
  * mirror `UseSubagentTool` (`src/tools/use-subagent.ts`): the cached invocable-flow
@@ -22,7 +24,7 @@
  * of the plugin/launch stack.
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-7-composability.md — INT-042 / INT-043
- * @see specs/ZZ-misc/orchestration/contracts/tools.md — run_flow
+ * @see specs/ZZ-misc/orchestration/contracts/tools.md — run_flow (now run_circuit)
  */
 
 import type { Tool, JSONSchema, ToolExecuteOptions, ToolResult } from "./tool";
@@ -33,7 +35,7 @@ import { logger } from "../utils/logger";
 
 const log = logger("RunCircuitTool");
 
-export const RUN_CIRCUIT_TOOL_NAME = "run_flow";
+export const RUN_CIRCUIT_TOOL_NAME = "run_circuit";
 
 /** A discovered invocable flow's name + its self-describing input contract. */
 interface InvocableFlowSummary {
@@ -56,10 +58,11 @@ export class RunCircuitTool implements Tool {
 
 	get description(): string {
 		const base =
-			"Run another orchestration flow to its terminal event and return its result " +
-			"(prefer its structured return, else its closing text). Available flows:\n";
+			"Run another circuit to its terminal event and return its result " +
+			"(prefer its structured return, else its closing text). Formerly run_flow. " +
+			"Available circuits:\n";
 		if (this.cachedInvocable.length === 0) {
-			return base + "(no invocable flows available)";
+			return base + "(no invocable circuits available)";
 		}
 		const lines = this.cachedInvocable.map(
 			(f) => `- ${f.name}: ${f.inputs ?? "(no input contract declared)"}`,
@@ -71,18 +74,27 @@ export class RunCircuitTool implements Tool {
 		return {
 			type: "object",
 			properties: {
-				flow: {
+				circuit: {
 					type: "string",
 					description:
-						"Which invocable flow to run. Each flow's notor-flow-inputs is surfaced in the description.",
+						"Which invocable circuit to run. Each circuit's input contract (notor-circuit-inputs) is surfaced in the description.",
+					enum: this.cachedInvocable.map((f) => f.name),
+				},
+				flow: {
+					type: "string",
+					description: "Legacy alias of `circuit`. Pass `circuit` instead.",
 					enum: this.cachedInvocable.map((f) => f.name),
 				},
 				payload: {
 					type: "string",
-					description: "Loose, natural-language input conforming to the callee's notor-flow-inputs.",
+					description: "Loose, natural-language input conforming to the callee's input contract.",
 				},
 			},
-			required: ["flow", "payload"],
+			// `circuit` is not listed as required: the policy layer validates
+			// `required` BEFORE execute(), and legacy `run_flow({ flow, payload })`
+			// calls (seeded reference content, old step prompts) must still pass.
+			// execute() enforces "one of circuit/flow" itself.
+			required: ["payload"],
 		};
 	}
 
@@ -108,7 +120,12 @@ export class RunCircuitTool implements Tool {
 	): Promise<ToolResult> {
 		await this.refreshInvocableCircuits();
 
-		const flowName = typeof params["flow"] === "string" ? params["flow"] : "";
+		const flowName =
+			typeof params["circuit"] === "string" && params["circuit"]
+				? params["circuit"]
+				: typeof params["flow"] === "string"
+					? params["flow"]
+					: "";
 		const payload = typeof params["payload"] === "string" ? params["payload"] : "";
 
 		// (0) Orchestration-context-only (Issue-4 / FR-172). No orchestrationContext
@@ -117,17 +134,17 @@ export class RunCircuitTool implements Tool {
 		// would be a silent, unrecoverable orphan.
 		const orchestrationContext = options?.orchestrationContext;
 		if (!orchestrationContext) {
-			return this.fail("run_flow can only be called from within an orchestration flow.");
+			return this.fail("run_circuit can only be called from within a circuit.");
 		}
 
 		// (1) Resolve the selected flow. Unknown / no-longer-invocable → success:false.
 		if (!flowName) {
-			return this.fail("Missing required parameter: flow.");
+			return this.fail("Missing required parameter: circuit.");
 		}
 		const flow = await this.compositionManager.resolveCircuit(flowName);
 		if (!flow) {
 			return this.fail(
-				`Flow '${flowName}' is not an invocable flow (set notor-flow-invocable: true on its definition.md).`,
+				`Circuit '${flowName}' is not invocable (set notor-circuit-invocable: true on its definition.md).`,
 			);
 		}
 
@@ -140,7 +157,7 @@ export class RunCircuitTool implements Tool {
 				runContext.depth >= runContext.maxDepth
 					? `composition depth cap reached (depth ${runContext.depth} ≥ max ${runContext.maxDepth})`
 					: "aggregate budget exhausted (cost or iteration ceiling)";
-			return this.fail(`Cannot run flow '${flowName}': ${reason}.`);
+			return this.fail(`Cannot run circuit '${flowName}': ${reason}.`);
 		}
 
 		// (3) Spawn the child flow to its terminal event (child session, child
@@ -177,9 +194,9 @@ export class RunCircuitTool implements Tool {
 						},
 			});
 		} catch (e) {
-			log.error("run_flow child spawn failed", { flow: flow.name, error: String(e) });
+			log.error("run_circuit child spawn failed", { flow: flow.name, error: String(e) });
 			return this.fail(
-				`Running flow '${flow.name}' failed: ${e instanceof Error ? e.message : String(e)}`,
+				`Running circuit '${flow.name}' failed: ${e instanceof Error ? e.message : String(e)}`,
 			);
 		}
 
@@ -214,8 +231,8 @@ export class RunCircuitTool implements Tool {
 		return {
 			tool_name: RUN_CIRCUIT_TOOL_NAME,
 			success: spawned.status !== "error",
-			result: resultText || `Flow '${flow.name}' finished (${spawned.status}).`,
-			error: spawned.status === "error" ? spawned.text || "Child flow errored." : null,
+			result: resultText || `Circuit '${flow.name}' finished (${spawned.status}).`,
+			error: spawned.status === "error" ? spawned.text || "Child circuit errored." : null,
 			child_run_metadata: {
 				entry_conversation_id: spawned.entryConversationId ?? undefined,
 				session_id: spawned.childSessionId,

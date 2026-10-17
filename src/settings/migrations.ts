@@ -4,6 +4,7 @@ import type { NotorSettings } from "./types";
 import { DEFAULT_MODEL_PRESETS } from "./defaults";
 import { slugifySecretId } from "../utils/secrets";
 import { getSecret, setSecret, clearSecret } from "../utils/secrets";
+import { LEGACY_TOOL_NAMES } from "../tools/tool-aliases";
 
 export interface MigrationDeps {
 	settings: NotorSettings;
@@ -19,6 +20,7 @@ export async function runAllMigrations(deps: MigrationDeps): Promise<void> {
 	await migrateAutomationSettings(deps);
 	await migrateProviderInstances(deps);
 	await migrateWebSearchMultiProvider(deps);
+	await migrateOrchestrationToCircuits(deps);
 }
 
 /**
@@ -320,4 +322,39 @@ async function migrateWebSearchMultiProvider(deps: MigrationDeps): Promise<void>
 		"Multi-provider web search settings have been moved to the 'multi-engine web search' extension tool.",
 		8000,
 	);
+}
+
+/**
+ * Orchestration → circuits rename (one-time, idempotent, detection-based).
+ *
+ * Tool-keyed settings maps (`auto_approve`, `tool_enabled`,
+ * `user_extension_settings`) move legacy tool names (`run_flow`,
+ * `orchestration_task_*`) to their canonical names, so a user's
+ * `auto_approve: { run_flow: true }` keeps applying to `run_circuit`. An
+ * existing canonical key always wins over the legacy one. Runtime readers stay
+ * alias-aware too (the LLM can still write legacy keys via
+ * `edit_notor_settings`), so this migration only tidies persisted data.
+ *
+ * @see src/tools/tool-aliases.ts
+ */
+export async function migrateOrchestrationToCircuits(deps: MigrationDeps): Promise<void> {
+	const { settings, saveSettings } = deps;
+	let changed = false;
+
+	const toolKeyedMaps: Array<Record<string, unknown> | undefined> = [
+		settings.auto_approve,
+		settings.tool_enabled,
+		settings.user_extension_settings,
+	];
+	for (const map of toolKeyedMaps) {
+		if (!map) continue;
+		for (const [legacy, canonical] of Object.entries(LEGACY_TOOL_NAMES)) {
+			if (!Object.prototype.hasOwnProperty.call(map, legacy)) continue;
+			if (!Object.prototype.hasOwnProperty.call(map, canonical)) map[canonical] = map[legacy];
+			delete map[legacy];
+			changed = true;
+		}
+	}
+
+	if (changed) await saveSettings();
 }

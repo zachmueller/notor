@@ -34,6 +34,7 @@ import type { ChatBlockDefinition } from "../ui/chat-blocks/registry";
 import { BUILTIN_AUTOMATION_SCAFFOLDS } from "./builtin-automation-scaffolds";
 import { BUILTIN_BLOCK_SCAFFOLDS } from "./builtin-block-scaffolds";
 import { logger } from "../utils/logger";
+import { canonicalToolName, legacyToolNamesFor } from "../tools/tool-aliases";
 
 const log = logger("ExtensionManager");
 
@@ -280,6 +281,9 @@ export class ExtensionManager {
 	private static readonly FEATURE_GROUP_TOGGLES: Record<string, string> = {
 		memory: "memory_enabled",
 		templates: "templates_enabled",
+		circuits: "orchestration_enabled",
+		// Legacy group id, persisted in user-materialized tool overrides
+		// (`notor-feature-group: orchestration`). Accepted forever.
 		orchestration: "orchestration_enabled",
 	};
 
@@ -325,6 +329,27 @@ export class ExtensionManager {
 			this.plugin.getTemplateRegistry(),
 		);
 		errors.push(...discovered.errors);
+
+		// 1a. Canonicalize legacy tool names (e.g. a vault override still named
+		// `orchestration_task_close`) so they override / register as the renamed
+		// tool. If both a legacy-named and a canonical-named file exist, keep the
+		// first and report the duplicate.
+		const seenToolNames = new Map<string, { filePath: string; viaLegacyName: boolean }>();
+		discovered.tools = discovered.tools.filter((t) => {
+			const canonical = canonicalToolName(t.name);
+			const viaLegacyName = canonical !== t.name;
+			const first = seenToolNames.get(canonical);
+			if (first && (first.viaLegacyName || viaLegacyName)) {
+				errors.push({
+					filePath: t.filePath,
+					message: `Tool '${t.name}' duplicates '${canonical}' (one file uses the legacy name), already defined in '${first.filePath}'. Ignoring this file; delete or rename one of them.`,
+				});
+				return false;
+			}
+			t.name = canonical;
+			if (!first) seenToolNames.set(canonical, { filePath: t.filePath, viaLegacyName });
+			return true;
+		});
 
 		// 1b. Inject scaffold fallbacks for missing built-in tools
 		for (const [name, scaffold] of BUILTIN_TOOL_SCAFFOLDS) {
@@ -988,6 +1013,11 @@ export class ExtensionManager {
 		if (this.plugin.app.vault.getAbstractFileByPath(filePath)) {
 			return filePath;
 		}
+		// A customized override saved under the tool's legacy name still counts.
+		for (const legacy of legacyToolNamesFor(toolName)) {
+			const legacyPath = normalizePath(`${dir}/${legacy}.md`);
+			if (this.plugin.app.vault.getAbstractFileByPath(legacyPath)) return legacyPath;
+		}
 
 		// Ensure directory exists
 		const dirFile = this.plugin.app.vault.getAbstractFileByPath(dir);
@@ -1014,9 +1044,10 @@ export class ExtensionManager {
 		const dir = normalizePath(`${this.plugin.settings.notor_dir}/tools`);
 		const filePath = normalizePath(`${dir}/${toolName}.md`);
 
-		const existing = this.plugin.app.vault.getAbstractFileByPath(filePath);
-		if (existing) {
-			await this.plugin.app.fileManager.trashFile(existing);
+		// Remove the override under its canonical name and any legacy name.
+		for (const name of [toolName, ...legacyToolNamesFor(toolName)]) {
+			const existing = this.plugin.app.vault.getAbstractFileByPath(normalizePath(`${dir}/${name}.md`));
+			if (existing) await this.plugin.app.fileManager.trashFile(existing);
 		}
 		log.info("Reset built-in tool to default scaffold", { tool: toolName, path: filePath });
 	}

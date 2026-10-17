@@ -25,7 +25,7 @@ import { scaffold } from "./_scaffold-helper";
  * forward but is not enforced during the call. Treat a step→workflow call as a
  * deliberate, potentially expensive delegation.
  *
- * Gated `featureGroup: "orchestration"`, so the `ExtensionManager` only
+ * Gated `featureGroup: "circuits"`, so the `ExtensionManager` only
  * compiles/registers it when `orchestration_enabled`. Mode `write` (Act only),
  * mirroring `emit_event`. Absent an `orchestrationContext` (reached outside a step
  * turn) or an `invokeWorkflow` bridge (no live orchestrator), it returns an error.
@@ -96,5 +96,5 @@ if (Array.isArray(ctx.workflowInvocations)) {
 
 // Return the workflow's final assistant text into the step's context.
 return "Workflow '" + workflowName + "' returned:\\n\\n" + (result.text || "(no output)");`,
-	"orchestration",
+	"circuits",
 );

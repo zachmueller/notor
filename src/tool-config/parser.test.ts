@@ -253,6 +253,32 @@ unknown_tool:
 			expect(result.errors[0]!.detail).toContain('Unrecognized tool name "unknown_tool"');
 		});
 
+		it("keys legacy circuit tool names under their canonical names (no knownToolNames)", () => {
+			const text = `<notor_tool_config>
+run_flow:
+  enabled: false
+orchestration_task_close:
+  auto_approve: true
+</notor_tool_config>`;
+			const result = extractToolConfigs(text, "persona", "test.md", undefined, parseYAML);
+			expect(result.errors).toHaveLength(0);
+			expect(result.configs[0]!.tools).toEqual({
+				run_circuit: { enabled: false },
+				circuit_task_close: { auto_approve: true },
+			});
+		});
+
+		it("validates legacy circuit tool names against canonical known names (sub-agent path)", () => {
+			const text = `<notor_tool_config>
+run_flow:
+  enabled: false
+</notor_tool_config>`;
+			const known = ["read_note", "run_circuit"];
+			const result = extractToolConfigs(text, "subagent", "agent.md", known, parseYAML);
+			expect(result.errors).toHaveLength(0);
+			expect(result.configs[0]!.tools).toHaveProperty("run_circuit");
+		});
+
 		it("skips tool name validation when knownToolNames is omitted", () => {
 			const text = `<notor_tool_config>
 any_tool_name:

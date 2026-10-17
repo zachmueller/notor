@@ -10,7 +10,7 @@ import { scaffold } from "./_scaffold-helper";
  * turn completes and hands it to the engine, which routes write-before-route. No
  * mid-turn routing.
  *
- * Gated `featureGroup: "orchestration"`, so the `ExtensionManager` only
+ * Gated `featureGroup: "circuits"`, so the `ExtensionManager` only
  * compiles/registers it when `orchestration_enabled` is true (ENV-002 wired the
  * `FEATURE_GROUP_TOGGLES` entry). Built via `_scaffold-helper.ts`, exactly as
  * `capture-memory.ts`.
@@ -103,5 +103,5 @@ if (prev && prev.topic !== topic && Array.isArray(overwrites)) {
 ctx.pendingEmission = { topic, payload };
 
 return "Emission recorded: '" + topic + "'. It will route after this turn completes.";`,
-	"orchestration",
+	"circuits",
 );

@@ -12,7 +12,7 @@ import { paramSchemaToJsonSchema } from "../param-schema";
  * cosmetic, so five scaffolds drifted into declaring conditionally-required
  * params as mandatory (`webview.url`, all five `write_docx` params,
  * `write_xlsx.output_path`/`filename`, `read_file.pages`,
- * `orchestration_task_list.filter`). Now that a missing required param
+ * `circuit_task_list.filter`). Now that a missing required param
  * auto-fails the call at dispatch (`src/chat/param-validation.ts`), that drift
  * would break the tool outright — so the expected set is pinned here, and a new
  * or edited scaffold must update this table deliberately.
@@ -62,12 +62,12 @@ const EXPECTED_REQUIRED: Record<string, string[]> = {
 	list_xlsx_sheets: ["path"],
 	manage_tags: ["path"],
 	move_note: ["new_path", "path"],
-	orchestration_task_close: ["key"],
-	orchestration_task_ensure: ["description", "key"],
+	circuit_task_close: ["key"],
+	circuit_task_ensure: ["description", "key"],
 	// `filter` is optional — the scaffold used to express that with a top-level
 	// `required: []`, which the parser silently ignores (it reads only `params`).
-	orchestration_task_list: [],
-	orchestration_task_start: ["key"],
+	circuit_task_list: [],
+	circuit_task_start: ["key"],
 	read_chat_history: ["conversation_id"],
 	read_docx: ["path"],
 	// `pages` is a PDF-only page range.
@@ -122,7 +122,7 @@ describe("built-in scaffolds — conditionally-required params opt out via `opti
 		["write_xlsx", "output_path"],
 		["write_xlsx", "filename"],
 		["read_file", "pages"],
-		["orchestration_task_list", "filter"],
+		["circuit_task_list", "filter"],
 	])("%s.%s is not required", (toolName, param) => {
 		expect(requiredParamsOf(toolName)).not.toContain(param);
 	});

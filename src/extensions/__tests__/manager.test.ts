@@ -1235,3 +1235,72 @@ describe("ExtensionManager.destroy", () => {
 		expect(manager.getAutomations()).toHaveLength(0);
 	});
 });
+
+describe("Legacy circuit tool names and feature group (orchestrations → circuits rename)", () => {
+	function circuitScaffold(name: string) {
+		mockBuiltinToolScaffolds.set(name, {
+			name,
+			description: `Built-in ${name}`,
+			mode: "write",
+			scaffoldContent: "---\nnotor-type: tool\n---\n```ts\nreturn 'default';\n```",
+		});
+	}
+
+	function discover(tools: unknown[]) {
+		mockDiscoverExtensions.mockResolvedValue({
+			tools,
+			automations: [],
+			blocks: [],
+			sharedSettings: null,
+			errors: [],
+		});
+		mockCompileExtension.mockReturnValue({ fn: vi.fn() });
+	}
+
+	it("a vault override still named orchestration_task_close overrides circuit_task_close", async () => {
+		circuitScaffold("circuit_task_close");
+		discover([makeToolDef({ name: "orchestration_task_close", filePath: "notor/tools/orchestration_task_close.md" })]);
+
+		const manager = new ExtensionManager(createMockPlugin() as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(manager.getTools().map((t) => t.name)).toEqual(["circuit_task_close"]);
+		expect(manager.getTools()[0]!.isScaffold).toBeFalsy();
+		expect(result.builtinOverrides).toContain("circuit_task_close");
+	});
+
+	it("reports a duplicate when both the legacy-named and canonical-named overrides exist", async () => {
+		circuitScaffold("circuit_task_close");
+		discover([
+			makeToolDef({ name: "orchestration_task_close", filePath: "notor/tools/orchestration_task_close.md" }),
+			makeToolDef({ name: "circuit_task_close", filePath: "notor/tools/circuit_task_close.md" }),
+		]);
+
+		const manager = new ExtensionManager(createMockPlugin() as never, vi.fn());
+		const result = await manager.reload(true);
+
+		expect(manager.getTools()).toHaveLength(1);
+		expect(manager.getTools()[0]!.filePath).toBe("notor/tools/orchestration_task_close.md");
+		expect(result.errors.some((e) => e.filePath === "notor/tools/circuit_task_close.md")).toBe(true);
+	});
+
+	it.each(["circuits", "orchestration"])("feature group %s is gated by orchestration_enabled", async (group) => {
+		discover([makeToolDef({ name: "gated_tool", featureGroup: group })]);
+		const off = new ExtensionManager(createMockPlugin() as never, vi.fn());
+		expect((await off.reload(true)).toolCount).toBe(0);
+
+		discover([makeToolDef({ name: "gated_tool", featureGroup: group })]);
+		const on = new ExtensionManager(
+			createMockPlugin({
+				settings: {
+					notor_dir: "notor/",
+					orchestration_enabled: true,
+					user_extension_settings: {},
+					user_shared_settings: {},
+				},
+			}) as never,
+			vi.fn(),
+		);
+		expect((await on.reload(true)).toolCount).toBe(1);
+	});
+});

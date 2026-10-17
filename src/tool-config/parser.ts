@@ -15,6 +15,7 @@ import type {
 	ToolConfigValidationError,
 } from "./types";
 import { isMcpTool } from "../mcp/mcp-tool-adapter";
+import { canonicalToolName } from "../tools/tool-aliases";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -132,7 +133,12 @@ export function extractToolConfigs(
 		// 4. Validate and extract per-tool entries
 		const tools: Record<string, ToolConfigEntry> = {};
 		const serverDefaults: Record<string, ToolConfigEntry> = {};
-		for (const [toolName, rawEntry] of Object.entries(parsed as Record<string, unknown>)) {
+		for (const [rawToolName, rawEntry] of Object.entries(parsed as Record<string, unknown>)) {
+			// Legacy tool names (e.g. `run_flow`, `orchestration_task_close`) are
+			// keyed under their canonical name, so an old persona/rule/workflow
+			// config keeps applying after the rename. If both spellings appear in one
+			// block, the later key wins.
+			const toolName = canonicalToolName(rawToolName);
 			// Check for MCP server wildcard key (e.g., "serverName__*")
 			const wildcardMatch = MCP_WILDCARD_REGEX.exec(toolName);
 			const isWildcard = wildcardMatch !== null;
