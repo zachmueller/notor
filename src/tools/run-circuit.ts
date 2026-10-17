@@ -26,8 +26,8 @@
  */
 
 import type { Tool, JSONSchema, ToolExecuteOptions, ToolResult } from "./tool";
-import type { FlowCompositionManager } from "../orchestration/flow-composition-manager";
-import type { SpawnChildFlow } from "../orchestration/child-flow";
+import type { FlowCompositionManager } from "../circuits/flow-composition-manager";
+import type { SpawnChildFlow } from "../circuits/child-flow";
 import { canSpawnChild } from "../run-loop/budget";
 import { logger } from "../utils/logger";
 

@@ -8,8 +8,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { VaultEventScheduler } from "./vault-event-scheduler";
-import { flowJobKey } from "../orchestration/flow-enabled";
-import type { OrchestrationFlow } from "../orchestration/types";
+import { flowJobKey } from "../circuits/flow-enabled";
+import type { OrchestrationFlow } from "../circuits/types";
 import type { NotorSettings } from "../settings/types";
 
 function makeFlow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {

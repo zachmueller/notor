@@ -36,8 +36,8 @@ import {
 	type CodeStepTurn,
 	extractCodeStepTurns,
 	spliceCodeSteps,
-} from "../orchestration/code-step-overlay";
-import { SessionLogReader } from "../orchestration/session-log-reader";
+} from "../circuits/code-step-overlay";
+import { SessionLogReader } from "../circuits/session-log-reader";
 import { logger } from "../utils/logger";
 
 const log = logger("RunTreeView");

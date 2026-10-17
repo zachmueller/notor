@@ -16,7 +16,7 @@ vi.mock("./chat-utils", () => ({
 vi.mock("./sub-agent-utils", () => ({ buildSubAgentUtils: () => ({ runSubAgent: async () => null }) }));
 vi.mock("./memory-utils", () => ({ buildMemoryUtils: () => ({ memory: null, memoryApprovalMode: null }) }));
 vi.mock("./plugin-utils", () => ({ buildPluginUtils: () => ({}) }));
-vi.mock("./orchestration-utils", () => ({ buildOrchestrationUtils: () => ({}) }));
+vi.mock("./circuit-utils", () => ({ buildOrchestrationUtils: () => ({}) }));
 
 import { buildUtils } from "./index";
 import { RUNTIME_API_VERSION } from "./version";
@@ -34,7 +34,7 @@ describe("buildUtils — runtime API version", () => {
 
 	it("code steps inherit api.version — they call the same buildUtils(plugin)", () => {
 		// Orchestration code steps build their utils via this exact function
-		// (src/orchestration/launch.ts calls buildUtils(plugin)); there is no
+		// (src/circuits/launch.ts calls buildUtils(plugin)); there is no
 		// separate builder, so the version stamp is carried for free.
 		const utils = buildUtils(makePlugin());
 		expect(utils.api.version).toBe(RUNTIME_API_VERSION);

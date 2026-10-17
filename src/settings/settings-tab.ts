@@ -40,7 +40,7 @@ import { renderRulesAndWorkflowsSection } from "./sections/rules-and-workflows";
 import { renderSharedSettingsSection, renderReloadExtensionsButton, renderExtensionTimeoutSetting } from "./sections/tool-shared-settings";
 import { renderMemorySection } from "./sections/memory";
 import { renderTemplatesSection } from "./sections/templates";
-import { renderOrchestrationSection } from "./sections/orchestration";
+import { renderOrchestrationSection } from "./sections/circuits";
 import { renderSystemPromptSection } from "./sections/system-prompt";
 import { renderUserAutomationsSection } from "./sections/user-automations";
 import { renderModelPresetsSection } from "./sections/model-presets";

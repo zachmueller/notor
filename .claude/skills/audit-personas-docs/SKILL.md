@@ -103,9 +103,9 @@ against these — never against memory or a hand-copied list.
 | Param + setting types | `ParamSchema` / `SettingsFieldSchema` (`src/extensions/types.ts`); `VALID_SETTING_TYPES` (`src/extensions/settings-schema.ts`); param conversion (`src/extensions/param-schema.ts`) | read source |
 | `web_search` provider list | `src/web-search/providers/` (one file per provider; wired via `provider.ts`) | `ls src/web-search/providers/` |
 | Hidden `log_level` default | `src/settings/types.ts` (`log_level`) + `src/settings/defaults.ts` | read source |
-| Orchestration tool scaffolds (`emit_event`, `run_flow`, `orchestration_task_*`) | `inventory.ts` (`tools`) — they are gated `featureGroup: "orchestration"` scaffolds in `BUILTIN_TOOL_SCAFFOLDS`; `run_flow` is the hand-written `RunFlowTool` (`src/tools/run-flow.ts`, `RUN_FLOW_TOOL_NAME`) registered in `src/main.ts` | `inventory.ts` (`tools`) + read `run-flow.ts` for the dynamic enum |
-| `OrchestrationHelper` code-step API | `OrchestrationHelper` interface (`src/orchestration/orchestration-helper.ts`) | read source |
-| Orchestration flow/step frontmatter fields | `FlowDefinitionParser` / `StepNoteParser` (`src/orchestration/flow-parser.ts`) + `OrchestrationFlow` / `StepDefinition` (`src/orchestration/types.ts`); contract: `specs/ZZ-misc/orchestration/contracts/vault-schema.md` | read source |
+| Orchestration tool scaffolds (`emit_event`, `run_flow`, `orchestration_task_*`) | `inventory.ts` (`tools`) — they are gated `featureGroup: "orchestration"` scaffolds in `BUILTIN_TOOL_SCAFFOLDS`; `run_flow` is the hand-written `RunFlowTool` (`src/tools/run-circuit.ts`, `RUN_FLOW_TOOL_NAME`) registered in `src/main.ts` | `inventory.ts` (`tools`) + read `run-circuit.ts` for the dynamic enum |
+| `OrchestrationHelper` code-step API | `OrchestrationHelper` interface (`src/circuits/orchestration-helper.ts`) | read source |
+| Orchestration flow/step frontmatter fields | `FlowDefinitionParser` / `StepNoteParser` (`src/circuits/flow-parser.ts`) + `OrchestrationFlow` / `StepDefinition` (`src/circuits/types.ts`); contract: `specs/ZZ-misc/orchestration/contracts/vault-schema.md` | read source |
 | Orchestration settings group (`notor-settings://Orchestration`) | `createSettingsGroup(containerEl, "Orchestration", …)` in `src/settings/settings-tab.ts` | read source (already covered by the settings-group row) |
 
 If you add a new claim surface to a persona or doc, add a row here so the next audit
@@ -158,10 +158,10 @@ covers it.
 - **`orchestration-creator` prose — diff against the orchestration sources.** Its
   `<notor_tool_config>` tools must exist in `inventory.ts.tools`; its inlined `definition.md`
   / step-note frontmatter must match `FlowDefinitionParser`/`StepNoteParser`
-  (`src/orchestration/flow-parser.ts`) and the `vault-schema.md` contract; its inlined
+  (`src/circuits/flow-parser.ts`) and the `vault-schema.md` contract; its inlined
   `OrchestrationHelper` surface (`emit`/`once`/`scratchpad`/`callTool`/`callMcpTool`/`tasks`/
   `flow`/`eventHistory`) must match the `OrchestrationHelper` interface
-  (`src/orchestration/orchestration-helper.ts`); its composition fields
+  (`src/circuits/orchestration-helper.ts`); its composition fields
   (`notor-flow-invocable`/`-inputs`/`-returns`/`-on-complete-flow`/`-handoff-isolation`/
   `-max-depth`/`-max-cost-usd`) must match the parser. A stale frontmatter field or a
   nonexistent helper method is high severity (the persona writes flows the parser rejects).

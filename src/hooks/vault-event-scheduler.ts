@@ -20,8 +20,8 @@ import type { VaultEventHookContext } from "./vault-event-hook-engine";
 import type { ExecutionChain } from "../types";
 import type { NotorSettings } from "../settings/types";
 import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
-import type { OrchestrationFlow } from "../orchestration/types";
-import { flowEnabledKey, flowJobKey } from "../orchestration/flow-enabled";
+import type { OrchestrationFlow } from "../circuits/types";
+import { flowEnabledKey, flowJobKey } from "../circuits/flow-enabled";
 import { logger } from "../utils/logger";
 
 const log = logger("VaultEventScheduler");

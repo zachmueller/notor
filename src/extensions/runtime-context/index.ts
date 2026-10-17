@@ -24,7 +24,7 @@ import { buildChatUtils, buildAsk, buildAskMany } from "./chat-utils";
 import { buildSubAgentUtils } from "./sub-agent-utils";
 import { buildMemoryUtils } from "./memory-utils";
 import { buildPluginUtils } from "./plugin-utils";
-import { buildOrchestrationUtils } from "./orchestration-utils";
+import { buildOrchestrationUtils } from "./circuit-utils";
 import { RUNTIME_API_VERSION } from "./version";
 
 // Bundled libraries (for buildLibs)

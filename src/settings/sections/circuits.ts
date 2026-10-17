@@ -12,7 +12,7 @@
 
 import { Setting, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
-import { materializeReferenceFlows, type ReferenceFlowFs } from "../../orchestration/reference-flows";
+import { materializeReferenceFlows, type ReferenceFlowFs } from "../../circuits/reference-flows";
 
 /**
  * Ensure `{notor_dir}/orchestrations/` exists (mirrors the memory toggle seeding

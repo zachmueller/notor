@@ -11,10 +11,10 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { RunFlowTool } from "./run-flow";
-import type { SpawnChildFlow, SpawnChildFlowResult } from "../orchestration/child-flow";
-import type { FlowCompositionManager } from "../orchestration/flow-composition-manager";
-import type { OrchestrationFlow } from "../orchestration/types";
+import { RunFlowTool } from "./run-circuit";
+import type { SpawnChildFlow, SpawnChildFlowResult } from "../circuits/child-flow";
+import type { FlowCompositionManager } from "../circuits/flow-composition-manager";
+import type { OrchestrationFlow } from "../circuits/types";
 import type { OrchestrationToolContext, RunContext } from "../run-loop/types";
 import type { ToolExecuteOptions } from "./tool";
 

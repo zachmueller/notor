@@ -413,26 +413,26 @@ export interface ExtensionUtils {
 	 * (read off {@link orchestrationContext}); the registry resolves nothing
 	 * globally, so a step can only touch its own session's tasks. Always present
 	 * (the bridge is cheap); the tools that use it are feature-gated. Shapes:
-	 * `TaskNote` / `TaskStatus` (`src/orchestration/task-registry.ts`).
+	 * `TaskNote` / `TaskStatus` (`src/circuits/task-registry.ts`).
 	 */
 	orchestrationTasks: {
 		ensure: (
 			tasksDir: string,
 			key: string,
 			description: string,
-		) => Promise<import("../../orchestration/task-registry").EnsureResult>;
+		) => Promise<import("../../circuits/task-registry").EnsureResult>;
 		start: (
 			tasksDir: string,
 			key: string,
-		) => Promise<import("../../orchestration/task-registry").MutateResult>;
+		) => Promise<import("../../circuits/task-registry").MutateResult>;
 		close: (
 			tasksDir: string,
 			key: string,
-		) => Promise<import("../../orchestration/task-registry").MutateResult>;
+		) => Promise<import("../../circuits/task-registry").MutateResult>;
 		list: (
 			tasksDir: string,
-			filter?: { status?: import("../../orchestration/task-registry").TaskStatus },
-		) => Promise<import("../../orchestration/task-registry").TaskNote[]>;
+			filter?: { status?: import("../../circuits/task-registry").TaskStatus },
+		) => Promise<import("../../circuits/task-registry").TaskNote[]>;
 	};
 	/**
 	 * Step→workflow invocation bridge for the `invoke_workflow` tool scaffold

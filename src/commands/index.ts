@@ -1,7 +1,7 @@
 import { FuzzySuggestModal, MarkdownView, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type NotorPlugin from "../main";
-import type { OrchestrationRunHandle } from "../orchestration/run-registry";
+import type { OrchestrationRunHandle } from "../circuits/run-registry";
 import { NotorChatView } from "../ui/chat-view";
 import {
 	showWorkflowPicker,
@@ -375,7 +375,7 @@ export function registerCommands(plugin: NotorPlugin): void {
 		checkCallback: (checking: boolean) => {
 			if (!plugin.settings.orchestration_enabled) return false;
 			if (checking) return true;
-			void import("../orchestration/launch").then(({ showOrchestrationPicker }) =>
+			void import("../circuits/launch").then(({ showOrchestrationPicker }) =>
 				showOrchestrationPicker(plugin).catch((e) => {
 					log.error("Run Orchestration command failed", { error: String(e) });
 					new Notice(`Run Orchestration failed: ${e instanceof Error ? e.message : String(e)}`);

@@ -41,10 +41,10 @@ import { READ_NOTOR_SETTINGS } from "./read-notor-settings";
 import { EDIT_NOTOR_SETTINGS } from "./edit-notor-settings";
 import { EMIT_EVENT } from "./emit-event";
 import { INVOKE_WORKFLOW } from "./invoke-workflow";
-import { ORCHESTRATION_TASK_ENSURE } from "./orchestration-task-ensure";
-import { ORCHESTRATION_TASK_START } from "./orchestration-task-start";
-import { ORCHESTRATION_TASK_CLOSE } from "./orchestration-task-close";
-import { ORCHESTRATION_TASK_LIST } from "./orchestration-task-list";
+import { ORCHESTRATION_TASK_ENSURE } from "./circuit-task-ensure";
+import { ORCHESTRATION_TASK_START } from "./circuit-task-start";
+import { ORCHESTRATION_TASK_CLOSE } from "./circuit-task-close";
+import { ORCHESTRATION_TASK_LIST } from "./circuit-task-list";
 
 /**
  * All built-in tool scaffolds, keyed by tool name.

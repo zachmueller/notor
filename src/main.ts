@@ -89,14 +89,14 @@ import { PlanStore } from "./plans/plan-store";
 import { PlanReviewController, setPlanReviewController } from "./plans/plan-review-controller";
 import { PlanView, PLAN_VIEW_TYPE } from "./ui/plan-view";
 import { createPlanBlockDefinition } from "./ui/chat-blocks/plan-block";
-import { RunFlowTool, RUN_FLOW_TOOL_NAME } from "./tools/run-flow";
-import { FlowCompositionManager } from "./orchestration/flow-composition-manager";
-import type { SpawnChildFlow } from "./orchestration/child-flow";
-import { OrchestrationRunRegistry } from "./orchestration/run-registry";
-import type { OrchestrationHost } from "./orchestration/host";
+import { RunFlowTool, RUN_FLOW_TOOL_NAME } from "./tools/run-circuit";
+import { FlowCompositionManager } from "./circuits/flow-composition-manager";
+import type { SpawnChildFlow } from "./circuits/child-flow";
+import { OrchestrationRunRegistry } from "./circuits/run-registry";
+import type { OrchestrationHost } from "./circuits/host";
 import { buildUtils } from "./extensions/runtime-context";
 import type { ExtensionUtils } from "./extensions/runtime-context/types";
-import type { OrchestrationFlow } from "./orchestration/types";
+import type { OrchestrationFlow } from "./circuits/types";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
@@ -809,8 +809,8 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			// never blocks load. Loud recovery errors surface as Notices.
 			if (this.settings.orchestration_enabled) {
 				Promise.all([
-					import("./orchestration/launch"),
-					import("./ui/orchestration-modals"),
+					import("./circuits/launch"),
+					import("./ui/circuit-modals"),
 				])
 					.then(([{ recoverOrchestrations }, { requestOrchestrationInput }]) =>
 						recoverOrchestrations(this, (flowName, question) =>
@@ -1122,9 +1122,9 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 				// the action with a diagnostic Notice.
 				launchOrchestration: this.settings.orchestration_enabled
 					? async (flowNameOrDir: string, objective: string) => {
-							const { FlowDefinitionParser } = await import("./orchestration/flow-parser");
-							const { launchOrchestration } = await import("./orchestration/launch");
-							const { requestOrchestrationInput } = await import("./ui/orchestration-modals");
+							const { FlowDefinitionParser } = await import("./circuits/flow-parser");
+							const { launchOrchestration } = await import("./circuits/launch");
+							const { requestOrchestrationInput } = await import("./ui/circuit-modals");
 							const parser = new FlowDefinitionParser(
 								this.app.vault,
 								this.app.metadataCache,
@@ -1231,8 +1231,8 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			() => this._discoveredFlows,
 			async (flow) => {
 				if (!this.settings.orchestration_enabled) return;
-				const { launchOrchestration } = await import("./orchestration/launch");
-				const { requestOrchestrationInput } = await import("./ui/orchestration-modals");
+				const { launchOrchestration } = await import("./circuits/launch");
+				const { requestOrchestrationInput } = await import("./ui/circuit-modals");
 				const objective = `Scheduled run of orchestration flow '${flow.name}'.`;
 				await launchOrchestration(this, flow, objective, {
 					origin: "schedule",
@@ -1788,15 +1788,15 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			this.settings.notor_dir,
 		);
 		// Lazy spawner (F6 Phase 4): defer loading the orchestration layer
-		// (`./orchestration/launch` + the ui modals it pulls) until `run_flow`
+		// (`./circuits/launch` + the ui modals it pulls) until `run_flow`
 		// actually executes — the spawner is only invoked inside RunFlowTool.execute(),
 		// which is async, so the dynamic import + real spawner are memoized on first
 		// call. This keeps the whole orchestration graph off the plugin's load path.
 		let realSpawner: SpawnChildFlow | undefined;
 		const spawnChildFlow: SpawnChildFlow = async (req) => {
 			if (!realSpawner) {
-				const { makeChildFlowSpawner } = await import("./orchestration/launch");
-				const { requestOrchestrationInput } = await import("./ui/orchestration-modals");
+				const { makeChildFlowSpawner } = await import("./circuits/launch");
+				const { requestOrchestrationInput } = await import("./ui/circuit-modals");
 				realSpawner = makeChildFlowSpawner(this, (flowName, question) =>
 					requestOrchestrationInput(this.app, flowName, question),
 				);
@@ -2499,7 +2499,7 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		}
 
 		try {
-			const { FlowDefinitionParser } = await import("./orchestration/flow-parser");
+			const { FlowDefinitionParser } = await import("./circuits/flow-parser");
 			const parser = new FlowDefinitionParser(
 				this.app.vault,
 				this.app.metadataCache,

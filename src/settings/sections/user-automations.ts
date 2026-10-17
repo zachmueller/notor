@@ -20,8 +20,8 @@ import type { UserAutomationDefinition } from "../../extensions/types";
 import type { Workflow } from "../../types";
 import { discoverWorkflows } from "../../workflows/workflow-discovery";
 import type { VaultEventScheduler } from "../../hooks/vault-event-scheduler";
-import type { OrchestrationFlow } from "../../orchestration/types";
-import { flowEnabledKey, flowJobKey } from "../../orchestration/flow-enabled";
+import type { OrchestrationFlow } from "../../circuits/types";
+import { flowEnabledKey, flowJobKey } from "../../circuits/flow-enabled";
 import { logger } from "../../utils/logger";
 
 const log = logger("UserAutomationsSection");

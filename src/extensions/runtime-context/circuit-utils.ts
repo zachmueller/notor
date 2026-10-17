@@ -1,6 +1,6 @@
 import type { BuilderContext, ExtensionUtils } from "./types";
 import { normalizePath } from "obsidian";
-import { TaskRegistry, type TaskFs, type TaskNote, type TaskStatus } from "../../orchestration/task-registry";
+import { TaskRegistry, type TaskFs, type TaskNote, type TaskStatus } from "../../circuits/task-registry";
 import { discoverWorkflows } from "../../workflows/workflow-discovery";
 import { logger } from "../../utils/logger";
 

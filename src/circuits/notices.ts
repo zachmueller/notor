@@ -10,7 +10,7 @@
  *
  * The engine never constructs a `Notice`; this helper lives in the orchestration
  * consumer and is invoked purely through the per-step-turn completion path
- * (`src/orchestration/step-turn-executor.ts`), keeping `src/run-loop/`
+ * (`src/circuits/step-turn-executor.ts`), keeping `src/run-loop/`
  * Notice-free (run-loop contract: "Notices stay out of the engine").
  *
  * **Notice-fatigue seam (AC-4).** `showOrchestrationProgressNotice` accepts a

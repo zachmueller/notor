@@ -15,11 +15,11 @@
 
 import { FuzzySuggestModal, Modal, Notice, ButtonComponent } from "obsidian";
 import type { App } from "obsidian";
-import type { OrchestrationHost } from "../orchestration/host";
+import type { OrchestrationHost } from "../circuits/host";
 import { logger } from "../utils/logger";
-import { FlowDefinitionParser } from "../orchestration/flow-parser";
-import type { OrchestrationFlow } from "../orchestration/types";
-import { launchOrchestration } from "../orchestration/run-lifecycle";
+import { FlowDefinitionParser } from "../circuits/flow-parser";
+import type { OrchestrationFlow } from "../circuits/types";
+import { launchOrchestration } from "../circuits/run-lifecycle";
 
 const log = logger("OrchestrationLaunch");
 

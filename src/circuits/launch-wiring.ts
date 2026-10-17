@@ -39,7 +39,7 @@ import { TaskRegistry, type TaskFs } from "./task-registry";
 import { memoriesPath } from "./memories";
 import { VaultStepConversationStore } from "./step-conversation-store";
 import { showOrchestrationProgressNotice } from "./notices";
-import { jumpToStepConversation } from "../ui/orchestration-modals";
+import { jumpToStepConversation } from "../ui/circuit-modals";
 
 /**
  * Query a session's still-open/running tasks for the runner's `FLOW_COMPLETE`

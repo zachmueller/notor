@@ -1,6 +1,6 @@
 /**
  * Child-flow spawn contract (INT-043/044) — the seam between the `run_flow` tool
- * (`src/tools/run-flow.ts`) and the launch wiring (`src/orchestration/launch.ts`).
+ * (`src/tools/run-circuit.ts`) and the launch wiring (`src/circuits/launch.ts`).
  *
  * `run_flow` is a hand-written `Tool` (it needs the dynamic `flow` enum, mirroring
  * `UseSubagentTool`) and must not import the plugin/launch stack directly. It is
