@@ -351,7 +351,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 * Cached orchestration-flow discovery results. In-memory only — re-discovered
 	 * from vault via `rescanCircuits()`. Read synchronously by the `VaultEventScheduler`
 	 * (which is sync) to register `notor-schedule` cron jobs. Empty when
-	 * `orchestration_enabled` is off.
+	 * `circuits_enabled` is off.
 	 */
 	private _discoveredCircuits: Circuit[] = [];
 	/** Circuit names already reported as colliding across roots (one Notice per name per load). */
@@ -828,9 +828,9 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			});
 
 			// INT-005 (FR-125): scan for interrupted orchestration sessions and
-			// resume them. Gated on orchestration_enabled; fire-and-forget so it
+			// resume them. Gated on circuits_enabled; fire-and-forget so it
 			// never blocks load. Loud recovery errors surface as Notices.
-			if (this.settings.orchestration_enabled) {
+			if (this.settings.circuits_enabled) {
 				Promise.all([
 					import("./circuits/launch"),
 					import("./ui/circuit-modals"),
@@ -1141,9 +1141,9 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				hookDelayManager,
 				createHeadlessOrchestrator: () => this.createHeadlessOrchestrator(),
 				// FEAT-012: hook-triggered orchestration launch (FR-119b). Present
-				// only when orchestration_enabled — otherwise the dispatcher skips
+				// only when circuits_enabled — otherwise the dispatcher skips
 				// the action with a diagnostic Notice.
-				launchCircuit: this.settings.orchestration_enabled
+				launchCircuit: this.settings.circuits_enabled
 					? async (flowNameOrDir: string, objective: string) => {
 							const { CircuitDefinitionParser } = await import("./circuits/circuit-parser");
 							const { launchCircuit } = await import("./circuits/launch");
@@ -1248,12 +1248,12 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		// Wire the orchestration-flow accessor + launcher into the scheduler so
 		// flows with a `notor-schedule` get cron jobs. The launcher resolves a
 		// fresh definition from disk (the cached flow may be stale) and launches
-		// with `origin: "schedule"`. Gated on `orchestration_enabled` — when off,
+		// with `origin: "schedule"`. Gated on `circuits_enabled` — when off,
 		// `_discoveredCircuits` is already empty so no jobs are registered.
 		vaultEventScheduler.setDiscoveredFlows(
 			() => this._discoveredCircuits,
 			async (flow) => {
-				if (!this.settings.orchestration_enabled) return;
+				if (!this.settings.circuits_enabled) return;
 				const { launchCircuit } = await import("./circuits/launch");
 				const { requestCircuitInput } = await import("./ui/circuit-modals");
 				const objective = `Scheduled run of orchestration flow '${flow.name}'.`;
@@ -1294,7 +1294,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			vaultEventScheduler.syncJobs(enabledScheduleHooks);
 
 			// Discover scheduled orchestration flows and register their cron jobs
-			// (no-op + empty cache when orchestration_enabled is off). Fire-and-forget.
+			// (no-op + empty cache when circuits_enabled is off). Fire-and-forget.
 			void this.rescanCircuits().catch((e) =>
 				log.warn("Initial orchestration flow scan failed", { error: String(e) }),
 			);
@@ -1788,11 +1788,11 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			}));
 
 			// run_flow (INT-042) — a hand-written Tool (it needs the dynamic flow
-			// enum, mirroring use_subagent), gated on `orchestration_enabled`. Unlike
+			// enum, mirroring use_subagent), gated on `circuits_enabled`. Unlike
 			// the orchestration *scaffolds* (auto-gated by the ExtensionManager), this
 			// class-based tool is gated by its registration here + the settings toggle
 			// (see syncRunCircuitToolRegistration). Skipped entirely when the group is off.
-			if (this.settings.orchestration_enabled) {
+			if (this.settings.circuits_enabled) {
 				this.registerRunCircuitTool(this._toolRegistry);
 			}
 
@@ -1835,7 +1835,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	}
 
 	/**
-	 * Re-gate `run_flow` when `orchestration_enabled` toggles (INT-042). On enable
+	 * Re-gate `run_flow` when `circuits_enabled` toggles (INT-042). On enable
 	 * it registers the tool into both the registry and the live dispatcher; on
 	 * disable it unregisters from both, so the tool appears/disappears with the
 	 * feature group exactly like the orchestration scaffolds.
@@ -1843,13 +1843,13 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	syncRunCircuitToolRegistration(): void {
 		const registry = this.getToolRegistry();
 		const present = registry.get(RUN_CIRCUIT_TOOL_NAME) !== undefined;
-		if (this.settings.orchestration_enabled && !present) {
+		if (this.settings.circuits_enabled && !present) {
 			this.registerRunCircuitTool(registry);
 			const tool = registry.get(RUN_CIRCUIT_TOOL_NAME);
 			if (tool && this._toolDispatcher && !this._toolDispatcher.hasTool(RUN_CIRCUIT_TOOL_NAME)) {
 				this._toolDispatcher.registerTool(tool);
 			}
-		} else if (!this.settings.orchestration_enabled && present) {
+		} else if (!this.settings.circuits_enabled && present) {
 			registry.unregister(RUN_CIRCUIT_TOOL_NAME);
 			this._toolDispatcher?.unregisterTool(RUN_CIRCUIT_TOOL_NAME);
 		}
@@ -2498,7 +2498,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 *
 	 * Refreshed via `rescanCircuits()`. Read by the Automation settings section and
 	 * the `VaultEventScheduler` to surface / register `notor-schedule` cron jobs.
-	 * Returns `[]` when `orchestration_enabled` is off.
+	 * Returns `[]` when `circuits_enabled` is off.
 	 */
 	getDiscoveredCircuits(): Circuit[] {
 		return this._discoveredCircuits;
@@ -2509,11 +2509,11 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 * scheduler so flows with a `notor-schedule` get cron jobs. Mirrors
 	 * `rescanWorkflows()` but is async (flow discovery reads the vault).
 	 *
-	 * No-ops to an empty cache when `orchestration_enabled` is off — a disabled
+	 * No-ops to an empty cache when `circuits_enabled` is off — a disabled
 	 * feature must not register scheduled runs.
 	 */
 	async rescanCircuits(): Promise<Circuit[]> {
-		if (!this.settings.orchestration_enabled) {
+		if (!this.settings.circuits_enabled) {
 			this._discoveredCircuits = [];
 			this._vaultEventScheduler?.syncJobs(
 				this.settings.vault_event_hooks.on_schedule.filter((h) => h.enabled),

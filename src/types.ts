@@ -708,14 +708,20 @@ export interface WorkflowScopedHook {
 	/** Lifecycle event this hook fires on. */
 	event: LLMHookEvent;
 	/** Action to perform when the hook fires. */
-	action_type: "execute_command" | "run_workflow" | "run_orchestration";
+	action_type: "execute_command" | "run_workflow" | "run_circuit" | "run_orchestration";
 	/** Shell command (required when action_type is "execute_command"). */
 	command: string | null;
 	/** Vault-relative workflow path (required when action_type is "run_workflow"). */
 	workflow_path: string | null;
 	/**
-	 * Orchestration flow name or flow-directory path (required when action_type
-	 * is "run_orchestration"; gated on `orchestration_enabled`, FR-119b).
+	 * Circuit name or circuit-directory path (required when action_type is
+	 * "run_circuit"; gated on `circuits_enabled`, FR-119b). Read through
+	 * `hookCircuitRef()`, which falls back to the legacy field.
+	 */
+	circuit?: string | null;
+	/**
+	 * @deprecated Legacy name of {@link circuit} (with `action_type:
+	 * "run_orchestration"`). Migrated on load; still read as a fallback.
 	 */
 	orchestration_flow?: string | null;
 }
@@ -877,14 +883,20 @@ export interface VaultEventHook {
 	/** The vault event type that triggers this hook. */
 	event: VaultEventHookType;
 	/** Action to perform when the hook fires. */
-	action_type: "execute_command" | "run_workflow" | "run_orchestration";
+	action_type: "execute_command" | "run_workflow" | "run_circuit" | "run_orchestration";
 	/** Shell command to execute (required when action_type is "execute_command"). */
 	command: string | null;
 	/** Vault-relative workflow path (required when action_type is "run_workflow"). */
 	workflow_path: string | null;
 	/**
-	 * Orchestration flow name or flow-directory path (required when action_type
-	 * is "run_orchestration"; gated on `orchestration_enabled`, FR-119b).
+	 * Circuit name or circuit-directory path (required when action_type is
+	 * "run_circuit"; gated on `circuits_enabled`, FR-119b). Read through
+	 * `hookCircuitRef()`, which falls back to the legacy field.
+	 */
+	circuit?: string | null;
+	/**
+	 * @deprecated Legacy name of {@link circuit} (with `action_type:
+	 * "run_orchestration"`). Migrated on load; still read as a fallback.
 	 */
 	orchestration_flow?: string | null;
 	/** Human-readable label (optional; falls back to command or workflow_path). */

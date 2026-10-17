@@ -55,7 +55,7 @@ export function makeRecoveryFs(
 }
 
 /**
- * Load-time orchestration recovery scan. Gated on `orchestration_enabled` by the
+ * Load-time orchestration recovery scan. Gated on `circuits_enabled` by the
  * caller (main.ts). Scans `{notor_dir}/orchestrations/sessions/*` for recoverable
  * roots (`user`/`hook` always; terminal-parent `chaining`), classifies each
  * dangling tail, rebuilds budget + safety state, and resumes each on its own
@@ -281,7 +281,7 @@ export async function resumeRecoveredSession(
 	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(host.app));
 	// Resolve the note-opening decision identically to a fresh launch (per-flow
 	// override, else the global orchestration setting).
-	const openNotes = flow.openNotesInEditor ?? host.settings.orchestration_open_notes_in_editor;
+	const openNotes = flow.openNotesInEditor ?? host.settings.circuits_open_notes_in_editor;
 	// Resume: seed the once() skip set from the recovered log so an
 	// already-committed external effect is not re-run (FR-125 / INT-010).
 	const executor = buildExecutor(host, sessionLog, new Set(recovered.committedKeys), openNotes);

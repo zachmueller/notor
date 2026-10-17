@@ -11,7 +11,7 @@ import { scaffold } from "./_scaffold-helper";
  * mid-turn routing.
  *
  * Gated `featureGroup: "circuits"`, so the `ExtensionManager` only
- * compiles/registers it when `orchestration_enabled` is true (ENV-002 wired the
+ * compiles/registers it when `circuits_enabled` is true (ENV-002 wired the
  * `FEATURE_GROUP_TOGGLES` entry). Built via `_scaffold-helper.ts`, exactly as
  * `capture-memory.ts`.
  *

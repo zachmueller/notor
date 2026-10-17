@@ -373,7 +373,7 @@ export function registerCommands(plugin: NotorPlugin): void {
 		id: "run-orchestration",
 		name: "Run orchestration",
 		checkCallback: (checking: boolean) => {
-			if (!plugin.settings.orchestration_enabled) return false;
+			if (!plugin.settings.circuits_enabled) return false;
 			if (checking) return true;
 			void import("../circuits/launch").then(({ showCircuitPicker }) =>
 				showCircuitPicker(plugin).catch((e) => {
@@ -392,7 +392,7 @@ export function registerCommands(plugin: NotorPlugin): void {
 		id: "stop-orchestration",
 		name: "Stop orchestration",
 		checkCallback: (checking: boolean) => {
-			if (!plugin.settings.orchestration_enabled) return false;
+			if (!plugin.settings.circuits_enabled) return false;
 			const registry = plugin.getCircuitRunRegistry();
 			const live = registry.listActive();
 			if (live.length === 0) return false;

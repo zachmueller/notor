@@ -36,6 +36,7 @@ import { injectWorkflowFrontmatter } from "../workflows/workflow-frontmatter";
 import { logger } from "../utils/logger";
 import type { TemplateVariableRegistry } from "../template-vars";
 import type { HookDelayManager } from "./hook-delay-manager";
+import { hookCircuitRef, isRunCircuitAction } from "./hook-action-type";
 
 const log = logger("VaultEventDispatcher");
 
@@ -80,7 +81,7 @@ export interface DispatcherDeps {
 	/**
 	 * Launch an orchestration flow by name/dir with an objective (FR-119b /
 	 * FEAT-012). Wired in `main.ts` to the orchestration launch module; absent
-	 * when `orchestration_enabled` is off (the dispatcher then skips the action
+	 * when `circuits_enabled` is off (the dispatcher then skips the action
 	 * with a diagnostic Notice). Stamps the session `origin: "hook"`.
 	 */
 	launchCircuit?: (flowNameOrDir: string, objective: string) => Promise<void>;
@@ -312,10 +313,10 @@ async function _executeOneHook(
 			vaultHook.delay_ms, // hookDelayMs — null=inherit, 0=immediate, >0=override
 			vaultHook.id,       // hookId — use hook ID as debounce key
 		);
-	} else if (actionType === "run_orchestration") {
+	} else if (isRunCircuitAction(actionType)) {
 		// Orchestration flow launch (FR-119b / FEAT-012) — gated on the feature
 		// group; chain-extended for loop prevention (reuses ExecutionChainTracker).
-		const flowRef = vaultHook.orchestration_flow;
+		const flowRef = hookCircuitRef(vaultHook);
 		if (!flowRef?.trim()) {
 			log.warn("run_orchestration hook has no orchestration_flow; skipping", {
 				hookId: vaultHook.id,
@@ -502,7 +503,7 @@ export async function executeRunWorkflowAction(
  * the flow's starting-event objective and delegates to the orchestration launch
  * module (`deps.launchCircuit`, which stamps `origin: "hook"`).
  *
- * Gated on `orchestration_enabled`: when the feature group is off,
+ * Gated on `circuits_enabled`: when the feature group is off,
  * `deps.launchCircuit` is absent and the action is skipped with a
  * diagnostic Notice (mirroring how an unresolved `run_workflow` target degrades).
  * Loop prevention reuses the existing `ExecutionChainTracker` — the launch
@@ -525,7 +526,7 @@ export async function executeRunOrchestrationAction(
 	});
 
 	if (!deps.launchCircuit) {
-		// orchestration_enabled is off — skip with a diagnostic Notice.
+		// circuits_enabled is off — skip with a diagnostic Notice.
 		log.warn("run_orchestration hook skipped: orchestration is disabled", { flowRef });
 		new Notice(`Orchestration hook skipped: enable orchestration in Settings → Notor to run '${flowRef}'.`);
 		return;

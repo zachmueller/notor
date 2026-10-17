@@ -127,7 +127,7 @@ function collectAllItems(ctx: SettingsContext): AutomationItem[] {
 
 	// 1b. Scheduled orchestration flows (flows with a valid `notor-schedule`).
 	// Only when orchestration is enabled — the cache is empty otherwise.
-	if (ctx.settings.orchestration_enabled) {
+	if (ctx.settings.circuits_enabled) {
 		for (const flow of ctx.plugin.getDiscoveredCircuits()) {
 			if (!flow.schedule) continue;
 			items.push({

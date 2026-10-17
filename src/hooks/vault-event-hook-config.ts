@@ -9,6 +9,7 @@
  */
 
 import type { VaultEventHook, VaultEventHookConfig, VaultEventHookType } from "../types";
+import { canonicalHookActionType, isRunCircuitAction, type StoredHookActionType } from "./hook-action-type";
 
 // ---------------------------------------------------------------------------
 // UUID generation
@@ -45,7 +46,7 @@ function generateId(): string {
 export function addVaultEventHook(
 	config: VaultEventHookConfig,
 	event: VaultEventHookType,
-	actionType: "execute_command" | "run_workflow" | "run_orchestration",
+	actionType: StoredHookActionType,
 	commandOrPath: string,
 	label = "",
 	schedule: string | null = null,
@@ -62,9 +63,9 @@ export function addVaultEventHook(
 			`action_type "run_workflow" requires a non-empty workflow path.`
 		);
 	}
-	if (actionType === "run_orchestration" && !commandOrPath.trim()) {
+	if (isRunCircuitAction(actionType) && !commandOrPath.trim()) {
 		throw new Error(
-			`action_type "run_orchestration" requires a non-empty orchestration flow name or directory.`
+			`action_type "run_circuit" requires a non-empty circuit name or directory.`
 		);
 	}
 
@@ -78,10 +79,10 @@ export function addVaultEventHook(
 	const hook: VaultEventHook = {
 		id: generateId(),
 		event,
-		action_type: actionType,
+		action_type: canonicalHookActionType(actionType),
 		command: actionType === "execute_command" ? commandOrPath.trim() : null,
 		workflow_path: actionType === "run_workflow" ? commandOrPath.trim() : null,
-		orchestration_flow: actionType === "run_orchestration" ? commandOrPath.trim() : null,
+		circuit: isRunCircuitAction(actionType) ? commandOrPath.trim() : null,
 		label,
 		enabled: true,
 		schedule: event === "on_schedule" ? (schedule?.trim() ?? null) : null,

@@ -391,10 +391,10 @@ async function testFlowCompletes(ctx: TestContext): Promise<void> {
 
 	const enabled = await page.evaluate(() => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
-		return plugin?.settings?.orchestration_enabled === true;
+		return plugin?.settings?.circuits_enabled === true;
 	});
 	if (!enabled) {
-		ctx.fail("orchestration enabled", "orchestration_enabled is not true at runtime");
+		ctx.fail("orchestration enabled", "circuits_enabled is not true at runtime (legacy orchestration_enabled seed should migrate)");
 		return;
 	}
 

@@ -217,7 +217,7 @@ export function requestCircuitInput(
 /**
  * Open the flow picker → objective prompt → launch. Discovers flows via
  * {@link CircuitDefinitionParser}. Surfaced by the "Notor: Run Orchestration"
- * command (gated on `orchestration_enabled`).
+ * command (gated on `circuits_enabled`).
  */
 export async function showCircuitPicker(host: CircuitHost): Promise<void> {
 	const parser = new CircuitDefinitionParser(

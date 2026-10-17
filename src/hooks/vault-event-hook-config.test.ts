@@ -1,6 +1,6 @@
 /**
- * Unit tests for `addVaultEventHook` — focused on the `run_orchestration` action
- * type (the hook-UI gap closure for directly scheduling orchestrations).
+ * Unit tests for `addVaultEventHook` — focused on the `run_circuit` action type
+ * (legacy `run_orchestration`), the hook-UI gap closure for scheduling circuits.
  */
 
 import { describe, it, expect } from "vitest";
@@ -18,20 +18,21 @@ function emptyConfig(): VaultEventHookConfig {
 	};
 }
 
-describe("addVaultEventHook — run_orchestration", () => {
-	it("creates a scheduled run_orchestration hook with orchestration_flow set", () => {
+describe("addVaultEventHook — run_circuit (legacy run_orchestration accepted)", () => {
+	it("creates a scheduled run_circuit hook with circuit set", () => {
 		const config = emptyConfig();
 		const hook = addVaultEventHook(
 			config,
 			"on_schedule",
-			"run_orchestration",
+			"run_circuit",
 			"code-assist",
 			"Nightly code assist",
 			"0 2 * * *",
 		);
 
-		expect(hook.action_type).toBe("run_orchestration");
-		expect(hook.orchestration_flow).toBe("code-assist");
+		expect(hook.action_type).toBe("run_circuit");
+		expect(hook.circuit).toBe("code-assist");
+		expect(hook.orchestration_flow).toBeUndefined();
 		expect(hook.command).toBeNull();
 		expect(hook.workflow_path).toBeNull();
 		expect(hook.schedule).toBe("0 2 * * *");
@@ -39,7 +40,7 @@ describe("addVaultEventHook — run_orchestration", () => {
 		expect(config.on_schedule[0]).toBe(hook);
 	});
 
-	it("creates an event-driven run_orchestration hook (no schedule required)", () => {
+	it("normalizes a legacy run_orchestration request to run_circuit + circuit", () => {
 		const config = emptyConfig();
 		const hook = addVaultEventHook(
 			config,
@@ -48,25 +49,23 @@ describe("addVaultEventHook — run_orchestration", () => {
 			"notor/orchestrations/review",
 		);
 
-		expect(hook.action_type).toBe("run_orchestration");
-		expect(hook.orchestration_flow).toBe("notor/orchestrations/review");
+		expect(hook.action_type).toBe("run_circuit");
+		expect(hook.circuit).toBe("notor/orchestrations/review");
 		expect(hook.schedule).toBeNull();
 		expect(config.on_tag_change).toHaveLength(1);
 	});
 
-	it("rejects a run_orchestration hook with an empty flow reference", () => {
+	it.each(["run_circuit", "run_orchestration"] as const)("rejects a %s hook with an empty circuit reference", (action) => {
 		const config = emptyConfig();
-		expect(() =>
-			addVaultEventHook(config, "on_tag_change", "run_orchestration", "   "),
-		).toThrow(/run_orchestration/);
+		expect(() => addVaultEventHook(config, "on_tag_change", action, "   ")).toThrow(/run_circuit/);
 	});
 
-	it("leaves orchestration_flow null for non-orchestration action types", () => {
+	it("leaves circuit null for non-circuit action types", () => {
 		const config = emptyConfig();
 		const cmd = addVaultEventHook(config, "on_save", "execute_command", "echo hi");
 		const wf = addVaultEventHook(config, "on_save", "run_workflow", "daily/review.md");
 
-		expect(cmd.orchestration_flow).toBeNull();
-		expect(wf.orchestration_flow).toBeNull();
+		expect(cmd.circuit).toBeNull();
+		expect(wf.circuit).toBeNull();
 	});
 });

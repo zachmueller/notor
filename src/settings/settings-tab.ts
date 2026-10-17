@@ -45,6 +45,7 @@ import { renderSystemPromptSection } from "./sections/system-prompt";
 import { renderUserAutomationsSection } from "./sections/user-automations";
 import { renderModelPresetsSection } from "./sections/model-presets";
 import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
+import { canonicalSettingsGroup } from "./group-aliases";
 
 /**
  * Notor settings tab registered in Obsidian's Settings panel.
@@ -81,6 +82,7 @@ export class NotorSettingTab extends PluginSettingTab {
 	 * Used by settings deep-links from chat messages.
 	 */
 	scrollToGroup(groupTitle: string, subsection?: string): void {
+		groupTitle = canonicalSettingsGroup(groupTitle);
 		const details = this.containerEl.querySelector<HTMLDetailsElement>(
 			`details[data-notor-group="${CSS.escape(groupTitle)}"]`
 		);
@@ -155,6 +157,11 @@ export class NotorSettingTab extends PluginSettingTab {
 			delete persisted["Provider setup"];
 			void ctx.saveSettings();
 		}
+		if ("Orchestration" in persisted && !("Circuits" in persisted)) {
+			persisted["Circuits"] = persisted["Orchestration"];
+			delete persisted["Orchestration"];
+			void ctx.saveSettings();
+		}
 		delete persisted["Tool configuration"];
 		delete persisted["Extensions"];
 
@@ -217,9 +224,9 @@ export class NotorSettingTab extends PluginSettingTab {
 		const templatesGroup = createSettingsGroup(containerEl, "Templates", false, persisted, onToggle);
 		renderTemplatesSection(templatesGroup, ctx);
 
-		// --- Orchestration (collapsed by default) ---
-		const orchestrationGroup = createSettingsGroup(containerEl, "Orchestration", false, persisted, onToggle);
-		renderCircuitsSection(orchestrationGroup, ctx);
+		// --- Circuits (formerly "Orchestration"; collapsed by default) ---
+		const circuitsGroup = createSettingsGroup(containerEl, "Circuits", false, persisted, onToggle);
+		renderCircuitsSection(circuitsGroup, ctx);
 
 		// --- Rules and workflows (collapsed by default) ---
 		const rulesWorkflowsGroup = createSettingsGroup(containerEl, "Rules and workflows", false, persisted, onToggle);

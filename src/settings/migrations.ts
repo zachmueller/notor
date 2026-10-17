@@ -327,6 +327,11 @@ async function migrateWebSearchMultiProvider(deps: MigrationDeps): Promise<void>
 /**
  * Orchestration → circuits rename (one-time, idempotent, detection-based).
  *
+ * Settings keys `orchestration_enabled` / `orchestration_write_failure_notes` /
+ * `orchestration_open_notes_in_editor` move to their `circuits_*` names, and
+ * hooks move from `run_orchestration` + `orchestration_flow` to `run_circuit` +
+ * `circuit` (readers stay alias-aware via `hooks/hook-action-type.ts`).
+ *
  * Tool-keyed settings maps (`auto_approve`, `tool_enabled`,
  * `user_extension_settings`) move legacy tool names (`run_flow`,
  * `orchestration_task_*`) to their canonical names, so a user's
@@ -356,5 +361,47 @@ export async function migrateOrchestrationToCircuits(deps: MigrationDeps): Promi
 		}
 	}
 
+	// Settings keys. A present legacy key always carries its value over.
+	// `loadSettings()` merges defaults first, and earlier migrations may already
+	// have persisted those defaults, so a "saved" new key cannot be told apart
+	// from a defaulted one. A legacy key only reappears after this migration via a
+	// later write (e.g. `edit_notor_settings`, or a downgrade), so it is also the
+	// most recent value.
+	const raw = settings as unknown as Record<string, unknown>;
+	for (const [legacy, current] of SETTINGS_KEY_RENAMES) {
+		if (raw[legacy] === undefined) continue;
+		raw[current] = raw[legacy];
+		delete raw[legacy];
+		changed = true;
+	}
+
+	// Hooks: `run_orchestration` + `orchestration_flow` → `run_circuit` + `circuit`.
+	const hookGroups: unknown[] = [
+		...(Object.values(settings.hooks ?? {}) as unknown[]),
+		...(Object.values(settings.vault_event_hooks ?? {}) as unknown[]),
+	];
+	for (const group of hookGroups) {
+		if (!Array.isArray(group)) continue;
+		for (const hook of group as Array<Record<string, unknown>>) {
+			if (!hook || typeof hook !== "object") continue;
+			if (hook.action_type === "run_orchestration") {
+				hook.action_type = "run_circuit";
+				changed = true;
+			}
+			if ("orchestration_flow" in hook) {
+				if (hook.circuit == null && hook.orchestration_flow != null) hook.circuit = hook.orchestration_flow;
+				delete hook.orchestration_flow;
+				changed = true;
+			}
+		}
+	}
+
 	if (changed) await saveSettings();
 }
+
+/** `[legacyKey, currentKey]` settings renames from the orchestrations → circuits reframe. */
+const SETTINGS_KEY_RENAMES: ReadonlyArray<readonly [string, string]> = [
+	["orchestration_enabled", "circuits_enabled"],
+	["orchestration_write_failure_notes", "circuits_write_failure_notes"],
+	["orchestration_open_notes_in_editor", "circuits_open_notes_in_editor"],
+];

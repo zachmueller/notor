@@ -1,5 +1,5 @@
 /**
- * Failed-run debug notes (opt-in via `orchestration_write_failure_notes`).
+ * Failed-run debug notes (opt-in via `circuits_write_failure_notes`).
  *
  * When an orchestration run terminates with `status: "error"`, this composes a
  * human-readable Markdown debug report from data the engine **already** captures

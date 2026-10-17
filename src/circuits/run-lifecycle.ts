@@ -47,7 +47,7 @@ export function newSessionId(): string {
 
 /**
  * Opt-in failed-run debug note (Part B). When a run terminates with
- * `status: "error"` and `orchestration_write_failure_notes` is on, compose a
+ * `status: "error"` and `circuits_write_failure_notes` is on, compose a
  * human-readable Markdown report from data already captured (session.json meta +
  * the run result + session-log.jsonl) and write it under
  * `{notor_dir}/{data root}/failures/`. Called from both finalize sites (a
@@ -63,7 +63,7 @@ export async function maybeWriteFailureReport(
 	flow: Circuit,
 	result: CircuitRunResult,
 ): Promise<void> {
-	if (!shouldWriteFailureReport(result.status, host.settings.orchestration_write_failure_notes)) {
+	if (!shouldWriteFailureReport(result.status, host.settings.circuits_write_failure_notes)) {
 		return;
 	}
 	try {
@@ -246,8 +246,8 @@ export async function launchCircuit(
 
 	const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(host.app));
 	// Resolve once: the per-flow `notor-open-notes-in-editor` override (when set)
-	// wins, else the global `orchestration_open_notes_in_editor` setting.
-	const openNotes = flow.openNotesInEditor ?? host.settings.orchestration_open_notes_in_editor;
+	// wins, else the global `circuits_open_notes_in_editor` setting.
+	const openNotes = flow.openNotesInEditor ?? host.settings.circuits_open_notes_in_editor;
 	// Fresh launch: no prior committed side-effects (INT-010 once() skip set).
 	const executor = buildExecutor(host, sessionLog, new Set<string>(), openNotes);
 

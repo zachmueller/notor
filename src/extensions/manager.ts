@@ -281,10 +281,10 @@ export class ExtensionManager {
 	private static readonly FEATURE_GROUP_TOGGLES: Record<string, string> = {
 		memory: "memory_enabled",
 		templates: "templates_enabled",
-		circuits: "orchestration_enabled",
+		circuits: "circuits_enabled",
 		// Legacy group id, persisted in user-materialized tool overrides
 		// (`notor-feature-group: orchestration`). Accepted forever.
-		orchestration: "orchestration_enabled",
+		orchestration: "circuits_enabled",
 	};
 
 	/**

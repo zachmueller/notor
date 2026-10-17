@@ -46,7 +46,7 @@ export interface Hook {
 	 *
 	 * @see specs/03-workflows-personas/tasks/group-f-tasks.md — F-001, F-004
 	 */
-	action_type?: "execute_command" | "run_workflow" | "run_orchestration";
+	action_type?: "execute_command" | "run_workflow" | "run_circuit" | "run_orchestration";
 	/**
 	 * Vault-relative workflow path (required when action_type is "run_workflow").
 	 *
@@ -54,8 +54,14 @@ export interface Hook {
 	 */
 	workflow_path?: string | null;
 	/**
-	 * Orchestration flow name or flow-directory path (required when action_type
-	 * is "run_orchestration"; gated on `orchestration_enabled`, FR-119b).
+	 * Circuit name or circuit-directory path (required when action_type is
+	 * "run_circuit"; gated on `circuits_enabled`, FR-119b). Read through
+	 * `hookCircuitRef()`, which falls back to the legacy field.
+	 */
+	circuit?: string | null;
+	/**
+	 * @deprecated Legacy name of {@link circuit} (with `action_type:
+	 * "run_orchestration"`). Migrated on load; still read as a fallback.
 	 */
 	orchestration_flow?: string | null;
 }
@@ -539,7 +545,7 @@ export interface NotorSettings {
 	 *
 	 * @see specs/ZZ-misc/orchestration/spec.md — FR-119
 	 */
-	orchestration_enabled: boolean;
+	circuits_enabled: boolean;
 
 	/**
 	 * When true, a run that terminates with `status: "error"` writes a
@@ -549,7 +555,7 @@ export interface NotorSettings {
 	 * the user (or Notor) can open or `@`-reference it to debug the failure.
 	 * Opt-in (default false); read at finalize time, so no extension reload needed.
 	 */
-	orchestration_write_failure_notes: boolean;
+	circuits_write_failure_notes: boolean;
 
 	/**
 	 * When true, notes an orchestration step reads or writes are opened in the
@@ -562,7 +568,7 @@ export interface NotorSettings {
 	 * override, in both directions. Read at launch time, so no extension reload is
 	 * needed on change.
 	 */
-	orchestration_open_notes_in_editor: boolean;
+	circuits_open_notes_in_editor: boolean;
 
 	// -------------------------------------------------------------------
 	// Phase 12: Extension block rate limiting

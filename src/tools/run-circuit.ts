@@ -11,7 +11,7 @@
  * mirror `UseSubagentTool` (`src/tools/use-subagent.ts`): the cached invocable-flow
  * list is rebuilt at registration and at the start of each `execute()` (hot-reload).
  *
- * It is **gated** to `orchestration_enabled` by its registration (main.ts registers
+ * It is **gated** to `circuits_enabled` by its registration (main.ts registers
  * it only when the feature group is on; the settings toggle re-gates it), and it is
  * **orchestration-context-only** (Issue-4): reached without an `orchestrationContext`
  * (a foreground-chat turn, a non-orchestration automation) it returns

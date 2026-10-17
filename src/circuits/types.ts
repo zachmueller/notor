@@ -85,7 +85,7 @@ export interface Circuit {
 	/**
 	 * `notor-open-notes-in-editor` — whether notes this flow's steps read/write are
 	 * opened in the editor. `null` (default, when absent) inherits the global
-	 * `orchestration_open_notes_in_editor` setting; `true`/`false` force the
+	 * `circuits_open_notes_in_editor` setting; `true`/`false` force the
 	 * behavior for this flow regardless of the setting.
 	 */
 	openNotesInEditor: boolean | null;

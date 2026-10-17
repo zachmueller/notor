@@ -26,7 +26,7 @@ import { scaffold } from "./_scaffold-helper";
  * deliberate, potentially expensive delegation.
  *
  * Gated `featureGroup: "circuits"`, so the `ExtensionManager` only
- * compiles/registers it when `orchestration_enabled`. Mode `write` (Act only),
+ * compiles/registers it when `circuits_enabled`. Mode `write` (Act only),
  * mirroring `emit_event`. Absent an `orchestrationContext` (reached outside a step
  * turn) or an `invokeWorkflow` bridge (no live orchestrator), it returns an error.
  *

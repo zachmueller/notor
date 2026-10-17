@@ -11,7 +11,7 @@ import { scaffold } from "./_scaffold-helper";
  * recovery replay safe (FR-122 → FR-125).
  *
  * Gated `featureGroup: "circuits"` (legacy group id `orchestration` still accepted) (registered only when
- * `orchestration_enabled`). Mode `write` (Act only).
+ * `circuits_enabled`). Mode `write` (Act only).
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-2-session-nav.md — INT-002
  * @see specs/ZZ-misc/orchestration/contracts/tools.md — Task tools

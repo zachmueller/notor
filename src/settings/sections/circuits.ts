@@ -3,7 +3,7 @@
  *
  * Master toggle for the orchestration subsystem (feature group
  * `orchestration`). Mirrors the Memory toggle: on change it sets
- * `settings.orchestration_enabled` and reloads the extension manager so tools
+ * `settings.circuits_enabled` and reloads the extension manager so tools
  * tagged `featureGroup: "orchestration"` are registered/filtered accordingly.
  *
  * @see specs/ZZ-misc/orchestration/spec.md — FR-119
@@ -55,9 +55,9 @@ export function renderCircuitsSection(
 		.setDesc("Master toggle for the orchestration subsystem.")
 		.addToggle((toggle) =>
 			toggle
-				.setValue(ctx.settings.orchestration_enabled)
+				.setValue(ctx.settings.circuits_enabled)
 				.onChange(async (value) => {
-					ctx.settings.orchestration_enabled = value;
+					ctx.settings.circuits_enabled = value;
 					await ctx.saveSettings();
 
 					// Seed the reference circuits on enable.
@@ -96,9 +96,9 @@ export function renderCircuitsSection(
 		)
 		.addToggle((toggle) =>
 			toggle
-				.setValue(ctx.settings.orchestration_write_failure_notes)
+				.setValue(ctx.settings.circuits_write_failure_notes)
 				.onChange(async (value) => {
-					ctx.settings.orchestration_write_failure_notes = value;
+					ctx.settings.circuits_write_failure_notes = value;
 					await ctx.saveSettings();
 				}),
 		);
@@ -118,9 +118,9 @@ export function renderCircuitsSection(
 		)
 		.addToggle((toggle) =>
 			toggle
-				.setValue(ctx.settings.orchestration_open_notes_in_editor)
+				.setValue(ctx.settings.circuits_open_notes_in_editor)
 				.onChange(async (value) => {
-					ctx.settings.orchestration_open_notes_in_editor = value;
+					ctx.settings.circuits_open_notes_in_editor = value;
 					await ctx.saveSettings();
 				}),
 		);

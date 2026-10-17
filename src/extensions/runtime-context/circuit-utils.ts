@@ -27,7 +27,7 @@ const log = logger("OrchestrationUtils");
  * the documented v1 limitation.
  *
  * Both bridges are always present (cheap); the *tools* are feature-gated, so they
- * are never reachable unless `orchestration_enabled` and a step turn supplies an
+ * are never reachable unless `circuits_enabled` and a step turn supplies an
  * `orchestrationContext`.
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-2-session-nav.md — INT-002

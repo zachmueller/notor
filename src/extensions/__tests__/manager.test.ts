@@ -1284,7 +1284,7 @@ describe("Legacy circuit tool names and feature group (orchestrations → circui
 		expect(result.errors.some((e) => e.filePath === "notor/tools/circuit_task_close.md")).toBe(true);
 	});
 
-	it.each(["circuits", "orchestration"])("feature group %s is gated by orchestration_enabled", async (group) => {
+	it.each(["circuits", "orchestration"])("feature group %s is gated by circuits_enabled", async (group) => {
 		discover([makeToolDef({ name: "gated_tool", featureGroup: group })]);
 		const off = new ExtensionManager(createMockPlugin() as never, vi.fn());
 		expect((await off.reload(true)).toolCount).toBe(0);
@@ -1294,7 +1294,7 @@ describe("Legacy circuit tool names and feature group (orchestrations → circui
 			createMockPlugin({
 				settings: {
 					notor_dir: "notor/",
-					orchestration_enabled: true,
+					circuits_enabled: true,
 					user_extension_settings: {},
 					user_shared_settings: {},
 				},
