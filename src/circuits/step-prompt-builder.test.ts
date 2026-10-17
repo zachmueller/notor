@@ -11,9 +11,9 @@
 
 import { describe, it, expect } from "vitest";
 import { StepPromptBuilder } from "./step-prompt-builder";
-import type { OrchestrationEvent, OrchestrationFlow, StepDefinition } from "./types";
+import type { CircuitEvent, Circuit, StepDefinition } from "./types";
 
-function flow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
+function flow(over: Partial<Circuit> = {}): Circuit {
 	return {
 		name: "Demo",
 		description: "",
@@ -58,13 +58,13 @@ function step(bodyContent: string, over: Partial<StepDefinition> = {}): StepDefi
 	};
 }
 
-function event(): OrchestrationEvent {
+function event(): CircuitEvent {
 	return { topic: "start", payload: "objective payload", source_step: null, turn: 1, ts: "2026-06-28T00:00:00Z" };
 }
 
 const builder = new StepPromptBuilder();
 
-function build(bodyContent: string, flowOver: Partial<OrchestrationFlow> = {}) {
+function build(bodyContent: string, flowOver: Partial<Circuit> = {}) {
 	return builder.build({
 		step: step(bodyContent),
 		flow: flow(flowOver),
@@ -139,7 +139,7 @@ describe("StepPromptBuilder — always-injected sections", () => {
 	});
 
 	it("injects recent event history", () => {
-		const history: OrchestrationEvent[] = [
+		const history: CircuitEvent[] = [
 			{ topic: "start", payload: "p", source_step: null, turn: 1, ts: "t" },
 			{ topic: "tasks.ready", payload: "q", source_step: "Planner", turn: 2, ts: "t" },
 		];

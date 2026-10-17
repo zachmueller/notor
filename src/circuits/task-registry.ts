@@ -2,7 +2,7 @@
  * `TaskRegistry` (INT-002) — the runtime task-note read/write/parse helper the
  * four task tools (`orchestration_task_ensure` / `_start` / `_close` / `_list`)
  * and the runner's `FLOW_COMPLETE` enforcement (INT-003) share. The code-step
- * `OrchestrationHelper.tasks` API (INT-011, Lane B) dispatches through the same
+ * `CircuitHelper.tasks` API (INT-011, Lane B) dispatches through the same
  * implementation.
  *
  * Task notes live at `sessions/{id}/tasks/{key}.md` with `notor-type:

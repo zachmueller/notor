@@ -1,10 +1,10 @@
 /**
- * `OrchestrationSessionManager` (INT-001) — owner of per-session workspace
+ * `CircuitSessionManager` (INT-001) — owner of per-session workspace
  * lifecycle.
  *
  * On flow start it allocates a session id and creates
  * `{notor_dir}/orchestrations/sessions/{session-id}/` containing:
- *  - `session.json` — the {@link OrchestrationSessionMeta} (initial status
+ *  - `session.json` — the {@link CircuitSessionMeta} (initial status
  *    `active`, flow name, iteration 0, the original prompt, and the always-set
  *    `origin` recovery discriminator);
  *  - an empty `session-log.jsonl` directory slot (the *writer* is FEAT-006's
@@ -24,7 +24,7 @@
  * tool config and never introduces a global "current session", so a step in
  * session A can never reach session B's scratchpad.
  *
- * Shape authority: [data-model.md] `OrchestrationSessionMeta`. Vault layout +
+ * Shape authority: [data-model.md] `CircuitSessionMeta`. Vault layout +
  * `session.json` field semantics: [contracts/vault-schema.md].
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-2-session-nav.md — INT-001
@@ -32,9 +32,9 @@
  */
 
 import { logger } from "../utils/logger";
-import type { OrchestrationSessionMeta } from "./types";
+import type { CircuitSessionMeta } from "./types";
 
-const log = logger("OrchestrationSessionManager");
+const log = logger("CircuitSessionManager");
 
 /**
  * The minimal durable filesystem surface the session manager needs. In
@@ -72,7 +72,7 @@ export interface CreateSessionArgs {
 	flowName: string;
 	prompt: string;
 	/** Always set — never null (the recovery discriminator). */
-	origin: OrchestrationSessionMeta["origin"];
+	origin: CircuitSessionMeta["origin"];
 	/** `null` for a root (`user` / `hook`); set for a composition child. */
 	parentSessionId?: string | null;
 }
@@ -82,7 +82,7 @@ function trimSlash(p: string): string {
 	return p.replace(/\/+$/, "");
 }
 
-export class OrchestrationSessionManager {
+export class CircuitSessionManager {
 	private readonly orchestrationsRoot: string;
 	/** Per-session write chains — serializes readMeta → mutate → writeMeta inside updateStatus. */
 	private readonly writeChains = new Map<string, Promise<void>>();
@@ -130,7 +130,7 @@ export class OrchestrationSessionManager {
 		await this.ensureDir(ws.scratchpadPath);
 		await this.ensureDir(ws.tasksPath);
 
-		const meta: OrchestrationSessionMeta = {
+		const meta: CircuitSessionMeta = {
 			session_id: args.sessionId,
 			flow_name: args.flowName,
 			status: "active",
@@ -153,10 +153,10 @@ export class OrchestrationSessionManager {
 	}
 
 	/** Read `session.json`. Throws if absent / unparseable. */
-	async readMeta(sessionId: string): Promise<OrchestrationSessionMeta> {
+	async readMeta(sessionId: string): Promise<CircuitSessionMeta> {
 		const ws = this.resolveWorkspace(sessionId);
 		const raw = await this.fs.read(ws.metaPath);
-		const meta = JSON.parse(raw) as OrchestrationSessionMeta;
+		const meta = JSON.parse(raw) as CircuitSessionMeta;
 		meta.schema_version ??= 1;
 		return meta;
 	}
@@ -164,7 +164,7 @@ export class OrchestrationSessionManager {
 	/** Overwrite `session.json` with `meta`. */
 	async writeMeta(
 		ws: SessionWorkspace | string,
-		meta: OrchestrationSessionMeta,
+		meta: CircuitSessionMeta,
 	): Promise<void> {
 		const metaPath =
 			typeof ws === "string" ? this.resolveWorkspace(ws).metaPath : ws.metaPath;
@@ -181,8 +181,8 @@ export class OrchestrationSessionManager {
 	 */
 	async updateStatus(
 		sessionId: string,
-		status: OrchestrationSessionMeta["status"],
-		patch?: Partial<Pick<OrchestrationSessionMeta, "iteration" | "active_step">>,
+		status: CircuitSessionMeta["status"],
+		patch?: Partial<Pick<CircuitSessionMeta, "iteration" | "active_step">>,
 	): Promise<void> {
 		const current = this.writeChains.get(sessionId) ?? Promise.resolve();
 		const next = current.then(async () => {

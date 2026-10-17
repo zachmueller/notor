@@ -18,7 +18,7 @@
 
 import { Notice, normalizePath } from "obsidian";
 import type { App } from "obsidian";
-import type { OrchestrationHost } from "./host";
+import type { CircuitHost } from "./host";
 import { ToolDispatcher } from "../chat/dispatcher";
 import { ConfigResolver } from "../chat/config-resolver";
 import type { ToolDefinition } from "../providers/provider";
@@ -32,13 +32,13 @@ import { StepPromptBuilder } from "./step-prompt-builder";
 import { StepTurnExecutor, type StepRuntime, type StepRuntimeFactory } from "./step-turn-executor";
 import type { ToolPolicyContext } from "../chat/tool-policy";
 import { CodeStepExecutor, type CodeStepRuntime, type CodeStepRuntimeFactory } from "./code-step-executor";
-import type { ScratchpadFs } from "./orchestration-helper";
+import type { ScratchpadFs } from "./circuit-helper";
 import { SessionLog, type SessionLogWriter } from "./session-log";
 import { type SessionFs } from "./session-manager";
 import { TaskRegistry, type TaskFs } from "./task-registry";
 import { memoriesPath } from "./memories";
 import { VaultStepConversationStore } from "./step-conversation-store";
-import { showOrchestrationProgressNotice } from "./notices";
+import { showCircuitProgressNotice } from "./notices";
 import { jumpToStepConversation } from "../ui/circuit-modals";
 
 /**
@@ -48,7 +48,7 @@ import { jumpToStepConversation } from "../ui/circuit-modals";
  * exactly what those tools persisted.
  */
 export async function listOpenTaskKeys(
-	host: OrchestrationHost,
+	host: CircuitHost,
 	tasksPath: string,
 ): Promise<Array<{ key: string; description: string }>> {
 	const adapter = host.app.vault.adapter;
@@ -76,7 +76,7 @@ export async function listOpenTaskKeys(
  * external effect is not re-run — FR-125 / INT-010).
  */
 export function buildExecutor(
-	host: OrchestrationHost,
+	host: CircuitHost,
 	sessionLog: SessionLog,
 	committedKeys: Set<string>,
 	openNotesInEditor: boolean,
@@ -114,7 +114,7 @@ export function buildExecutor(
 			// active orchestrator lazily at right-click time (a panel may not be open
 			// when the flow is launched from a hook).
 			showProgressNotice: ({ flowName, stepName, iteration, emittedTopic, conversationId }) =>
-				showOrchestrationProgressNotice({
+				showCircuitProgressNotice({
 					flowName,
 					stepName,
 					iteration,
@@ -212,7 +212,7 @@ type StepPersona = Parameters<StepRuntimeFactory["build"]>[0]["persona"];
  * so passing it is behavior-neutral vs. the old omit).
  */
 async function assembleStepDispatcher(
-	host: OrchestrationHost,
+	host: CircuitHost,
 	opts: { persona: StepPersona; openNotesInEditor: boolean },
 ): Promise<{ dispatcher: ToolDispatcher; effective: EffectiveToolConfig; toolDefinitions: ToolDefinition[] }> {
 	const settings = host.settings;
@@ -259,7 +259,7 @@ async function assembleStepDispatcher(
  * a per-step dispatcher (with the orchestration session context bound via the
  * dispatcher's session-context seam).
  */
-export function makeRuntimeFactory(host: OrchestrationHost, openNotesInEditor: boolean): StepRuntimeFactory {
+export function makeRuntimeFactory(host: CircuitHost, openNotesInEditor: boolean): StepRuntimeFactory {
 	return {
 		async build({ step, persona, resolved, mode, orchestrationContext }): Promise<StepRuntime> {
 			const settings = host.settings;
@@ -329,7 +329,7 @@ export function makeRuntimeFactory(host: OrchestrationHost, openNotesInEditor: b
  * effects commit), shared with the conversation path.
  */
 export function makeCodeStepRuntimeFactory(
-	host: OrchestrationHost,
+	host: CircuitHost,
 	committedKeys: Set<string>,
 	openNotesInEditor: boolean,
 ): CodeStepRuntimeFactory {

@@ -1,13 +1,13 @@
 /**
- * `FlowDefinitionParser` + `StepNoteParser` (FEAT-002).
+ * `CircuitDefinitionParser` + `StepNoteParser` (FEAT-002).
  *
- * Turns vault notes into `OrchestrationFlow` / `StepDefinition`. Mirrors the
+ * Turns vault notes into `Circuit` / `StepDefinition`. Mirrors the
  * existing workflow discovery/parse machinery (`discoverWorkflows()` at
  * `src/workflows/workflow-discovery.ts:73`, frontmatter read via
  * `metadataCache.getFileCache()`, body via `vault.read()` + `getFrontMatterInfo()`)
  * rather than inventing new plumbing.
  *
- * `FlowDefinitionParser` scans each `{notor_dir}/orchestrations/{flow}/definition.md`
+ * `CircuitDefinitionParser` scans each `{notor_dir}/orchestrations/{flow}/definition.md`
  * (discriminator `notor-type: orchestration-flow`), resolves the `notor-steps`
  * wikilinks against `{flow-dir}/steps/`, parses each via `StepNoteParser`
  * (discriminator `notor-type: orchestration-step`), and runs two layers of
@@ -49,7 +49,7 @@ import {
 	FLOW_COMPLETE,
 	isTerminalTopic,
 	USER_INPUT_REQUIRED,
-	type OrchestrationFlow,
+	type Circuit,
 	type StepDefinition,
 } from "./types";
 
@@ -60,23 +60,23 @@ const log = logger("FlowParser");
 // ---------------------------------------------------------------------------
 
 /** A blocking load error — the flow cannot run. */
-export class FlowParseError extends Error {
+export class CircuitParseError extends Error {
 	constructor(message: string) {
 		super(message);
-		this.name = "FlowParseError";
+		this.name = "CircuitParseError";
 	}
 }
 
 /** A non-blocking load warning (dead step, definition-lint). */
-export interface FlowParseWarning {
+export interface CircuitParseWarning {
 	kind: "dead_step" | "definition_lint";
 	message: string;
 }
 
 /** The result of parsing one flow: the flow plus any non-blocking warnings. */
-export interface FlowParseResult {
-	flow: OrchestrationFlow;
-	warnings: FlowParseWarning[];
+export interface CircuitParseResult {
+	flow: Circuit;
+	warnings: CircuitParseWarning[];
 }
 
 /**
@@ -173,7 +173,7 @@ function parseHandoffIsolation(value: unknown, flowName: string): "isolated" | "
 	const raw = parseStringOrNull(value);
 	if (raw === null) return "isolated";
 	if (raw === "isolated" || raw === "shared") return raw;
-	throw new FlowParseError(
+	throw new CircuitParseError(
 		`Flow '${flowName}': invalid 'notor-handoff-isolation: ${raw}' — must be 'isolated' or 'shared'.`,
 	);
 }
@@ -247,7 +247,7 @@ export class StepNoteParser {
 
 		const name = parseStringOrNull(fm["notor-step-name"]);
 		if (!name) {
-			throw new FlowParseError(
+			throw new CircuitParseError(
 				`Step note '${file.path}' is missing required 'notor-step-name'.`,
 			);
 		}
@@ -273,7 +273,7 @@ export class StepNoteParser {
 		try {
 			rawContent = await this.vault.read(file);
 		} catch (err) {
-			throw new FlowParseError(
+			throw new CircuitParseError(
 				`Failed to read step note '${file.path}': ${err instanceof Error ? err.message : String(err)}`,
 			);
 		}
@@ -298,14 +298,14 @@ export class StepNoteParser {
 }
 
 // ---------------------------------------------------------------------------
-// FlowDefinitionParser
+// CircuitDefinitionParser
 // ---------------------------------------------------------------------------
 
 /**
  * Discovers and parses orchestration flows. Stateless — each call re-scans
  * (mirrors `discoverWorkflows`'s no-active-state pattern).
  */
-export class FlowDefinitionParser {
+export class CircuitDefinitionParser {
 	private readonly stepParser: StepNoteParser;
 
 	constructor(
@@ -329,7 +329,7 @@ export class FlowDefinitionParser {
 	 * are skipped. A flow that fails to parse is logged and excluded (one bad
 	 * flow never blocks discovery of the rest).
 	 */
-	async discoverFlows(): Promise<FlowParseResult[]> {
+	async discoverCircuits(): Promise<CircuitParseResult[]> {
 		const rootPath = this.orchestrationsRootPath();
 		const root = this.vault.getAbstractFileByPath(rootPath);
 		if (!(root instanceof TFolder)) {
@@ -337,7 +337,7 @@ export class FlowDefinitionParser {
 			return [];
 		}
 
-		const results: FlowParseResult[] = [];
+		const results: CircuitParseResult[] = [];
 		for (const child of root.children) {
 			if (!(child instanceof TFolder)) continue;
 			const defPath = `${child.path}/definition.md`;
@@ -361,47 +361,47 @@ export class FlowDefinitionParser {
 	}
 
 	/** Parse a single flow by its directory path (used by the picker / runner). */
-	async parseFlowByDir(flowDir: string): Promise<FlowParseResult> {
+	async parseCircuitByDir(flowDir: string): Promise<CircuitParseResult> {
 		const dir = this.vault.getAbstractFileByPath(flowDir.replace(/\/$/, ""));
 		if (!(dir instanceof TFolder)) {
-			throw new FlowParseError(`Flow directory not found: '${flowDir}'.`);
+			throw new CircuitParseError(`Flow directory not found: '${flowDir}'.`);
 		}
 		return this.parseFlowDir(dir);
 	}
 
 	/** Parse a flow directory containing `definition.md` + `steps/`. */
-	private async parseFlowDir(dir: TFolder): Promise<FlowParseResult> {
+	private async parseFlowDir(dir: TFolder): Promise<CircuitParseResult> {
 		const defPath = `${dir.path}/definition.md`;
 		const defFile = this.vault.getAbstractFileByPath(defPath);
 		if (!(defFile instanceof TFile)) {
-			throw new FlowParseError(`Flow '${dir.path}' has no definition.md.`);
+			throw new CircuitParseError(`Flow '${dir.path}' has no definition.md.`);
 		}
 
 		const cache = this.metadataCache.getFileCache(defFile);
 		const fm = cache?.frontmatter as Record<string, unknown> | undefined;
 		if (!fm || fm["notor-type"] !== "orchestration-flow") {
-			throw new FlowParseError(
+			throw new CircuitParseError(
 				`definition.md in '${dir.path}' is missing 'notor-type: orchestration-flow'.`,
 			);
 		}
 
 		const name = parseStringOrNull(fm["notor-flow-name"]);
 		if (!name) {
-			throw new FlowParseError(`Flow '${dir.path}' is missing required 'notor-flow-name'.`);
+			throw new CircuitParseError(`Flow '${dir.path}' is missing required 'notor-flow-name'.`);
 		}
 		const startingEvent = parseStringOrNull(fm["notor-starting-event"]);
 		if (!startingEvent) {
-			throw new FlowParseError(`Flow '${name}' is missing required 'notor-starting-event'.`);
+			throw new CircuitParseError(`Flow '${name}' is missing required 'notor-starting-event'.`);
 		}
 
 		// Resolve step wikilinks under {flow-dir}/steps/.
 		const stepLinks = parseStringArray(fm["notor-steps"]);
 		if (stepLinks.length === 0) {
-			throw new FlowParseError(`Flow '${name}' declares no 'notor-steps'.`);
+			throw new CircuitParseError(`Flow '${name}' declares no 'notor-steps'.`);
 		}
 		const steps = await this.resolveSteps(stepLinks, dir, defFile.path, name);
 
-		const flow: OrchestrationFlow = {
+		const flow: Circuit = {
 			name,
 			description: parseStringOrNull(fm["notor-flow-description"]) ?? "",
 			flowDir: dir.path,
@@ -456,13 +456,13 @@ export class FlowDefinitionParser {
 			const linkText = stripWikilink(link);
 			const file = this.resolveStepFile(linkText, stepsDir, definitionPath);
 			if (!file) {
-				throw new FlowParseError(
+				throw new CircuitParseError(
 					`Flow '${flowName}': step '${linkText}' could not be resolved under '${stepsDir}/'.`,
 				);
 			}
 			const step = await this.stepParser.parse(file);
 			if (!step) {
-				throw new FlowParseError(
+				throw new CircuitParseError(
 					`Flow '${flowName}': note '${file.path}' is not a valid orchestration step.`,
 				);
 			}
@@ -507,7 +507,7 @@ export class FlowDefinitionParser {
 	 * Each topic maps to exactly one step by default; a topic with >1 subscriber
 	 * is rejected unless declared in `notor-fanout-topics`.
 	 */
-	private validateTriggerRouting(flow: OrchestrationFlow): void {
+	private validateTriggerRouting(flow: Circuit): void {
 		const fanout = new Set(flow.fanoutTopics);
 		const subscribers = new Map<string, string[]>();
 		for (const step of flow.steps) {
@@ -519,7 +519,7 @@ export class FlowDefinitionParser {
 		}
 		for (const [topic, steps] of subscribers) {
 			if (steps.length > 1 && !fanout.has(topic)) {
-				throw new FlowParseError(
+				throw new CircuitParseError(
 					`Flow '${flow.name}': topic '${topic}' is triggered by multiple steps ` +
 						`(${steps.join(", ")}) but is not declared in 'notor-fanout-topics'. ` +
 						`Declare it as fan-out or give it a single subscriber.`,
@@ -535,8 +535,8 @@ export class FlowDefinitionParser {
 	 * required-events, and any published-but-unsubscribed non-terminal topic
 	 * (Issue-10). Warns on a dead step and on the definition-lint case (Issue-13f).
 	 */
-	private validateTopology(flow: OrchestrationFlow): FlowParseWarning[] {
-		const warnings: FlowParseWarning[] = [];
+	private validateTopology(flow: Circuit): CircuitParseWarning[] {
+		const warnings: CircuitParseWarning[] = [];
 
 		const triggeredTopics = new Set<string>();
 		const publishedTopics = new Set<string>();
@@ -555,7 +555,7 @@ export class FlowDefinitionParser {
 		// (b) Every required-events topic must be published by some step.
 		for (const required of flow.requiredEvents) {
 			if (!publishedTopics.has(required) && !triggeredTopics.has(required)) {
-				throw new FlowParseError(
+				throw new CircuitParseError(
 					`Flow '${flow.name}': required event '${required}' is published by no step — ` +
 						`the flow could never legitimately complete.`,
 				);
@@ -571,7 +571,7 @@ export class FlowDefinitionParser {
 				if (isValidatorExemptTopic(topic)) continue;
 				if (topic === flow.completionEvent) continue;
 				if (!triggeredTopics.has(topic)) {
-					throw new FlowParseError(
+					throw new CircuitParseError(
 						`Flow '${flow.name}': step '${step.name}' publishes '${topic}' but no step ` +
 							`triggers on it (a static orphan). Wire it to a step, declare it terminal, ` +
 							`or remove it.`,
@@ -624,7 +624,7 @@ export class FlowDefinitionParser {
 	 * completion event must end up reachable.
 	 */
 	private assertCompletionReachable(
-		flow: OrchestrationFlow,
+		flow: Circuit,
 		_triggeredTopics: Set<string>,
 		_publishedTopics: Set<string>,
 	): void {
@@ -646,7 +646,7 @@ export class FlowDefinitionParser {
 			}
 		}
 		if (!reachableTopics.has(flow.completionEvent)) {
-			throw new FlowParseError(
+			throw new CircuitParseError(
 				`Flow '${flow.name}': completion event '${flow.completionEvent}' is not reachable ` +
 					`from the starting event '${flow.startingEvent}'.`,
 			);

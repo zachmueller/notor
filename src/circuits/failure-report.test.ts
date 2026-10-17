@@ -15,8 +15,8 @@ import {
 	shouldWriteFailureReport,
 } from "./failure-report";
 import type { SessionFs } from "./session-manager";
-import type { OrchestrationRunResult } from "./runner";
-import type { OrchestrationSessionMeta, OrchestrationEvent } from "./types";
+import type { CircuitRunResult } from "./runner";
+import type { CircuitSessionMeta, CircuitEvent } from "./types";
 
 /** Minimal in-memory SessionFs (only write is exercised by the writer). */
 class FakeFs implements SessionFs {
@@ -35,7 +35,7 @@ class FakeFs implements SessionFs {
 	}
 }
 
-function meta(over: Partial<OrchestrationSessionMeta> = {}): OrchestrationSessionMeta {
+function meta(over: Partial<CircuitSessionMeta> = {}): CircuitSessionMeta {
 	return {
 		session_id: "sess-abc123",
 		flow_name: "Notor Usage Miner",
@@ -50,11 +50,11 @@ function meta(over: Partial<OrchestrationSessionMeta> = {}): OrchestrationSessio
 	};
 }
 
-function terminal(topic: string, payload: string): OrchestrationEvent {
+function terminal(topic: string, payload: string): CircuitEvent {
 	return { topic, payload, source_step: "Rollup Build", turn: 7, ts: "2026-06-29T03:17:43Z" };
 }
 
-function result(over: Partial<OrchestrationRunResult> = {}): OrchestrationRunResult {
+function result(over: Partial<CircuitRunResult> = {}): CircuitRunResult {
 	// The writer reads only status / terminal / iterations; the rest is filler to
 	// satisfy the type without dragging in budget/subtree shapes.
 	return {
@@ -63,9 +63,9 @@ function result(over: Partial<OrchestrationRunResult> = {}): OrchestrationRunRes
 		iterations: 7,
 		structured: null,
 		text: "",
-		subtreeConsumed: {} as OrchestrationRunResult["subtreeConsumed"],
+		subtreeConsumed: {} as CircuitRunResult["subtreeConsumed"],
 		tokenUsage: { input: 0, output: 0 },
-		budget: {} as OrchestrationRunResult["budget"],
+		budget: {} as CircuitRunResult["budget"],
 		depth: 0,
 		...over,
 	};

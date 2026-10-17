@@ -1,9 +1,9 @@
 /**
- * `OrchestrationRunner` (FEAT-010) — the main loop that runs a flow end-to-end.
+ * `CircuitRunner` (FEAT-010) — the main loop that runs a flow end-to-end.
  *
  * `start(flow, promptText)`:
  *  - registers the `FallbackCoordinator` on `*` and subscribes each step's
- *    `triggers` on the `OrchestrationEventEngine`;
+ *    `triggers` on the `CircuitEventEngine`;
  *  - writes `session.start` and publishes the flow's `startingEvent` with the
  *    user objective as payload;
  *  - drives the event loop: resolve subscribers (in `notor-steps` order), run
@@ -21,7 +21,7 @@
  *
  * Full `FLOW_COMPLETE` **task** enforcement (open/running tasks) is Phase 2
  * (INT-003); the runner leaves the hook and enforces only `required_events` in
- * Phase 1. The full `OrchestrationSessionManager` (workspace/scratchpad/tasks/
+ * Phase 1. The full `CircuitSessionManager` (workspace/scratchpad/tasks/
  * recovery) is Phase 2 (INT-001) — Phase 1 needs only enough of a session to
  * write the log and run turns.
  *
@@ -39,7 +39,7 @@ import type {
 import { newRootBudget } from "../run-loop/budget";
 import { logger } from "../utils/logger";
 import { FallbackCoordinator } from "./fallback-coordinator";
-import { OrchestrationEventEngine } from "./event-engine";
+import { CircuitEventEngine } from "./event-engine";
 import { LoopSafetyGuards } from "./safety";
 import type { SessionLog } from "./session-log";
 import type { RecoverableSession } from "./session-recovery";
@@ -51,20 +51,20 @@ import {
 	isTerminalTopic,
 	USER_INPUT_RECEIVED,
 	USER_INPUT_REQUIRED,
-	type OrchestrationEvent,
-	type OrchestrationFlow,
+	type CircuitEvent,
+	type Circuit,
 	type StepDefinition,
 } from "./types";
 
-const log = logger("OrchestrationRunner");
+const log = logger("CircuitRunner");
 
 /** Terminal status of a flow run. */
-export type OrchestrationRunStatus = "completed" | "cancelled" | "error";
+export type CircuitRunStatus = "completed" | "cancelled" | "error";
 
-export interface OrchestrationRunResult {
-	status: OrchestrationRunStatus;
+export interface CircuitRunResult {
+	status: CircuitRunStatus;
 	/** The terminal event that ended the loop. */
-	terminal: OrchestrationEvent;
+	terminal: CircuitEvent;
 	/** Total engine hops (step turns, code + conversation). */
 	iterations: number;
 	/**
@@ -106,11 +106,11 @@ export interface OrchestrationRunResult {
 
 /** A queued routing job: an event to deliver to a specific subscriber step. */
 interface RoutingJob {
-	event: OrchestrationEvent;
+	event: CircuitEvent;
 	step: StepDefinition;
 }
 
-export interface OrchestrationRunnerDeps {
+export interface CircuitRunnerDeps {
 	executor: StepTurnExecutor;
 	sessionLog: SessionLog;
 	/** A fresh per-step orchestration carriage factory (paths + null pendingEmission). */
@@ -175,8 +175,8 @@ export interface OrchestrationRunnerDeps {
 	setSessionStatus?: (status: "active" | "interrupted") => Promise<void>;
 }
 
-export class OrchestrationRunner {
-	private readonly engine = new OrchestrationEventEngine();
+export class CircuitRunner {
+	private readonly engine = new CircuitEventEngine();
 	private readonly fallback = new FallbackCoordinator();
 	private readonly guards = new LoopSafetyGuards();
 
@@ -201,13 +201,13 @@ export class OrchestrationRunner {
 	/** The closing text of the most recent turn (the loose `run_flow` fallback return). */
 	private lastText = "";
 
-	constructor(private readonly deps: OrchestrationRunnerDeps) {}
+	constructor(private readonly deps: CircuitRunnerDeps) {}
 
 	/**
 	 * Run `flow` to a terminal event with `promptText` as the objective. Returns
 	 * the terminal status + event.
 	 */
-	async start(flow: OrchestrationFlow, promptText: string): Promise<OrchestrationRunResult> {
+	async start(flow: Circuit, promptText: string): Promise<CircuitRunResult> {
 		this.startedAtMs = Date.now();
 		// A child / chaining run inherits the parent's SHARED budget cell by
 		// reference and its depth + 1 (so the whole tree respects one ceiling); a
@@ -259,9 +259,9 @@ export class OrchestrationRunner {
 	 * documented recovery boundary.
 	 */
 	async resume(
-		flow: OrchestrationFlow,
+		flow: Circuit,
 		recovered: RecoverableSession,
-	): Promise<OrchestrationRunResult> {
+	): Promise<CircuitRunResult> {
 		this.startedAtMs = Date.now();
 		// Re-seed the budget from the replayed decrements (NOT reset to full).
 		this.budget = {
@@ -310,7 +310,7 @@ export class OrchestrationRunner {
 			return result;
 		}
 
-		let seed: OrchestrationEvent | null = null;
+		let seed: CircuitEvent | null = null;
 		if (action.kind === "re_emit_trigger") {
 			this.engine.setEmissionContext(this.nextIteration(), null);
 			seed = this.engine.publish(action.topic, action.payload, this.deps.sessionLog);
@@ -339,7 +339,7 @@ export class OrchestrationRunner {
 	 * Register the mandatory wildcard fallback (cannot be overridden) and subscribe
 	 * each step's triggers in `notor-steps` order. Shared by `start` and `resume`.
 	 */
-	private wireSubscriptions(flow: OrchestrationFlow): void {
+	private wireSubscriptions(flow: Circuit): void {
 		this.engine.subscribe("*", this.fallbackSentinel());
 		for (const step of flow.steps) {
 			for (const topic of step.triggers) {
@@ -356,10 +356,10 @@ export class OrchestrationRunner {
 	 * are routed (breadth-first FIFO drain, Issue-11).
 	 */
 	private async drive(
-		flow: OrchestrationFlow,
+		flow: Circuit,
 		objective: string,
-		starting: OrchestrationEvent,
-	): Promise<OrchestrationRunResult> {
+		starting: CircuitEvent,
+	): Promise<CircuitRunResult> {
 		const queue: RoutingJob[] = [];
 
 		// Seed the queue from the starting event's subscribers.
@@ -375,10 +375,10 @@ export class OrchestrationRunner {
 	 * fan-out drain, the per-turn safety guards, and terminal handling identically.
 	 */
 	private async driveQueue(
-		flow: OrchestrationFlow,
+		flow: Circuit,
 		objective: string,
 		queue: RoutingJob[],
-	): Promise<OrchestrationRunResult> {
+	): Promise<CircuitRunResult> {
 		while (queue.length > 0) {
 			if (this.deps.abortSignal.aborted) {
 				return this.terminalResult("cancelled", this.synthTerminal(FLOW_CANCELLED, "Run aborted."));
@@ -491,11 +491,11 @@ export class OrchestrationRunner {
 	 * should end, else `null` (work was enqueued).
 	 */
 	private async routeEmission(
-		flow: OrchestrationFlow,
-		emitted: OrchestrationEvent,
+		flow: Circuit,
+		emitted: CircuitEvent,
 		sourceStep: StepDefinition,
 		queue: RoutingJob[],
-	): Promise<OrchestrationRunResult | null> {
+	): Promise<CircuitRunResult | null> {
 		// Terminal short-circuits.
 		if (emitted.topic === FLOW_CANCELLED) {
 			return this.terminalResult("cancelled", emitted);
@@ -536,11 +536,11 @@ export class OrchestrationRunner {
 	 * are surfaced first.
 	 */
 	private async handleCompletion(
-		flow: OrchestrationFlow,
-		emitted: OrchestrationEvent,
+		flow: Circuit,
+		emitted: CircuitEvent,
 		sourceStep: StepDefinition,
 		queue: RoutingJob[],
-	): Promise<OrchestrationRunResult | null> {
+	): Promise<CircuitRunResult | null> {
 		const missing = this.missingRequiredEvents(flow);
 
 		// INT-003: query the session task registry for still-open/running tasks.
@@ -607,11 +607,11 @@ export class OrchestrationRunner {
 	 * `interrupted` while paused — the same status the recovery scan looks for.
 	 */
 	private async handlePause(
-		flow: OrchestrationFlow,
-		emitted: OrchestrationEvent,
+		flow: Circuit,
+		emitted: CircuitEvent,
 		sourceStep: StepDefinition,
 		queue: RoutingJob[],
-	): Promise<OrchestrationRunResult | null> {
+	): Promise<CircuitRunResult | null> {
 		// Durable pause entry BEFORE suspending (recovery anchor).
 		await this.deps.sessionLog.appendUserInputRequired({
 			turn: emitted.turn,
@@ -644,7 +644,7 @@ export class OrchestrationRunner {
 		pausedStep: StepDefinition,
 		prompt: string,
 		queue: RoutingJob[],
-	): Promise<OrchestrationRunResult | null> {
+	): Promise<CircuitRunResult | null> {
 		const userInput = this.deps.requestUserInput
 			? await this.deps.requestUserInput(prompt)
 			: null;
@@ -695,11 +695,11 @@ export class OrchestrationRunner {
 	 * (no concrete subscriber) goes to the fallback → terminal `FLOW_ERROR`.
 	 */
 	private enqueueRouting(
-		flow: OrchestrationFlow,
-		event: OrchestrationEvent,
+		flow: Circuit,
+		event: CircuitEvent,
 		queue: RoutingJob[],
 		completingStep?: StepDefinition,
-	): OrchestrationRunResult | null {
+	): CircuitRunResult | null {
 		const subscribers = this.engine.getSubscribers(event.topic, completingStep ?? null);
 		if (subscribers.length === 0) {
 			// Orphan → fallback (pure backstop → diagnosable FLOW_ERROR).
@@ -714,7 +714,7 @@ export class OrchestrationRunner {
 
 	// -- Finalization --------------------------------------------------------
 
-	private async finalize(result: OrchestrationRunResult): Promise<void> {
+	private async finalize(result: CircuitRunResult): Promise<void> {
 		if (result.status === "cancelled") {
 			await this.deps.sessionLog.appendSessionCancelled({ reason: result.terminal.payload });
 		} else if (result.status === "error") {
@@ -734,17 +734,17 @@ export class OrchestrationRunner {
 	}
 
 	/** Resolve a step by name within the flow (or `null`). */
-	private findStep(flow: OrchestrationFlow, name: string | null): StepDefinition | null {
+	private findStep(flow: Circuit, name: string | null): StepDefinition | null {
 		if (!name) return null;
 		return flow.steps.find((s) => s.name === name) ?? null;
 	}
 
-	private missingRequiredEvents(flow: OrchestrationFlow): string[] {
+	private missingRequiredEvents(flow: Circuit): string[] {
 		const seen = new Set(this.engine.getEventHistory().map((e) => e.topic));
 		return flow.requiredEvents.filter((topic) => !seen.has(topic));
 	}
 
-	private makeRunContext(flow: OrchestrationFlow): RunContext {
+	private makeRunContext(flow: Circuit): RunContext {
 		return {
 			depth: this.baseDepth,
 			// The effective spawn ceiling below this run is the tighter of the
@@ -787,7 +787,7 @@ export class OrchestrationRunner {
 		ctx.childRunResults = [];
 	}
 
-	private synthTerminal(topic: string, payload: string): OrchestrationEvent {
+	private synthTerminal(topic: string, payload: string): CircuitEvent {
 		return {
 			topic,
 			payload,
@@ -798,9 +798,9 @@ export class OrchestrationRunner {
 	}
 
 	private terminalResult(
-		status: OrchestrationRunStatus,
-		terminal: OrchestrationEvent,
-	): OrchestrationRunResult {
+		status: CircuitRunStatus,
+		terminal: CircuitEvent,
+	): CircuitRunResult {
 		return {
 			status,
 			terminal,

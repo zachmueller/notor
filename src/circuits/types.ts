@@ -17,7 +17,7 @@
  */
 
 // ---------------------------------------------------------------------------
-// OrchestrationFlow — parsed from definition.md
+// Circuit — parsed from definition.md
 // ---------------------------------------------------------------------------
 
 /**
@@ -28,15 +28,15 @@
  *
  * Every flow is bounded by construction (FR-117 / FR-119a): `maxIterations`,
  * `maxRuntimeMinutes`, and `maxCostUsd` are optional in frontmatter but the
- * `FlowDefinitionParser` injects finite engine defaults
+ * `CircuitDefinitionParser` injects finite engine defaults
  * (`DEFAULT_MAX_ITERATIONS` / `DEFAULT_MAX_RUNTIME_MINUTES` /
  * `DEFAULT_MAX_COST_USD`, never `Infinity`) when omitted. `maxDepth` stays
  * `null`-able (unlimited depth is acceptable — the three ceilings still bound
  * total work).
  *
- * @see specs/ZZ-misc/orchestration/data-model.md — OrchestrationFlow
+ * @see specs/ZZ-misc/orchestration/data-model.md — Circuit
  */
-export interface OrchestrationFlow {
+export interface Circuit {
 	/** `notor-flow-name`. */
 	name: string;
 	/** `notor-flow-description`. */
@@ -137,12 +137,12 @@ export interface StepDefinition {
 }
 
 // ---------------------------------------------------------------------------
-// OrchestrationSessionMeta — persisted session.json
+// CircuitSessionMeta — persisted session.json
 // ---------------------------------------------------------------------------
 
 /**
  * The per-session metadata note (`sessions/{id}/session.json`), owned by the
- * `OrchestrationSessionManager` (INT-001). `status` is the recovery entry point
+ * `CircuitSessionManager` (INT-001). `status` is the recovery entry point
  * (the scan filters on `active`/`interrupted`); the authoritative replay source
  * is `session-log.jsonl`.
  *
@@ -153,10 +153,10 @@ export interface StepDefinition {
  * and Phase-7 composition stamps `"run_flow"` / `"chaining"`. `parent_session_id`
  * is `null` for a root (`user` / `hook` / `schedule`) and set for a composition child.
  *
- * @see specs/ZZ-misc/orchestration/data-model.md — OrchestrationSessionMeta
+ * @see specs/ZZ-misc/orchestration/data-model.md — CircuitSessionMeta
  * @see specs/ZZ-misc/orchestration/contracts/vault-schema.md — session.json
  */
-export interface OrchestrationSessionMeta {
+export interface CircuitSessionMeta {
 	/** Matches the session directory name. */
 	session_id: string;
 	/** The flow's `notor-flow-name`. */
@@ -180,17 +180,17 @@ export interface OrchestrationSessionMeta {
 }
 
 // ---------------------------------------------------------------------------
-// OrchestrationEvent
+// CircuitEvent
 // ---------------------------------------------------------------------------
 
 /**
- * A routed event in a flow run. Constructed by `OrchestrationEventEngine.publish()`
+ * A routed event in a flow run. Constructed by `CircuitEventEngine.publish()`
  * (which stamps `source_step`, `turn`, `ts`) and read by the safety detectors and
  * recovery replay.
  *
- * @see specs/ZZ-misc/orchestration/data-model.md — OrchestrationEvent
+ * @see specs/ZZ-misc/orchestration/data-model.md — CircuitEvent
  */
-export interface OrchestrationEvent {
+export interface CircuitEvent {
 	topic: string;
 	payload: string;
 	/** Emitting step's name; `null` for the flow's starting event. */
@@ -228,7 +228,7 @@ export function isTerminalTopic(topic: string): boolean {
  * The pause signal a step emits (via `emit_event` / `orchestration.emit`) to
  * suspend the loop awaiting user input (FR-150). It is an **ordinary topic at
  * the engine layer** (write-before-route applies); the *pause* is the
- * `OrchestrationRunner`'s interpretation of it at its routing boundary, not an
+ * `CircuitRunner`'s interpretation of it at its routing boundary, not an
  * engine routing rule. The payload carries the question shown to the user.
  *
  * @see specs/ZZ-misc/orchestration/contracts/event-engine.md — Event Routing Rules

@@ -11,7 +11,7 @@ import { scaffold } from "./_scaffold-helper";
  * @see specs/ZZ-misc/orchestration/tasks/phase-2-session-nav.md — INT-002
  * @see specs/ZZ-misc/orchestration/contracts/tools.md — Task tools
  */
-export const ORCHESTRATION_TASK_CLOSE = scaffold(
+export const CIRCUIT_TASK_CLOSE = scaffold(
 	"orchestration_task_close",
 	"Mark an orchestration task as closed (stamps the completed timestamp).",
 	"write",

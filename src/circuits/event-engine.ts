@@ -1,5 +1,5 @@
 /**
- * `OrchestrationEventEngine` (FEAT-003) — the pub/sub routing core of a flow run.
+ * `CircuitEventEngine` (FEAT-003) — the pub/sub routing core of a flow run.
  *
  * Steps communicate only by publishing named events; the engine routes each
  * event to the next step(s) by trigger subscription. It owns:
@@ -19,7 +19,7 @@
  *  - The in-session **event history** the safety detectors read.
  *
  * The engine does **not** execute steps and performs **no mid-turn routing** —
- * the `OrchestrationRunner` (FEAT-010) drives execution and owns the
+ * the `CircuitRunner` (FEAT-010) drives execution and owns the
  * breadth-first FIFO fan-out drain.
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-1-engine.md — FEAT-003
@@ -29,7 +29,7 @@
 import { logger } from "../utils/logger";
 import { COMPLETION_NOPROGRESS_THRESHOLD } from "./constants";
 import type { SessionLog } from "./session-log";
-import type { OrchestrationEvent, StepDefinition } from "./types";
+import type { CircuitEvent, StepDefinition } from "./types";
 
 const log = logger("EventEngine");
 
@@ -42,13 +42,13 @@ const WILDCARD = "*";
 /** Synthesized re-trigger topics auto-subscribed to the completing step (FR-123). */
 const SYNTHESIZED_TOPICS = new Set(["flow.tasks_remaining", "flow.requirements_unmet"]);
 
-export class OrchestrationEventEngine {
+export class CircuitEventEngine {
 	/** Concrete topic → ordered subscriber list (in subscribe / notor-steps order). */
 	private readonly subscribers = new Map<string, StepDefinition[]>();
 	/** The single wildcard subscriber (the FallbackCoordinator's step sentinel). */
 	private wildcard: StepDefinition | null = null;
 	/** Ordered in-session event history (newest last). */
-	private readonly history: OrchestrationEvent[] = [];
+	private readonly history: CircuitEvent[] = [];
 
 	/** Emission context the runner sets before each `publish()` (for stamping). */
 	private currentTurn = 0;
@@ -71,7 +71,7 @@ export class OrchestrationEventEngine {
 		if (topic === WILDCARD) {
 			if (this.wildcard !== null) {
 				throw new Error(
-					"OrchestrationEventEngine: the '*' wildcard subscriber cannot be overridden.",
+					"CircuitEventEngine: the '*' wildcard subscriber cannot be overridden.",
 				);
 			}
 			this.wildcard = step;
@@ -118,13 +118,13 @@ export class OrchestrationEventEngine {
 
 	/**
 	 * Publish an event. **Write-before-route:** the constructed
-	 * `OrchestrationEvent` is appended to `session-log.jsonl` (via the serialized
+	 * `CircuitEvent` is appended to `session-log.jsonl` (via the serialized
 	 * SessionLog write chain) **before** it is pushed to history and exposed to
 	 * subscribers. The runner resolves subscribers and executes them *after* this
 	 * returns — there is no mid-turn routing here.
 	 */
-	publish(topic: string, payload: string, sessionLog: SessionLog): OrchestrationEvent {
-		const event: OrchestrationEvent = {
+	publish(topic: string, payload: string, sessionLog: SessionLog): CircuitEvent {
+		const event: CircuitEvent = {
 			topic,
 			payload,
 			source_step: this.currentSourceStep,
@@ -170,7 +170,7 @@ export class OrchestrationEventEngine {
 	}
 
 	/** The full ordered event history for the current session (newest last). */
-	getEventHistory(): OrchestrationEvent[] {
+	getEventHistory(): CircuitEvent[] {
 		return [...this.history];
 	}
 
@@ -225,7 +225,7 @@ export class OrchestrationEventEngine {
 	 * it before a resumed run continues keeps a near-stale loop from being reset
 	 * by a reload. Appends in order; does not write to the session log.
 	 */
-	rehydrateHistory(events: OrchestrationEvent[]): void {
+	rehydrateHistory(events: CircuitEvent[]): void {
 		this.history.push(...events);
 	}
 }

@@ -56,7 +56,7 @@ import type { SessionLog } from "./session-log";
 import type { StepPromptBuilder } from "./step-prompt-builder";
 import type { StepConversationStore } from "./step-conversation-store";
 import type { CodeStepExecutor } from "./code-step-executor";
-import type { OrchestrationEvent, OrchestrationFlow, StepDefinition } from "./types";
+import type { CircuitEvent, Circuit, StepDefinition } from "./types";
 
 const log = logger("StepTurnExecutor");
 
@@ -106,7 +106,7 @@ export type IncludeResolver = (body: string, notePath: string) => Promise<string
  *
  * Injected (not open-coded) so `StepTurnExecutor` stays free of `obsidian`'s
  * `Notice` and of `ChatOrchestrator` — the runtime wiring (`launch.ts`) supplies
- * a callback that builds the Notice via `showOrchestrationProgressNotice(...)`
+ * a callback that builds the Notice via `showCircuitProgressNotice(...)`
  * and closes the jump over `switchToConversationById(conversationId)`. Omitted in
  * unit tests → no Notice (the engine's routing is unaffected). Mirrors the
  * `notifyError` injection the code-step path already uses.
@@ -169,11 +169,11 @@ export interface StepTurnExecutorDeps {
 /** Inputs the runner threads into a single step-turn execution. */
 export interface StepTurnRequest {
 	step: StepDefinition;
-	flow: OrchestrationFlow;
+	flow: Circuit;
 	/** The incoming trigger event. */
-	event: OrchestrationEvent;
+	event: CircuitEvent;
 	/** Recent event history (for the prompt scaffold). */
-	eventHistory: OrchestrationEvent[];
+	eventHistory: CircuitEvent[];
 	/** The original user objective (injected every turn). */
 	objective: string;
 	/** Engine hop/turn counter. */

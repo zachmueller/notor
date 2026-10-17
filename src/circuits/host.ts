@@ -1,8 +1,8 @@
 /**
- * `OrchestrationHost` (F6) — the narrow capability interface the orchestration
+ * `CircuitHost` (F6) — the narrow capability interface the orchestration
  * integration layer depends on, instead of the concrete `NotorPlugin`.
  *
- * `NotorPlugin implements OrchestrationHost` structurally: every member already
+ * `NotorPlugin implements CircuitHost` structurally: every member already
  * exists on the plugin, so the `implements` clause simply makes the compiler
  * enforce that the plugin never drifts away from what launch-wiring /
  * run-lifecycle / child-spawn / recovery-boot need. The one plugin-shaped member
@@ -11,7 +11,7 @@
  * territory, out of scope here.
  *
  * Precedent for this deps-interface style: `StepTurnExecutorDeps` /
- * `OrchestrationRunnerDeps` in the core — this extends the same pattern one layer
+ * `CircuitRunnerDeps` in the core — this extends the same pattern one layer
  * out.
  *
  * @see specs/ZZ-misc/arch-review-july-2026/F6-launch-ts-decomposition.md — §3
@@ -26,9 +26,9 @@ import type { PersonaManager } from "../personas/persona-manager";
 import type { ChatOrchestrator } from "../chat/orchestrator";
 import type { FlowRunEntry } from "../workflows/workflow-activity-tracker";
 import type { ExtensionUtils } from "../extensions/runtime-context/types";
-import type { OrchestrationRunRegistry } from "./run-registry";
+import type { CircuitRunRegistry } from "./run-registry";
 
-export interface OrchestrationHost {
+export interface CircuitHost {
 	readonly app: App;
 	readonly settings: NotorSettings;
 	readonly vaultRootPath: string;
@@ -48,5 +48,5 @@ export interface OrchestrationHost {
 	 */
 	buildExtensionUtils(): ExtensionUtils;
 	/** F1 Fix 1: the in-memory live-run registry (Stop UI / liveness / teardown). */
-	getOrchestrationRunRegistry(): OrchestrationRunRegistry;
+	getCircuitRunRegistry(): CircuitRunRegistry;
 }

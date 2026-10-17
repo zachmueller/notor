@@ -12,25 +12,25 @@
  */
 
 import { Notice, ButtonComponent, normalizePath } from "obsidian";
-import type { OrchestrationHost } from "./host";
+import type { CircuitHost } from "./host";
 import type { AggregateBudget, OrchestrationToolContext } from "../run-loop/types";
 import { logger } from "../utils/logger";
-import { FlowDefinitionParser } from "./flow-parser";
+import { CircuitDefinitionParser } from "./circuit-parser";
 import { SessionLog } from "./session-log";
-import { OrchestrationSessionManager } from "./session-manager";
-import { OrchestrationRunner, type OrchestrationRunResult } from "./runner";
+import { CircuitSessionManager } from "./session-manager";
+import { CircuitRunner, type CircuitRunResult } from "./runner";
 import { SessionRecovery, type RecoveryFs, type RecoverableSession } from "./session-recovery";
 import { isSessionLogMtimeLive } from "./recovery-liveness";
-import type { OrchestrationFlow } from "./types";
+import type { Circuit } from "./types";
 import { VaultSessionFs, VaultSessionLogWriter, buildExecutor, listOpenTaskKeys } from "./launch-wiring";
 import { finalizeRun, reflectFlowRunStatus, type RequestUserInput } from "./run-lifecycle";
 
-const log = logger("OrchestrationLaunch");
+const log = logger("CircuitLaunch");
 
 /** Build the {@link RecoveryFs} the scan + child-resume read sessions through. */
 export function makeRecoveryFs(
-	host: OrchestrationHost,
-	sessionManager: OrchestrationSessionManager,
+	host: CircuitHost,
+	sessionManager: CircuitSessionManager,
 ): RecoveryFs {
 	const fsVault = new VaultSessionFs(host.app);
 	const sessionsRoot = `${sessionManager.rootPath}/sessions`;
@@ -79,21 +79,21 @@ export function makeRecoveryFs(
  */
 export interface RecoverDeps {
 	recoveryFs?: RecoveryFs;
-	/** The discoverable flows keyed by name (defaults to a live `discoverFlows()`). */
-	resolveFlows?: () => Promise<Map<string, OrchestrationFlow>>;
+	/** The discoverable flows keyed by name (defaults to a live `discoverCircuits()`). */
+	resolveFlows?: () => Promise<Map<string, Circuit>>;
 	/** Whether a still-`active` session's log looks live (defaults to the mtime check). */
 	isLive?: (sessionId: string) => Promise<boolean>;
 	/** Offer to resume one recoverable root (defaults to the Resume-button Notice). */
-	offerResume?: (flow: OrchestrationFlow, recovered: RecoverableSession) => void;
+	offerResume?: (flow: Circuit, recovered: RecoverableSession) => void;
 }
 
-export async function recoverOrchestrations(
-	host: OrchestrationHost,
+export async function recoverCircuits(
+	host: CircuitHost,
 	requestUserInput?: RequestUserInput,
 	deps?: RecoverDeps,
 ): Promise<void> {
 	const fsVault = new VaultSessionFs(host.app);
-	const sessionManager = new OrchestrationSessionManager(host.settings.notor_dir, fsVault);
+	const sessionManager = new CircuitSessionManager(host.settings.notor_dir, fsVault);
 	const recoveryFs = deps?.recoveryFs ?? makeRecoveryFs(host, sessionManager);
 
 	// Resolve each flow's finite ceilings so the budget re-seeds from the real
@@ -102,25 +102,25 @@ export async function recoverOrchestrations(
 		deps?.resolveFlows ??
 		(async () => {
 			try {
-				const parser = new FlowDefinitionParser(
+				const parser = new CircuitDefinitionParser(
 					host.app.vault,
 					host.app.metadataCache,
 					host.settings.notor_dir,
 				);
-				const parsed = await parser.discoverFlows();
+				const parsed = await parser.discoverCircuits();
 				return new Map(parsed.map((p) => [p.flow.name, p.flow]));
 			} catch (e) {
 				log.warn("Flow discovery during recovery failed; using engine-default ceilings", {
 					error: String(e),
 				});
-				return new Map<string, OrchestrationFlow>();
+				return new Map<string, Circuit>();
 			}
 		});
 	const flowsByName = await resolveFlows();
 	const isLive = deps?.isLive ?? ((sessionId: string) => isSessionLogLive(host, sessionManager, sessionId));
 	const offerResume =
 		deps?.offerResume ??
-		((flow: OrchestrationFlow, recovered: RecoverableSession) =>
+		((flow: Circuit, recovered: RecoverableSession) =>
 			offerResumeNotice(host, flow, recovered, sessionManager, requestUserInput));
 
 	const recovery = new SessionRecovery();
@@ -182,8 +182,8 @@ export async function recoverOrchestrations(
  * the pure {@link isSessionLogMtimeLive}.
  */
 async function isSessionLogLive(
-	host: OrchestrationHost,
-	sessionManager: OrchestrationSessionManager,
+	host: CircuitHost,
+	sessionManager: CircuitSessionManager,
 	sessionId: string,
 ): Promise<boolean> {
 	try {
@@ -201,10 +201,10 @@ async function isSessionLogLive(
  * Fix 2). The run restarts only on click — resume is offered, not forced.
  */
 function offerResumeNotice(
-	host: OrchestrationHost,
-	flow: OrchestrationFlow,
+	host: CircuitHost,
+	flow: Circuit,
 	recovered: RecoverableSession,
-	sessionManager: OrchestrationSessionManager,
+	sessionManager: CircuitSessionManager,
 	requestUserInput?: RequestUserInput,
 ): void {
 	const fragment = document.createDocumentFragment();
@@ -250,7 +250,7 @@ function offerResumeNotice(
  */
 export function dismissRecoveredSession(
 	recovered: RecoverableSession,
-	sessionManager: OrchestrationSessionManager,
+	sessionManager: CircuitSessionManager,
 ): Promise<void> {
 	return sessionManager.updateStatus(recovered.sessionId, "cancelled").catch((e) =>
 		log.error("Failed to persist resume-dismiss", {
@@ -267,13 +267,13 @@ export function dismissRecoveredSession(
  * re-seeds its budget from the rehydrated state.
  */
 export async function resumeRecoveredSession(
-	host: OrchestrationHost,
-	flow: OrchestrationFlow,
+	host: CircuitHost,
+	flow: Circuit,
 	recovered: RecoverableSession,
-	sessionManager: OrchestrationSessionManager,
+	sessionManager: CircuitSessionManager,
 	inheritedContext?: { budget: AggregateBudget; depth: number; abort?: AbortSignal },
 	requestUserInput?: RequestUserInput,
-): Promise<OrchestrationRunResult> {
+): Promise<CircuitRunResult> {
 	const ws = sessionManager.resolveWorkspace(recovered.sessionId);
 	await sessionManager.updateStatus(recovered.sessionId, "active").catch(() => undefined);
 
@@ -288,7 +288,7 @@ export async function resumeRecoveredSession(
 	// resume owns its controller and registers it so the Stop UI / onunload can
 	// cancel it (children are cancelled transitively via the cascade — register
 	// root sessions only, i.e. when no `inheritedContext` was passed).
-	const registry = host.getOrchestrationRunRegistry();
+	const registry = host.getCircuitRunRegistry();
 	const rootController = inheritedContext?.abort ? null : new AbortController();
 	const abortSignal = inheritedContext?.abort ?? rootController!.signal;
 	if (rootController) {
@@ -301,7 +301,7 @@ export async function resumeRecoveredSession(
 	}
 
 	const requestUserInputCb = requestUserInput;
-	const runner = new OrchestrationRunner({
+	const runner = new CircuitRunner({
 		executor,
 		sessionLog,
 		makeOrchestrationContext: (): OrchestrationToolContext => ({
@@ -342,7 +342,7 @@ export async function resumeRecoveredSession(
 		},
 	});
 
-	let result: OrchestrationRunResult;
+	let result: CircuitRunResult;
 	try {
 		result = await runner.resume(flow, recovered);
 	} catch (e) {

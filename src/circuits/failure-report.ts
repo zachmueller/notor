@@ -3,7 +3,7 @@
  *
  * When an orchestration run terminates with `status: "error"`, this composes a
  * human-readable Markdown debug report from data the engine **already** captures
- * — `session.json` meta, the `OrchestrationRunResult`, and the `session-log.jsonl`
+ * — `session.json` meta, the `CircuitRunResult`, and the `session-log.jsonl`
  * timeline — and writes it to a discoverable note under
  * `{notor_dir}/orchestrations/failures/{flow-slug}-{session_id}.md`. The user (or
  * Notor itself) can then open or `@`-reference that note to debug the failure
@@ -19,8 +19,8 @@
 
 import { logger } from "../utils/logger";
 import type { SessionFs } from "./session-manager";
-import type { OrchestrationRunResult } from "./runner";
-import type { OrchestrationSessionMeta } from "./types";
+import type { CircuitRunResult } from "./runner";
+import type { CircuitSessionMeta } from "./types";
 import { SessionLogReader } from "./session-log-reader";
 import type { SessionLogEntry } from "./session-log";
 
@@ -51,7 +51,7 @@ export function slugifyFlowName(flowName: string): string {
  * while the setting is off.
  */
 export function shouldWriteFailureReport(
-	status: OrchestrationRunResult["status"],
+	status: CircuitRunResult["status"],
 	settingEnabled: boolean,
 ): boolean {
 	return settingEnabled && status === "error";
@@ -70,9 +70,9 @@ export interface WriteFailureReportArgs {
 	notorDir: string;
 	fs: SessionFs;
 	/** The session's `session.json` metadata. */
-	meta: OrchestrationSessionMeta;
+	meta: CircuitSessionMeta;
 	/** The terminal run result (caller guarantees `status === "error"`). */
-	result: OrchestrationRunResult;
+	result: CircuitRunResult;
 	/** Raw `session-log.jsonl` contents, or `null` if unreadable. */
 	logJsonl: string | null;
 	/** `sessions/{id}` dir (vault-relative) for the raw-data pointer links. */
@@ -113,8 +113,8 @@ function parseLogEntriesSafe(logJsonl: string | null): SessionLogEntry[] {
 }
 
 interface BuildArgs {
-	meta: OrchestrationSessionMeta;
-	result: OrchestrationRunResult;
+	meta: CircuitSessionMeta;
+	result: CircuitRunResult;
 	entries: SessionLogEntry[];
 	sessionDir: string;
 }

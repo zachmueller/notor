@@ -1,7 +1,7 @@
 import { FuzzySuggestModal, MarkdownView, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type NotorPlugin from "../main";
-import type { OrchestrationRunHandle } from "../circuits/run-registry";
+import type { CircuitRunHandle } from "../circuits/run-registry";
 import { NotorChatView } from "../ui/chat-view";
 import {
 	showWorkflowPicker,
@@ -18,25 +18,25 @@ import { logger } from "../utils/logger";
 const log = logger("Commands");
 
 /** Fuzzy picker over live orchestration runs for the Stop Orchestration command. */
-class OrchestrationRunStopModal extends FuzzySuggestModal<OrchestrationRunHandle> {
+class CircuitRunStopModal extends FuzzySuggestModal<CircuitRunHandle> {
 	constructor(
 		app: App,
-		private readonly runs: OrchestrationRunHandle[],
+		private readonly runs: CircuitRunHandle[],
 		private readonly onChoose: (sessionId: string, flowName: string) => void,
 	) {
 		super(app);
 		this.setPlaceholder("Select a running orchestration flow to stop…");
 	}
 
-	getItems(): OrchestrationRunHandle[] {
+	getItems(): CircuitRunHandle[] {
 		return this.runs;
 	}
 
-	getItemText(run: OrchestrationRunHandle): string {
+	getItemText(run: CircuitRunHandle): string {
 		return `${run.flowName} (${run.sessionId})`;
 	}
 
-	onChooseItem(run: OrchestrationRunHandle): void {
+	onChooseItem(run: CircuitRunHandle): void {
 		this.onChoose(run.sessionId, run.flowName);
 	}
 }
@@ -375,8 +375,8 @@ export function registerCommands(plugin: NotorPlugin): void {
 		checkCallback: (checking: boolean) => {
 			if (!plugin.settings.orchestration_enabled) return false;
 			if (checking) return true;
-			void import("../circuits/launch").then(({ showOrchestrationPicker }) =>
-				showOrchestrationPicker(plugin).catch((e) => {
+			void import("../circuits/launch").then(({ showCircuitPicker }) =>
+				showCircuitPicker(plugin).catch((e) => {
 					log.error("Run Orchestration command failed", { error: String(e) });
 					new Notice(`Run Orchestration failed: ${e instanceof Error ? e.message : String(e)}`);
 				}),
@@ -393,7 +393,7 @@ export function registerCommands(plugin: NotorPlugin): void {
 		name: "Stop orchestration",
 		checkCallback: (checking: boolean) => {
 			if (!plugin.settings.orchestration_enabled) return false;
-			const registry = plugin.getOrchestrationRunRegistry();
+			const registry = plugin.getCircuitRunRegistry();
 			const live = registry.listActive();
 			if (live.length === 0) return false;
 			if (checking) return true;
@@ -402,7 +402,7 @@ export function registerCommands(plugin: NotorPlugin): void {
 				new Notice(`Stopping orchestration '${live[0]!.flowName}'…`);
 				return true;
 			}
-			new OrchestrationRunStopModal(plugin.app, live, (sessionId, flowName) => {
+			new CircuitRunStopModal(plugin.app, live, (sessionId, flowName) => {
 				registry.abort(sessionId);
 				new Notice(`Stopping orchestration '${flowName}'…`);
 			}).open();

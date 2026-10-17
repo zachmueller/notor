@@ -1,5 +1,5 @@
 /**
- * `OrchestrationRunTreeView` (POL-003 / FR-178) — the unified run-tree `ItemView`.
+ * `CircuitRunTreeView` (POL-003 / FR-178) — the unified run-tree `ItemView`.
  *
  * A read-only consumer of the contracts in
  * specs/ZZ-misc/orchestration/contracts/edges.md: it renders a run as a navigable,
@@ -42,7 +42,7 @@ import { logger } from "../utils/logger";
 
 const log = logger("RunTreeView");
 
-export const ORCHESTRATION_RUN_TREE_VIEW_TYPE = "notor-run-tree-view";
+export const CIRCUIT_RUN_TREE_VIEW_TYPE = "notor-run-tree-view";
 
 /** A node in the run tree, resolved from a step / sub-agent conversation header. */
 interface RunTreeNode {
@@ -79,7 +79,7 @@ interface ScannedHeader {
 	sub_agent_name?: string;
 }
 
-export class OrchestrationRunTreeView extends ItemView {
+export class CircuitRunTreeView extends ItemView {
 	private rootSessionId?: string;
 	private rootConversationId?: string;
 	private treeEl?: HTMLElement;
@@ -96,7 +96,7 @@ export class OrchestrationRunTreeView extends ItemView {
 	}
 
 	getViewType(): string {
-		return ORCHESTRATION_RUN_TREE_VIEW_TYPE;
+		return CIRCUIT_RUN_TREE_VIEW_TYPE;
 	}
 
 	getDisplayText(): string {

@@ -16,7 +16,7 @@ vi.mock("./chat-utils", () => ({
 vi.mock("./sub-agent-utils", () => ({ buildSubAgentUtils: () => ({ runSubAgent: async () => null }) }));
 vi.mock("./memory-utils", () => ({ buildMemoryUtils: () => ({ memory: null, memoryApprovalMode: null }) }));
 vi.mock("./plugin-utils", () => ({ buildPluginUtils: () => ({}) }));
-vi.mock("./circuit-utils", () => ({ buildOrchestrationUtils: () => ({}) }));
+vi.mock("./circuit-utils", () => ({ buildCircuitUtils: () => ({}) }));
 
 import { buildUtils } from "./index";
 import { RUNTIME_API_VERSION } from "./version";

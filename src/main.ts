@@ -89,14 +89,14 @@ import { PlanStore } from "./plans/plan-store";
 import { PlanReviewController, setPlanReviewController } from "./plans/plan-review-controller";
 import { PlanView, PLAN_VIEW_TYPE } from "./ui/plan-view";
 import { createPlanBlockDefinition } from "./ui/chat-blocks/plan-block";
-import { RunFlowTool, RUN_FLOW_TOOL_NAME } from "./tools/run-circuit";
-import { FlowCompositionManager } from "./circuits/flow-composition-manager";
-import type { SpawnChildFlow } from "./circuits/child-flow";
-import { OrchestrationRunRegistry } from "./circuits/run-registry";
-import type { OrchestrationHost } from "./circuits/host";
+import { RunCircuitTool, RUN_CIRCUIT_TOOL_NAME } from "./tools/run-circuit";
+import { CircuitCompositionManager } from "./circuits/circuit-composition-manager";
+import type { SpawnChildCircuit } from "./circuits/child-circuit";
+import { CircuitRunRegistry } from "./circuits/run-registry";
+import type { CircuitHost } from "./circuits/host";
 import { buildUtils } from "./extensions/runtime-context";
 import type { ExtensionUtils } from "./extensions/runtime-context/types";
-import type { OrchestrationFlow } from "./circuits/types";
+import type { Circuit } from "./circuits/types";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
@@ -147,7 +147,7 @@ import { TemplateVariableRegistry, registerBuiltinVars } from "./template-vars";
 
 // UI
 import { NotorChatView, CHAT_VIEW_TYPE } from "./ui/chat-view";
-import { OrchestrationRunTreeView, ORCHESTRATION_RUN_TREE_VIEW_TYPE } from "./ui/run-tree-view";
+import { CircuitRunTreeView, CIRCUIT_RUN_TREE_VIEW_TYPE } from "./ui/run-tree-view";
 import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effective-config-inspector";
 import { resolveNote } from "./utils/resolve-note";
 
@@ -159,7 +159,7 @@ function providerConfigKey(config: LLMProviderConfig): string {
 	return JSON.stringify(rest);
 }
 
-export default class NotorPlugin extends Plugin implements OrchestrationHost {
+export default class NotorPlugin extends Plugin implements CircuitHost {
 	settings: NotorSettings;
 
 	/**
@@ -280,11 +280,11 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	 * lifecycle handle. Deliberately not persisted — after a crash the recovery
 	 * liveness guard is the protection.
 	 */
-	private _orchestrationRunRegistry = new OrchestrationRunRegistry();
+	private _circuitRunRegistry = new CircuitRunRegistry();
 
 	/** The live orchestration-run registry (F1 Fix 1). */
-	getOrchestrationRunRegistry(): OrchestrationRunRegistry {
-		return this._orchestrationRunRegistry;
+	getCircuitRunRegistry(): CircuitRunRegistry {
+		return this._circuitRunRegistry;
 	}
 
 	// -----------------------------------------------------------------------
@@ -330,11 +330,11 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 
 	/**
 	 * Cached orchestration-flow discovery results. In-memory only — re-discovered
-	 * from vault via `rescanFlows()`. Read synchronously by the `VaultEventScheduler`
+	 * from vault via `rescanCircuits()`. Read synchronously by the `VaultEventScheduler`
 	 * (which is sync) to register `notor-schedule` cron jobs. Empty when
 	 * `orchestration_enabled` is off.
 	 */
-	private _discoveredFlows: OrchestrationFlow[] = [];
+	private _discoveredCircuits: Circuit[] = [];
 
 	/** Debounce timer for vault-triggered workflow rescans. */
 	private _workflowRescanTimer: ReturnType<typeof setTimeout> | null = null;
@@ -420,7 +420,7 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	 */
 	/**
 	 * Build the extension `utils` object a code step receives (F6
-	 * {@link OrchestrationHost}). Wraps `buildUtils(this)` so the host interface
+	 * {@link CircuitHost}). Wraps `buildUtils(this)` so the host interface
 	 * stays plugin-shaped in exactly this one member instead of leaking the whole
 	 * plugin type into the orchestration layer.
 	 */
@@ -551,8 +551,8 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		// scalar; opened from a run_flow/sub-agent card, the activity indicator, or a
 		// progress Notice via openRunTreeView().
 		this.registerView(
-			ORCHESTRATION_RUN_TREE_VIEW_TYPE,
-			(leaf) => new OrchestrationRunTreeView(leaf, this),
+			CIRCUIT_RUN_TREE_VIEW_TYPE,
+			(leaf) => new CircuitRunTreeView(leaf, this),
 		);
 
 		// 3a-iii. Register the plan review leaf (submit_plan → review → hand-back).
@@ -812,9 +812,9 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 					import("./circuits/launch"),
 					import("./ui/circuit-modals"),
 				])
-					.then(([{ recoverOrchestrations }, { requestOrchestrationInput }]) =>
-						recoverOrchestrations(this, (flowName, question) =>
-							requestOrchestrationInput(this.app, flowName, question),
+					.then(([{ recoverCircuits }, { requestCircuitInput }]) =>
+						recoverCircuits(this, (flowName, question) =>
+							requestCircuitInput(this.app, flowName, question),
 						),
 					)
 					.catch((e) => log.warn("Orchestration recovery scan failed", { error: String(e) }));
@@ -889,7 +889,7 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		// runner does not finalize before the process tears down the session stays
 		// `active`; Fix 2's recovery liveness guard makes the subsequent auto-resume
 		// safe. Never hang onunload.
-		const abortedRuns = this._orchestrationRunRegistry.abortAll();
+		const abortedRuns = this._circuitRunRegistry.abortAll();
 		if (abortedRuns.length > 0) {
 			log.info("Aborted live orchestration runs on unload", { count: abortedRuns.length });
 		}
@@ -1120,18 +1120,18 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 				// FEAT-012: hook-triggered orchestration launch (FR-119b). Present
 				// only when orchestration_enabled — otherwise the dispatcher skips
 				// the action with a diagnostic Notice.
-				launchOrchestration: this.settings.orchestration_enabled
+				launchCircuit: this.settings.orchestration_enabled
 					? async (flowNameOrDir: string, objective: string) => {
-							const { FlowDefinitionParser } = await import("./circuits/flow-parser");
-							const { launchOrchestration } = await import("./circuits/launch");
-							const { requestOrchestrationInput } = await import("./ui/circuit-modals");
-							const parser = new FlowDefinitionParser(
+							const { CircuitDefinitionParser } = await import("./circuits/circuit-parser");
+							const { launchCircuit } = await import("./circuits/launch");
+							const { requestCircuitInput } = await import("./ui/circuit-modals");
+							const parser = new CircuitDefinitionParser(
 								this.app.vault,
 								this.app.metadataCache,
 								this.settings.notor_dir,
 							);
 							// Resolve by directory if it looks like a path, else by flow name.
-							const flows = await parser.discoverFlows();
+							const flows = await parser.discoverCircuits();
 							const ref = flowNameOrDir.trim();
 							const match = flows.find(
 								(f) => f.flow.name === ref || f.flow.flowDir === ref || f.flow.flowDir.endsWith(`/${ref}`),
@@ -1140,10 +1140,10 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 								new Notice(`Orchestration flow '${ref}' not found; hook skipped.`);
 								return;
 							}
-							await launchOrchestration(this, match.flow, objective, {
+							await launchCircuit(this, match.flow, objective, {
 								origin: "hook",
 								requestUserInput: (flowName, question) =>
-									requestOrchestrationInput(this.app, flowName, question),
+									requestCircuitInput(this.app, flowName, question),
 							});
 						}
 					: undefined,
@@ -1226,18 +1226,18 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		// flows with a `notor-schedule` get cron jobs. The launcher resolves a
 		// fresh definition from disk (the cached flow may be stale) and launches
 		// with `origin: "schedule"`. Gated on `orchestration_enabled` — when off,
-		// `_discoveredFlows` is already empty so no jobs are registered.
+		// `_discoveredCircuits` is already empty so no jobs are registered.
 		vaultEventScheduler.setDiscoveredFlows(
-			() => this._discoveredFlows,
+			() => this._discoveredCircuits,
 			async (flow) => {
 				if (!this.settings.orchestration_enabled) return;
-				const { launchOrchestration } = await import("./circuits/launch");
-				const { requestOrchestrationInput } = await import("./ui/circuit-modals");
+				const { launchCircuit } = await import("./circuits/launch");
+				const { requestCircuitInput } = await import("./ui/circuit-modals");
 				const objective = `Scheduled run of orchestration flow '${flow.name}'.`;
-				await launchOrchestration(this, flow, objective, {
+				await launchCircuit(this, flow, objective, {
 					origin: "schedule",
 					requestUserInput: (flowName, question) =>
-						requestOrchestrationInput(this.app, flowName, question),
+						requestCircuitInput(this.app, flowName, question),
 				});
 			},
 		);
@@ -1272,7 +1272,7 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 
 			// Discover scheduled orchestration flows and register their cron jobs
 			// (no-op + empty cache when orchestration_enabled is off). Fire-and-forget.
-			void this.rescanFlows().catch((e) =>
+			void this.rescanCircuits().catch((e) =>
 				log.warn("Initial orchestration flow scan failed", { error: String(e) }),
 			);
 
@@ -1768,9 +1768,9 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			// enum, mirroring use_subagent), gated on `orchestration_enabled`. Unlike
 			// the orchestration *scaffolds* (auto-gated by the ExtensionManager), this
 			// class-based tool is gated by its registration here + the settings toggle
-			// (see syncRunFlowToolRegistration). Skipped entirely when the group is off.
+			// (see syncRunCircuitToolRegistration). Skipped entirely when the group is off.
 			if (this.settings.orchestration_enabled) {
-				this.registerRunFlowTool(this._toolRegistry);
+				this.registerRunCircuitTool(this._toolRegistry);
 			}
 
 			log.debug("Tool registry initialized", {
@@ -1781,32 +1781,32 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	}
 
 	/** Construct + register `run_flow` into the registry (INT-042). */
-	private registerRunFlowTool(registry: ToolRegistry): void {
-		const composition = new FlowCompositionManager(
+	private registerRunCircuitTool(registry: ToolRegistry): void {
+		const composition = new CircuitCompositionManager(
 			this.app.vault,
 			this.app.metadataCache,
 			this.settings.notor_dir,
 		);
 		// Lazy spawner (F6 Phase 4): defer loading the orchestration layer
 		// (`./circuits/launch` + the ui modals it pulls) until `run_flow`
-		// actually executes — the spawner is only invoked inside RunFlowTool.execute(),
+		// actually executes — the spawner is only invoked inside RunCircuitTool.execute(),
 		// which is async, so the dynamic import + real spawner are memoized on first
 		// call. This keeps the whole orchestration graph off the plugin's load path.
-		let realSpawner: SpawnChildFlow | undefined;
-		const spawnChildFlow: SpawnChildFlow = async (req) => {
+		let realSpawner: SpawnChildCircuit | undefined;
+		const spawnChildFlow: SpawnChildCircuit = async (req) => {
 			if (!realSpawner) {
-				const { makeChildFlowSpawner } = await import("./circuits/launch");
-				const { requestOrchestrationInput } = await import("./ui/circuit-modals");
-				realSpawner = makeChildFlowSpawner(this, (flowName, question) =>
-					requestOrchestrationInput(this.app, flowName, question),
+				const { makeChildCircuitSpawner } = await import("./circuits/launch");
+				const { requestCircuitInput } = await import("./ui/circuit-modals");
+				realSpawner = makeChildCircuitSpawner(this, (flowName, question) =>
+					requestCircuitInput(this.app, flowName, question),
 				);
 			}
 			return realSpawner(req);
 		};
-		const runFlowTool = new RunFlowTool(composition, spawnChildFlow);
+		const runFlowTool = new RunCircuitTool(composition, spawnChildFlow);
 		registry.register(runFlowTool);
 		// Prime the invocable-flow cache (hot-reloaded again at each execute()).
-		runFlowTool.refreshInvocableFlows().catch((e) =>
+		runFlowTool.refreshInvocableCircuits().catch((e) =>
 			log.warn("Failed to prime run_flow invocable flows", { error: String(e) }),
 		);
 	}
@@ -1817,18 +1817,18 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	 * disable it unregisters from both, so the tool appears/disappears with the
 	 * feature group exactly like the orchestration scaffolds.
 	 */
-	syncRunFlowToolRegistration(): void {
+	syncRunCircuitToolRegistration(): void {
 		const registry = this.getToolRegistry();
-		const present = registry.get(RUN_FLOW_TOOL_NAME) !== undefined;
+		const present = registry.get(RUN_CIRCUIT_TOOL_NAME) !== undefined;
 		if (this.settings.orchestration_enabled && !present) {
-			this.registerRunFlowTool(registry);
-			const tool = registry.get(RUN_FLOW_TOOL_NAME);
-			if (tool && this._toolDispatcher && !this._toolDispatcher.hasTool(RUN_FLOW_TOOL_NAME)) {
+			this.registerRunCircuitTool(registry);
+			const tool = registry.get(RUN_CIRCUIT_TOOL_NAME);
+			if (tool && this._toolDispatcher && !this._toolDispatcher.hasTool(RUN_CIRCUIT_TOOL_NAME)) {
 				this._toolDispatcher.registerTool(tool);
 			}
 		} else if (!this.settings.orchestration_enabled && present) {
-			registry.unregister(RUN_FLOW_TOOL_NAME);
-			this._toolDispatcher?.unregisterTool(RUN_FLOW_TOOL_NAME);
+			registry.unregister(RUN_CIRCUIT_TOOL_NAME);
+			this._toolDispatcher?.unregisterTool(RUN_CIRCUIT_TOOL_NAME);
 		}
 	}
 
@@ -2473,12 +2473,12 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	/**
 	 * Synchronous accessor for the last discovered orchestration flows.
 	 *
-	 * Refreshed via `rescanFlows()`. Read by the Automation settings section and
+	 * Refreshed via `rescanCircuits()`. Read by the Automation settings section and
 	 * the `VaultEventScheduler` to surface / register `notor-schedule` cron jobs.
 	 * Returns `[]` when `orchestration_enabled` is off.
 	 */
-	getDiscoveredFlows(): OrchestrationFlow[] {
-		return this._discoveredFlows;
+	getDiscoveredCircuits(): Circuit[] {
+		return this._discoveredCircuits;
 	}
 
 	/**
@@ -2489,9 +2489,9 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 	 * No-ops to an empty cache when `orchestration_enabled` is off — a disabled
 	 * feature must not register scheduled runs.
 	 */
-	async rescanFlows(): Promise<OrchestrationFlow[]> {
+	async rescanCircuits(): Promise<Circuit[]> {
 		if (!this.settings.orchestration_enabled) {
-			this._discoveredFlows = [];
+			this._discoveredCircuits = [];
 			this._vaultEventScheduler?.syncJobs(
 				this.settings.vault_event_hooks.on_schedule.filter((h) => h.enabled),
 			);
@@ -2499,21 +2499,21 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		}
 
 		try {
-			const { FlowDefinitionParser } = await import("./circuits/flow-parser");
-			const parser = new FlowDefinitionParser(
+			const { CircuitDefinitionParser } = await import("./circuits/circuit-parser");
+			const parser = new CircuitDefinitionParser(
 				this.app.vault,
 				this.app.metadataCache,
 				this.settings.notor_dir,
 			);
-			const parsed = await parser.discoverFlows();
-			this._discoveredFlows = parsed.map((p) => p.flow);
+			const parsed = await parser.discoverCircuits();
+			this._discoveredCircuits = parsed.map((p) => p.flow);
 			log.debug("Flow cache updated", {
-				count: this._discoveredFlows.length,
-				scheduled: this._discoveredFlows.filter((f) => f.schedule).map((f) => f.name),
+				count: this._discoveredCircuits.length,
+				scheduled: this._discoveredCircuits.filter((f) => f.schedule).map((f) => f.name),
 			});
 		} catch (e) {
 			log.warn("Orchestration flow rescan failed", { error: String(e) });
-			this._discoveredFlows = [];
+			this._discoveredCircuits = [];
 		}
 
 		if (this._vaultEventScheduler) {
@@ -2522,11 +2522,11 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 			);
 		}
 
-		return this._discoveredFlows;
+		return this._discoveredCircuits;
 	}
 
 	/**
-	 * Debounced wrapper around `rescanFlows()` for vault event handlers.
+	 * Debounced wrapper around `rescanCircuits()` for vault event handlers.
 	 * Coalesces rapid bursts (e.g. bulk sync) into a single rescan.
 	 */
 	private scheduleFlowRescan(): void {
@@ -2535,7 +2535,7 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		}
 		this._flowRescanTimer = setTimeout(() => {
 			this._flowRescanTimer = null;
-			void this.rescanFlows().catch((e) =>
+			void this.rescanCircuits().catch((e) =>
 				log.warn("Vault-triggered flow rescan failed", { error: String(e) }),
 			);
 		}, 300);
@@ -3044,17 +3044,17 @@ export default class NotorPlugin extends Plugin implements OrchestrationHost {
 		const { workspace } = this.app;
 		const state = { rootSessionId: root.sessionId, rootConversationId: root.conversationId };
 
-		const existing = workspace.getLeavesOfType(ORCHESTRATION_RUN_TREE_VIEW_TYPE);
+		const existing = workspace.getLeavesOfType(CIRCUIT_RUN_TREE_VIEW_TYPE);
 		if (existing.length > 0) {
 			const leaf = existing[0]!;
-			await leaf.setViewState({ type: ORCHESTRATION_RUN_TREE_VIEW_TYPE, active: true, state });
+			await leaf.setViewState({ type: CIRCUIT_RUN_TREE_VIEW_TYPE, active: true, state });
 			void workspace.revealLeaf(leaf);
 			return;
 		}
 
 		const leaf = workspace.getRightLeaf(false);
 		if (leaf) {
-			await leaf.setViewState({ type: ORCHESTRATION_RUN_TREE_VIEW_TYPE, active: true, state });
+			await leaf.setViewState({ type: CIRCUIT_RUN_TREE_VIEW_TYPE, active: true, state });
 			void workspace.revealLeaf(leaf);
 		}
 	}

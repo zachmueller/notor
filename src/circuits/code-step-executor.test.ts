@@ -26,10 +26,10 @@ import {
 } from "./code-step-executor";
 import { SessionLog, type SessionLogWriter } from "./session-log";
 import { TaskRegistry, type TaskFs } from "./task-registry";
-import type { ScratchpadFs } from "./orchestration-helper";
+import type { ScratchpadFs } from "./circuit-helper";
 import type {
-	OrchestrationEvent,
-	OrchestrationFlow,
+	CircuitEvent,
+	Circuit,
 	StepDefinition,
 } from "./types";
 import type { StepTurnRequest } from "./step-turn-executor";
@@ -114,7 +114,7 @@ function step(over: Partial<StepDefinition> = {}): StepDefinition {
 	};
 }
 
-function flow(): OrchestrationFlow {
+function flow(): Circuit {
 	return {
 		name: "Demo",
 		description: "",
@@ -160,7 +160,7 @@ function runContext(): RunContext {
 	};
 }
 
-function event(payload = ""): OrchestrationEvent {
+function event(payload = ""): CircuitEvent {
 	return { topic: "build.done", payload, source_step: "Builder", turn: 0, ts: "T" };
 }
 

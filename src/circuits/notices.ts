@@ -13,7 +13,7 @@
  * (`src/circuits/step-turn-executor.ts`), keeping `src/run-loop/`
  * Notice-free (run-loop contract: "Notices stay out of the engine").
  *
- * **Notice-fatigue seam (AC-4).** `showOrchestrationProgressNotice` accepts a
+ * **Notice-fatigue seam (AC-4).** `showCircuitProgressNotice` accepts a
  * `suppress` flag so a long-running loop can withhold the toast without losing
  * progress: a suppressed turn still wrote `turn.complete` and still drove the
  * live run-tree update upstream (those happen *before* this call in the
@@ -34,7 +34,7 @@ import { Notice, Platform } from "obsidian";
 export const PROGRESS_NOTICE_TIMEOUT_MS = 5000;
 
 /** Inputs for the per-turn progress Notice (INT-020 + INT-021). */
-export interface OrchestrationProgressNoticeArgs {
+export interface CircuitProgressNoticeArgs {
 	/** `notor-flow-name` of the running flow (conversation-header §1). */
 	flowName: string;
 	/** `notor-step-name` of the step that produced this turn. */
@@ -100,7 +100,7 @@ export function buildProgressNoticeMessage(args: {
  * right-click affordance and the hint line. A `suppress: true` call shows nothing
  * (Notice-fatigue seam, AC-4).
  */
-export function showOrchestrationProgressNotice(args: OrchestrationProgressNoticeArgs): void {
+export function showCircuitProgressNotice(args: CircuitProgressNoticeArgs): void {
 	// Notice-fatigue seam (AC-4): the toast is the opt-in interrupt; the run-tree
 	// (driven by the upstream session-log writes) is the always-on progress surface.
 	if (args.suppress) return;

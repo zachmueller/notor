@@ -41,10 +41,10 @@ import { READ_NOTOR_SETTINGS } from "./read-notor-settings";
 import { EDIT_NOTOR_SETTINGS } from "./edit-notor-settings";
 import { EMIT_EVENT } from "./emit-event";
 import { INVOKE_WORKFLOW } from "./invoke-workflow";
-import { ORCHESTRATION_TASK_ENSURE } from "./circuit-task-ensure";
-import { ORCHESTRATION_TASK_START } from "./circuit-task-start";
-import { ORCHESTRATION_TASK_CLOSE } from "./circuit-task-close";
-import { ORCHESTRATION_TASK_LIST } from "./circuit-task-list";
+import { CIRCUIT_TASK_ENSURE } from "./circuit-task-ensure";
+import { CIRCUIT_TASK_START } from "./circuit-task-start";
+import { CIRCUIT_TASK_CLOSE } from "./circuit-task-close";
+import { CIRCUIT_TASK_LIST } from "./circuit-task-list";
 
 /**
  * All built-in tool scaffolds, keyed by tool name.
@@ -95,10 +95,10 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[EDIT_NOTOR_SETTINGS.name, EDIT_NOTOR_SETTINGS],
 		[EMIT_EVENT.name, EMIT_EVENT],
 		[INVOKE_WORKFLOW.name, INVOKE_WORKFLOW],
-		[ORCHESTRATION_TASK_ENSURE.name, ORCHESTRATION_TASK_ENSURE],
-		[ORCHESTRATION_TASK_START.name, ORCHESTRATION_TASK_START],
-		[ORCHESTRATION_TASK_CLOSE.name, ORCHESTRATION_TASK_CLOSE],
-		[ORCHESTRATION_TASK_LIST.name, ORCHESTRATION_TASK_LIST],
+		[CIRCUIT_TASK_ENSURE.name, CIRCUIT_TASK_ENSURE],
+		[CIRCUIT_TASK_START.name, CIRCUIT_TASK_START],
+		[CIRCUIT_TASK_CLOSE.name, CIRCUIT_TASK_CLOSE],
+		[CIRCUIT_TASK_LIST.name, CIRCUIT_TASK_LIST],
 	]);
 
 /**

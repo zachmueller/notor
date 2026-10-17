@@ -10,9 +10,9 @@
 
 import { describe, it, expect } from "vitest";
 import { FallbackCoordinator } from "./fallback-coordinator";
-import { FLOW_ERROR, type OrchestrationEvent, type OrchestrationFlow } from "./types";
+import { FLOW_ERROR, type CircuitEvent, type Circuit } from "./types";
 
-function fakeFlow(): OrchestrationFlow {
+function fakeFlow(): Circuit {
 	return {
 		name: "Demo",
 		description: "",
@@ -38,7 +38,7 @@ function fakeFlow(): OrchestrationFlow {
 	};
 }
 
-function event(topic: string, sourceStep: string | null = "StepA"): OrchestrationEvent {
+function event(topic: string, sourceStep: string | null = "StepA"): CircuitEvent {
 	return { topic, payload: "ctx", source_step: sourceStep, turn: 3, ts: "2026-06-28T00:00:00Z" };
 }
 

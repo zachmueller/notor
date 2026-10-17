@@ -45,7 +45,7 @@ vi.mock("obsidian", () => ({
 }));
 
 import {
-	showOrchestrationProgressNotice,
+	showCircuitProgressNotice,
 	buildProgressNoticeMessage,
 	PROGRESS_NOTICE_TIMEOUT_MS,
 } from "./notices";
@@ -98,12 +98,12 @@ describe("buildProgressNoticeMessage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// showOrchestrationProgressNotice — synthesis (INT-020) + jump (INT-021)
+// showCircuitProgressNotice — synthesis (INT-020) + jump (INT-021)
 // ---------------------------------------------------------------------------
 
-describe("showOrchestrationProgressNotice — synthesis (INT-020)", () => {
+describe("showCircuitProgressNotice — synthesis (INT-020)", () => {
 	it("shows a Notice naming flow + step + iteration + topic (AC-1 / AC-2)", () => {
-		showOrchestrationProgressNotice({
+		showCircuitProgressNotice({
 			flowName: "Code Implementation",
 			stepName: "📋 Planner",
 			iteration: 3,
@@ -119,7 +119,7 @@ describe("showOrchestrationProgressNotice — synthesis (INT-020)", () => {
 	});
 
 	it("honors a custom timeout override", () => {
-		showOrchestrationProgressNotice({
+		showCircuitProgressNotice({
 			flowName: "F",
 			stepName: "S",
 			iteration: 1,
@@ -130,7 +130,7 @@ describe("showOrchestrationProgressNotice — synthesis (INT-020)", () => {
 	});
 
 	it("withholds the toast when suppressed (AC-4, Notice fatigue)", () => {
-		showOrchestrationProgressNotice({
+		showCircuitProgressNotice({
 			flowName: "F",
 			stepName: "S",
 			iteration: 7,
@@ -142,7 +142,7 @@ describe("showOrchestrationProgressNotice — synthesis (INT-020)", () => {
 
 	it("emits one Notice per call when not suppressed (v1 one-per-turn)", () => {
 		for (let i = 1; i <= 3; i++) {
-			showOrchestrationProgressNotice({
+			showCircuitProgressNotice({
 				flowName: "F",
 				stepName: "S",
 				iteration: i,
@@ -153,11 +153,11 @@ describe("showOrchestrationProgressNotice — synthesis (INT-020)", () => {
 	});
 });
 
-describe("showOrchestrationProgressNotice — desktop right-click jump (INT-021)", () => {
+describe("showCircuitProgressNotice — desktop right-click jump (INT-021)", () => {
 	it("desktop: attaches oncontextmenu invoking the jump with the right conversation id (AC-1)", () => {
 		platform.isDesktop = true;
 		const jump = vi.fn();
-		showOrchestrationProgressNotice({
+		showCircuitProgressNotice({
 			flowName: "F",
 			stepName: "S",
 			iteration: 1,
@@ -179,7 +179,7 @@ describe("showOrchestrationProgressNotice — desktop right-click jump (INT-021)
 		// Mirror how launch.ts closes the jump over a specific conversation id.
 		const opened: string[] = [];
 		const conversationId = "step-conv-hidden-from-flat-list";
-		showOrchestrationProgressNotice({
+		showCircuitProgressNotice({
 			flowName: "F",
 			stepName: "S",
 			iteration: 2,
@@ -194,7 +194,7 @@ describe("showOrchestrationProgressNotice — desktop right-click jump (INT-021)
 	it("mobile: attaches no handler and adds no hint line (AC-2)", () => {
 		platform.isDesktop = false;
 		const jump = vi.fn();
-		showOrchestrationProgressNotice({
+		showCircuitProgressNotice({
 			flowName: "F",
 			stepName: "S",
 			iteration: 1,
@@ -209,7 +209,7 @@ describe("showOrchestrationProgressNotice — desktop right-click jump (INT-021)
 
 	it("desktop but no conversation id/callback: no handler, no hint", () => {
 		platform.isDesktop = true;
-		showOrchestrationProgressNotice({
+		showCircuitProgressNotice({
 			flowName: "F",
 			stepName: "S",
 			iteration: 1,
@@ -222,7 +222,7 @@ describe("showOrchestrationProgressNotice — desktop right-click jump (INT-021)
 
 	it("suppressed desktop turn produces no Notice to right-click (AC-5 inherited)", () => {
 		platform.isDesktop = true;
-		showOrchestrationProgressNotice({
+		showCircuitProgressNotice({
 			flowName: "F",
 			stepName: "S",
 			iteration: 9,

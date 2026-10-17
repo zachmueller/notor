@@ -20,8 +20,8 @@ import type { UserAutomationDefinition } from "../../extensions/types";
 import type { Workflow } from "../../types";
 import { discoverWorkflows } from "../../workflows/workflow-discovery";
 import type { VaultEventScheduler } from "../../hooks/vault-event-scheduler";
-import type { OrchestrationFlow } from "../../circuits/types";
-import { flowEnabledKey, flowJobKey } from "../../circuits/flow-enabled";
+import type { Circuit } from "../../circuits/types";
+import { circuitEnabledKey, circuitJobKey } from "../../circuits/circuit-enabled";
 import { logger } from "../../utils/logger";
 
 const log = logger("UserAutomationsSection");
@@ -85,7 +85,7 @@ type AutomationItem = {
 	scaffold?: BuiltinAutomationScaffold;
 } | {
 	kind: "flow";
-	flow: OrchestrationFlow;
+	flow: Circuit;
 	name: string;
 	triggerKey: string;
 	isBuiltin: false;
@@ -128,7 +128,7 @@ function collectAllItems(ctx: SettingsContext): AutomationItem[] {
 	// 1b. Scheduled orchestration flows (flows with a valid `notor-schedule`).
 	// Only when orchestration is enabled — the cache is empty otherwise.
 	if (ctx.settings.orchestration_enabled) {
-		for (const flow of ctx.plugin.getDiscoveredFlows()) {
+		for (const flow of ctx.plugin.getDiscoveredCircuits()) {
 			if (!flow.schedule) continue;
 			items.push({
 				kind: "flow",
@@ -274,7 +274,7 @@ function renderFlowRow(
 	ctx: SettingsContext,
 ): void {
 	const flow = item.flow;
-	const enableKey = flowEnabledKey(flow.flowDir);
+	const enableKey = circuitEnabledKey(flow.flowDir);
 	const isEnabled = ctx.settings.flow_enabled[enableKey] !== false;
 
 	// Description: schedule + next run (flows in this group always have a schedule).
@@ -295,7 +295,7 @@ function renderFlowRow(
 	});
 
 	// Status dot
-	const isActive = scheduler?.isJobActive(flowJobKey(flow.flowDir)) ?? false;
+	const isActive = scheduler?.isJobActive(circuitJobKey(flow.flowDir)) ?? false;
 	const dot = setting.nameEl.createSpan({
 		cls: `notor-schedule-status-dot ${isActive ? "notor-schedule-active" : "notor-schedule-inactive"}`,
 	});
@@ -311,7 +311,7 @@ function renderFlowRow(
 				ctx.settings.flow_enabled[enableKey] = value;
 				await ctx.saveSettings();
 				// Re-sync cron jobs so the schedule starts/stops immediately.
-				await ctx.plugin.rescanFlows();
+				await ctx.plugin.rescanCircuits();
 				ctx.redisplay();
 			}),
 	);

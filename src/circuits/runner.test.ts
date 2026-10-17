@@ -1,5 +1,5 @@
 /**
- * TEST-002 (part 4) + Phase-1 exit gate — `OrchestrationRunner` end-to-end.
+ * TEST-002 (part 4) + Phase-1 exit gate — `CircuitRunner` end-to-end.
  *
  * Drives a hand-authored flow with a FAKE `StepTurnExecutor` (no LLM, no vault):
  *  - single-flow happy path → FLOW_COMPLETE;
@@ -14,7 +14,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { COMPLETION_NOPROGRESS_THRESHOLD } from "./constants";
-import { OrchestrationRunner } from "./runner";
+import { CircuitRunner } from "./runner";
 import { SessionRecovery, type RecoverableSession } from "./session-recovery";
 import type { SessionLogEntry } from "./session-log";
 import type { StepTurnExecutor, StepTurnRequest, StepTurnResult } from "./step-turn-executor";
@@ -22,7 +22,7 @@ import type { SessionLog } from "./session-log";
 import {
 	FLOW_CANCELLED,
 	FLOW_COMPLETE,
-	type OrchestrationFlow,
+	type Circuit,
 	type StepDefinition,
 } from "./types";
 
@@ -66,7 +66,7 @@ function step(name: string, over: Partial<StepDefinition> = {}): StepDefinition 
 	};
 }
 
-function flow(steps: StepDefinition[], over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
+function flow(steps: StepDefinition[], over: Partial<Circuit> = {}): Circuit {
 	return {
 		name: "Demo",
 		description: "",
@@ -116,12 +116,12 @@ function fakeExecutor(
 }
 
 function makeRunner(
-	f: OrchestrationFlow,
+	f: Circuit,
 	executor: StepTurnExecutor,
 	listOpenTasks?: () => Promise<Array<{ key: string; description: string }>>,
 ) {
 	let convId = 0;
-	return new OrchestrationRunner({
+	return new CircuitRunner({
 		executor,
 		sessionLog: noopLog(),
 		makeOrchestrationContext: () => ({
@@ -144,7 +144,7 @@ function makeRunner(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("OrchestrationRunner", () => {
+describe("CircuitRunner", () => {
 	it("runs a single-flow happy path end-to-end → completed", async () => {
 		const planner = step("Planner", { triggers: ["start"], publishes: ["work"] });
 		const finisher = step("Finisher", { triggers: ["work"], publishes: [FLOW_COMPLETE] });
@@ -255,7 +255,7 @@ describe("OrchestrationRunner", () => {
 		};
 
 		let convId = 0;
-		const runner = new OrchestrationRunner({
+		const runner = new CircuitRunner({
 			executor,
 			sessionLog: log,
 			makeOrchestrationContext: () => ({
@@ -402,14 +402,14 @@ describe("OrchestrationRunner", () => {
 	}
 
 	function makeInteractiveRunner(args: {
-		f: OrchestrationFlow;
+		f: Circuit;
 		executor: StepTurnExecutor;
 		log: SessionLog;
 		requestUserInput?: (prompt: string) => Promise<string | null>;
 		setSessionStatus?: (status: "active" | "interrupted") => Promise<void>;
 	}) {
 		let convId = 0;
-		return new OrchestrationRunner({
+		return new CircuitRunner({
 			executor: args.executor,
 			sessionLog: args.log,
 			makeOrchestrationContext: () => ({

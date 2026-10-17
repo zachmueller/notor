@@ -261,7 +261,7 @@ export class WorkflowActivityIndicator {
 
 	/**
 	 * Wire the stop callback for live `flow-run` entries (F1 Fix 1). Wired by
-	 * `chat-view.ts` to the plugin's `OrchestrationRunRegistry.abort`.
+	 * `chat-view.ts` to the plugin's `CircuitRunRegistry.abort`.
 	 */
 	setOnStopFlowRun(callback: (sessionId: string) => void): void {
 		this.onStopFlowRun = callback;
@@ -269,7 +269,7 @@ export class WorkflowActivityIndicator {
 
 	/**
 	 * Wire the liveness predicate gating the Stop button (F1 Fix 1). Wired by
-	 * `chat-view.ts` to `OrchestrationRunRegistry.get(sessionId)` so the button
+	 * `chat-view.ts` to `CircuitRunRegistry.get(sessionId)` so the button
 	 * only renders for a run the registry can actually abort.
 	 */
 	setIsFlowRunLive(predicate: (sessionId: string) => boolean): void {

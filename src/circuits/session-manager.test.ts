@@ -1,5 +1,5 @@
 /**
- * INT-001 — `OrchestrationSessionManager` unit tests.
+ * INT-001 — `CircuitSessionManager` unit tests.
  *
  * Asserts session-workspace creation (dir + scratchpad/ + tasks/ + session.json
  * with status active / iteration 0 / origin always set), status finalization,
@@ -10,8 +10,8 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { OrchestrationSessionManager, type SessionFs } from "./session-manager";
-import type { OrchestrationSessionMeta } from "./types";
+import { CircuitSessionManager, type SessionFs } from "./session-manager";
+import type { CircuitSessionMeta } from "./types";
 
 class FakeSessionFs implements SessionFs {
 	files = new Map<string, string>();
@@ -33,14 +33,14 @@ class FakeSessionFs implements SessionFs {
 }
 
 let fs: FakeSessionFs;
-let mgr: OrchestrationSessionManager;
+let mgr: CircuitSessionManager;
 
 beforeEach(() => {
 	fs = new FakeSessionFs();
-	mgr = new OrchestrationSessionManager("notor", fs);
+	mgr = new CircuitSessionManager("notor", fs);
 });
 
-describe("OrchestrationSessionManager", () => {
+describe("CircuitSessionManager", () => {
 	it("resolves the well-known workspace paths under orchestrations/sessions", () => {
 		const ws = mgr.resolveWorkspace("sess-abc");
 		expect(ws.sessionDir).toBe("notor/orchestrations/sessions/sess-abc");
@@ -61,7 +61,7 @@ describe("OrchestrationSessionManager", () => {
 		expect(fs.dirs.has(ws.scratchpadPath)).toBe(true);
 		expect(fs.dirs.has(ws.tasksPath)).toBe(true);
 
-		const meta = JSON.parse(fs.files.get(ws.metaPath)!) as OrchestrationSessionMeta;
+		const meta = JSON.parse(fs.files.get(ws.metaPath)!) as CircuitSessionMeta;
 		expect(meta.status).toBe("active");
 		expect(meta.iteration).toBe(0);
 		expect(meta.flow_name).toBe("Code Implementation");
@@ -72,8 +72,8 @@ describe("OrchestrationSessionManager", () => {
 	it("stamps origin at creation — never null (user / hook are roots with parent null)", async () => {
 		const userWs = await mgr.createSession({ sessionId: "u", flowName: "F", prompt: "p", origin: "user" });
 		const hookWs = await mgr.createSession({ sessionId: "h", flowName: "F", prompt: "p", origin: "hook" });
-		const u = JSON.parse(fs.files.get(userWs.metaPath)!) as OrchestrationSessionMeta;
-		const h = JSON.parse(fs.files.get(hookWs.metaPath)!) as OrchestrationSessionMeta;
+		const u = JSON.parse(fs.files.get(userWs.metaPath)!) as CircuitSessionMeta;
+		const h = JSON.parse(fs.files.get(hookWs.metaPath)!) as CircuitSessionMeta;
 		expect(u.origin).toBe("user");
 		expect(u.parent_session_id).toBeNull();
 		expect(h.origin).toBe("hook");
@@ -88,7 +88,7 @@ describe("OrchestrationSessionManager", () => {
 			origin: "run_flow",
 			parentSessionId: "parent-1",
 		});
-		const meta = JSON.parse(fs.files.get(ws.metaPath)!) as OrchestrationSessionMeta;
+		const meta = JSON.parse(fs.files.get(ws.metaPath)!) as CircuitSessionMeta;
 		expect(meta.origin).toBe("run_flow");
 		expect(meta.parent_session_id).toBe("parent-1");
 	});
@@ -105,7 +105,7 @@ describe("OrchestrationSessionManager", () => {
 
 	it("createSession stamps schema_version: 1 on session.json", async () => {
 		const ws = await mgr.createSession({ sessionId: "sv", flowName: "F", prompt: "p", origin: "user" });
-		const meta = JSON.parse(fs.files.get(ws.metaPath)!) as OrchestrationSessionMeta;
+		const meta = JSON.parse(fs.files.get(ws.metaPath)!) as CircuitSessionMeta;
 		expect(meta.schema_version).toBe(1);
 	});
 

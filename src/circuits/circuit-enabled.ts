@@ -12,11 +12,11 @@
  */
 
 /** Settings `flow_enabled` map key for a scheduled flow (its vault directory). */
-export function flowEnabledKey(flowDir: string): string {
+export function circuitEnabledKey(flowDir: string): string {
 	return flowDir;
 }
 
 /** Scheduler job-map key for a scheduled flow's cron job. */
-export function flowJobKey(flowDir: string): string {
+export function circuitJobKey(flowDir: string): string {
 	return `orch:${flowDir}`;
 }

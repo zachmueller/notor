@@ -1,7 +1,7 @@
 /**
  * Orchestration chaining handoff (INT-045 / FR-175) — the `notor-on-complete-flow`
  * one-way handoff, extracted from `run-lifecycle.ts` (F6 follow-up) so the core
- * `launchOrchestration` module stays under the ~500-line ceiling.
+ * `launchCircuit` module stays under the ~500-line ceiling.
  *
  * A completed flow that declares `notor-on-complete-flow` launches its successor
  * over the SAME shared budget cell + depth (canSpawnChild semantics), so an
@@ -9,7 +9,7 @@
  * handoff is AWAITED (Bug B, F1) — a `run_flow` parent transitively sees the whole
  * chain complete; that is the documented, intended semantics.
  *
- * Mutual recursion crosses the module boundary (this imports `launchOrchestration`;
+ * Mutual recursion crosses the module boundary (this imports `launchCircuit`;
  * run-lifecycle imports the helpers back). ESM tolerates the cycle because both are
  * used lazily at call time — the same shape as the existing child-spawn↔recovery-boot
  * cycle. `run-lifecycle.test.ts`'s chaining coverage lives in `chaining.test.ts`.
@@ -18,16 +18,16 @@
  */
 
 import { Notice } from "obsidian";
-import type { OrchestrationHost } from "./host";
+import type { CircuitHost } from "./host";
 import { logger } from "../utils/logger";
-import { FlowDefinitionParser } from "./flow-parser";
-import { OrchestrationSessionManager } from "./session-manager";
-import type { OrchestrationRunResult } from "./runner";
-import type { OrchestrationFlow } from "./types";
+import { CircuitDefinitionParser } from "./circuit-parser";
+import { CircuitSessionManager } from "./session-manager";
+import type { CircuitRunResult } from "./runner";
+import type { Circuit } from "./types";
 import { VaultSessionFs } from "./launch-wiring";
-import { launchOrchestration, type RequestUserInput } from "./run-lifecycle";
+import { launchCircuit, type RequestUserInput } from "./run-lifecycle";
 
-const log = logger("OrchestrationLaunch");
+const log = logger("CircuitLaunch");
 
 /**
  * Resolve a chaining successor's `notor-flow-inputs` by wikilink-stripped flow
@@ -35,16 +35,16 @@ const log = logger("OrchestrationLaunch");
  * HANDOFF section is then simply omitted).
  */
 export async function resolveSuccessorInputs(
-	host: OrchestrationHost,
+	host: CircuitHost,
 	successorName: string,
 ): Promise<string | null> {
 	try {
-		const parser = new FlowDefinitionParser(
+		const parser = new CircuitDefinitionParser(
 			host.app.vault,
 			host.app.metadataCache,
 			host.settings.notor_dir,
 		);
-		const parsed = await parser.discoverFlows();
+		const parsed = await parser.discoverCircuits();
 		const match = parsed.find((p) => p.flow.name === successorName);
 		return match?.flow.flowInputs ?? null;
 	} catch {
@@ -53,21 +53,21 @@ export async function resolveSuccessorInputs(
 }
 
 /**
- * The successor-launcher signature — {@link launchOrchestration} in production,
+ * The successor-launcher signature — {@link launchCircuit} in production,
  * injectable in tests to observe the gate decision without driving a full run.
  */
 export type ChainLauncher = (
-	host: OrchestrationHost,
-	flow: OrchestrationFlow,
+	host: CircuitHost,
+	flow: Circuit,
 	promptText: string,
-	options?: Parameters<typeof launchOrchestration>[3],
-) => Promise<OrchestrationRunResult>;
+	options?: Parameters<typeof launchCircuit>[3],
+) => Promise<CircuitRunResult>;
 
 /** Injectable seams for {@link chainToSuccessor} (production defaults built inline). */
 export interface ChainDeps {
 	/** Resolve the successor flow by name; `null` when not discoverable. */
-	resolveSuccessor?: (name: string) => Promise<OrchestrationFlow | null>;
-	/** Launch the successor run (defaults to {@link launchOrchestration}). */
+	resolveSuccessor?: (name: string) => Promise<Circuit | null>;
+	/** Launch the successor run (defaults to {@link launchCircuit}). */
 	launch?: ChainLauncher;
 }
 
@@ -86,22 +86,22 @@ export interface ChainDeps {
  * predecessor is terminal — INT-005).
  *
  * **Bug B (F1):** this handoff is **awaited**, not fire-and-forget — the caller
- * (`launchOrchestration`) awaits `chainToSuccessor`, which awaits the full successor
- * `launchOrchestration`, so a `run_flow` parent transitively awaits the entire
+ * (`launchCircuit`) awaits `chainToSuccessor`, which awaits the full successor
+ * `launchCircuit`, so a `run_flow` parent transitively awaits the entire
  * chain. That is the current, intended semantics (a `run_flow` caller sees the
  * whole chain's result), locked by a regression test in chaining.test.ts. Making it
  * truly detached would change those semantics and orphan the successor from the
  * abort cascade; it is a follow-up candidate now that the run registry (Fix 1)
  * could own a detached chain.
  *
- * Reached only from `launchOrchestration`'s `result.status === "completed" &&
+ * Reached only from `launchCircuit`'s `result.status === "completed" &&
  * flow.onCompleteFlow` guard — so a chain only ever fires on a **completed**
  * predecessor that declares `notor-on-complete-flow`.
  */
 export async function chainToSuccessor(
-	host: OrchestrationHost,
-	predecessor: OrchestrationFlow,
-	predecessorResult: OrchestrationRunResult,
+	host: CircuitHost,
+	predecessor: Circuit,
+	predecessorResult: CircuitRunResult,
 	predecessorSessionId: string,
 	requestUserInput?: RequestUserInput,
 	deps?: ChainDeps,
@@ -112,15 +112,15 @@ export async function chainToSuccessor(
 	const resolveSuccessor =
 		deps?.resolveSuccessor ??
 		(async (name: string) => {
-			const parser = new FlowDefinitionParser(
+			const parser = new CircuitDefinitionParser(
 				host.app.vault,
 				host.app.metadataCache,
 				host.settings.notor_dir,
 			);
-			const parsed = await parser.discoverFlows();
+			const parsed = await parser.discoverCircuits();
 			return parsed.find((p) => p.flow.name === name)?.flow ?? null;
 		});
-	const launch = deps?.launch ?? launchOrchestration;
+	const launch = deps?.launch ?? launchCircuit;
 
 	const successor = await resolveSuccessor(successorName);
 	if (!successor) {
@@ -166,7 +166,7 @@ export async function chainToSuccessor(
 		inheritedContext: { budget, depth: depth + 1 },
 		parentScratchpadPath:
 			successor.handoffIsolation === "shared"
-				? new OrchestrationSessionManager(
+				? new CircuitSessionManager(
 						host.settings.notor_dir,
 						new VaultSessionFs(host.app),
 					).resolveWorkspace(predecessorSessionId).scratchpadPath

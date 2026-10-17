@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 import { SessionRecovery, type RecoveryFs } from "./session-recovery";
 import { DEFAULT_MAX_COST_USD, DEFAULT_MAX_ITERATIONS } from "./constants";
 import type { SessionLogEntry } from "./session-log";
-import type { OrchestrationSessionMeta } from "./types";
+import type { CircuitSessionMeta } from "./types";
 
 const recovery = new SessionRecovery();
 
@@ -28,7 +28,7 @@ function jsonl(entries: SessionLogEntry[]): string {
 
 const TS = "2026-06-28T00:00:00.000Z";
 
-function sessionStart(origin: OrchestrationSessionMeta["origin"], parent: string | null = null): SessionLogEntry {
+function sessionStart(origin: CircuitSessionMeta["origin"], parent: string | null = null): SessionLogEntry {
 	return { type: "session.start", session_id: "s", flow: "F", prompt: "obj", origin, parent_session_id: parent, ts: TS };
 }
 function eventEmitted(turn: number, topic: string, payload = "p", source: string | null = null): SessionLogEntry {
@@ -53,7 +53,7 @@ function stepLog(turn: number, step: string, message: string): SessionLogEntry {
 	return { type: "step.log", turn, step, level: "info", message, ts: TS };
 }
 
-function meta(over: Partial<OrchestrationSessionMeta> = {}): OrchestrationSessionMeta {
+function meta(over: Partial<CircuitSessionMeta> = {}): CircuitSessionMeta {
 	return {
 		session_id: "s",
 		flow_name: "F",
@@ -283,7 +283,7 @@ describe("SessionRecovery — committed-key collection", () => {
 // ---------------------------------------------------------------------------
 
 describe("SessionRecovery — root selection", () => {
-	const metas = new Map<string, OrchestrationSessionMeta>();
+	const metas = new Map<string, CircuitSessionMeta>();
 
 	it("recovers user and hook origins always", () => {
 		expect(recovery.isRecoverableRoot(meta({ origin: "user" }), metas)).toBe(true);
@@ -299,7 +299,7 @@ describe("SessionRecovery — root selection", () => {
 	});
 
 	it("recovers a chaining successor IFF its predecessor is terminal", () => {
-		const map = new Map<string, OrchestrationSessionMeta>();
+		const map = new Map<string, CircuitSessionMeta>();
 		map.set("pred-done", meta({ session_id: "pred-done", status: "completed" }));
 		map.set("pred-live", meta({ session_id: "pred-live", status: "active" }));
 
@@ -322,7 +322,7 @@ describe("SessionRecovery — root selection", () => {
 /** A fake recovery FS holding session.json + log per session. */
 class FakeRecoveryFs implements RecoveryFs {
 	constructor(
-		private readonly sessions: Record<string, { meta?: OrchestrationSessionMeta; log?: string }>,
+		private readonly sessions: Record<string, { meta?: CircuitSessionMeta; log?: string }>,
 	) {}
 	async listSessions(): Promise<string[]> {
 		return Object.keys(this.sessions);

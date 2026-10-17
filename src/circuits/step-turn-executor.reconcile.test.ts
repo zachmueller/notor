@@ -47,7 +47,7 @@ import { StepTurnExecutor } from "./step-turn-executor";
 import { newRootBudget } from "../run-loop/budget";
 import type { SessionLog } from "./session-log";
 import type { OrchestrationToolContext, RunContext } from "../run-loop/types";
-import type { OrchestrationFlow, StepDefinition } from "./types";
+import type { Circuit, StepDefinition } from "./types";
 
 function noopLog(): SessionLog {
 	const noop = () => Promise.resolve();
@@ -76,7 +76,7 @@ function step(over: Partial<StepDefinition> = {}): StepDefinition {
 	};
 }
 
-function flow(steps: StepDefinition[]): OrchestrationFlow {
+function flow(steps: StepDefinition[]): Circuit {
 	return {
 		name: "Demo",
 		description: "",

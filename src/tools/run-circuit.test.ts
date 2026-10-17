@@ -1,7 +1,7 @@
 /**
- * TEST-006 (part 2) — `RunFlowTool` (INT-042 / INT-043).
+ * TEST-006 (part 2) — `RunCircuitTool` (INT-042 / INT-043).
  *
- * Covers the tool shell over a fake {@link SpawnChildFlow}: the dynamic `flow`
+ * Covers the tool shell over a fake {@link SpawnChildCircuit}: the dynamic `flow`
  * enum reflects discovered invocable flows; orchestration-context-only refusal
  * (Issue-4); unknown-flow `success: false`; the spawn gate over the shared budget
  * cell / depth; structured-vs-text return preference; and the `child` edge +
@@ -11,14 +11,14 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { RunFlowTool } from "./run-circuit";
-import type { SpawnChildFlow, SpawnChildFlowResult } from "../circuits/child-flow";
-import type { FlowCompositionManager } from "../circuits/flow-composition-manager";
-import type { OrchestrationFlow } from "../circuits/types";
+import { RunCircuitTool } from "./run-circuit";
+import type { SpawnChildCircuit, SpawnChildCircuitResult } from "../circuits/child-circuit";
+import type { CircuitCompositionManager } from "../circuits/circuit-composition-manager";
+import type { Circuit } from "../circuits/types";
 import type { OrchestrationToolContext, RunContext } from "../run-loop/types";
 import type { ToolExecuteOptions } from "./tool";
 
-function flow(name: string, over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
+function flow(name: string, over: Partial<Circuit> = {}): Circuit {
 	return {
 		name,
 		description: "",
@@ -45,14 +45,14 @@ function flow(name: string, over: Partial<OrchestrationFlow> = {}): Orchestratio
 	};
 }
 
-function fakeComposition(flows: OrchestrationFlow[]): FlowCompositionManager {
+function fakeComposition(flows: Circuit[]): CircuitCompositionManager {
 	return {
-		listInvocableFlows: vi.fn(async () => flows),
-		resolveFlow: vi.fn(async (name: string) => flows.find((f) => f.name === name) ?? null),
-	} as unknown as FlowCompositionManager;
+		listInvocableCircuits: vi.fn(async () => flows),
+		resolveCircuit: vi.fn(async (name: string) => flows.find((f) => f.name === name) ?? null),
+	} as unknown as CircuitCompositionManager;
 }
 
-function spawnResult(over: Partial<SpawnChildFlowResult> = {}): SpawnChildFlowResult {
+function spawnResult(over: Partial<SpawnChildCircuitResult> = {}): SpawnChildCircuitResult {
 	return {
 		status: "completed",
 		structured: null,
@@ -89,10 +89,10 @@ function runContext(over: Partial<RunContext> = {}): RunContext {
 	};
 }
 
-describe("RunFlowTool", () => {
+describe("RunCircuitTool", () => {
 	it("exposes a dynamic flow enum + per-flow inputs in the description", async () => {
-		const tool = new RunFlowTool(fakeComposition([flow("Alpha"), flow("Beta")]), vi.fn());
-		await tool.refreshInvocableFlows();
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha"), flow("Beta")]), vi.fn());
+		await tool.refreshInvocableCircuits();
 
 		expect(tool.input_schema.properties?.flow?.enum).toEqual(["Alpha", "Beta"]);
 		expect(tool.description).toContain("Alpha: a question");
@@ -101,7 +101,7 @@ describe("RunFlowTool", () => {
 
 	it("refuses outside an orchestration context (Issue-4) — no spawn", async () => {
 		const spawn = vi.fn();
-		const tool = new RunFlowTool(fakeComposition([flow("Alpha")]), spawn as unknown as SpawnChildFlow);
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), spawn as unknown as SpawnChildCircuit);
 		const result = await tool.execute({ flow: "Alpha", payload: "x" }, {} as ToolExecuteOptions);
 		expect(result.success).toBe(false);
 		expect(result.error).toMatch(/within an orchestration flow/i);
@@ -109,7 +109,7 @@ describe("RunFlowTool", () => {
 	});
 
 	it("returns success:false for an unknown / non-invocable flow (not a throw)", async () => {
-		const tool = new RunFlowTool(fakeComposition([flow("Alpha")]), vi.fn());
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), vi.fn());
 		const result = await tool.execute(
 			{ flow: "Nope", payload: "x" },
 			{ orchestrationContext: orchestrationContext(), runContext: runContext() },
@@ -120,7 +120,7 @@ describe("RunFlowTool", () => {
 
 	it("blocks a too-deep spawn over the shared cell / depth (spawn gate)", async () => {
 		const spawn = vi.fn();
-		const tool = new RunFlowTool(fakeComposition([flow("Alpha")]), spawn as unknown as SpawnChildFlow);
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), spawn as unknown as SpawnChildCircuit);
 		const result = await tool.execute(
 			{ flow: "Alpha", payload: "x" },
 			{ orchestrationContext: orchestrationContext(), runContext: runContext({ depth: 3, maxDepth: 3 }) },
@@ -132,7 +132,7 @@ describe("RunFlowTool", () => {
 
 	it("blocks a spawn when the shared budget cell is exhausted", async () => {
 		const spawn = vi.fn();
-		const tool = new RunFlowTool(fakeComposition([flow("Alpha")]), spawn as unknown as SpawnChildFlow);
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), spawn as unknown as SpawnChildCircuit);
 		const result = await tool.execute(
 			{ flow: "Alpha", payload: "x" },
 			{
@@ -149,7 +149,7 @@ describe("RunFlowTool", () => {
 		const spawn = vi.fn(async () =>
 			spawnResult({ structured: { report: "done", sources: ["a", "b"] } }),
 		);
-		const tool = new RunFlowTool(fakeComposition([flow("Alpha")]), spawn);
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), spawn);
 		const ctx = orchestrationContext();
 		const result = await tool.execute(
 			{ flow: "Alpha", payload: "research X" },
@@ -186,7 +186,7 @@ describe("RunFlowTool", () => {
 
 	it("falls back to text when no structured return was supplied", async () => {
 		const spawn = vi.fn(async () => spawnResult({ structured: null, text: "the report text" }));
-		const tool = new RunFlowTool(fakeComposition([flow("Alpha")]), spawn);
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), spawn);
 		const result = await tool.execute(
 			{ flow: "Alpha", payload: "x" },
 			{ orchestrationContext: orchestrationContext(), runContext: runContext() },
@@ -196,8 +196,8 @@ describe("RunFlowTool", () => {
 	});
 
 	it("threads step identity + a per-step ordinal into the spawn request (F1 Fix 3)", async () => {
-		const spawn: SpawnChildFlow = vi.fn(async () => spawnResult());
-		const tool = new RunFlowTool(fakeComposition([flow("Alpha"), flow("Beta")]), spawn);
+		const spawn: SpawnChildCircuit = vi.fn(async () => spawnResult());
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha"), flow("Beta")]), spawn);
 		// One carriage (one step turn) with its ordinal counter.
 		const ctx = orchestrationContext({
 			stepName: "Caller",
@@ -221,7 +221,7 @@ describe("RunFlowTool", () => {
 		const spawn = vi.fn(async () =>
 			spawnResult({ status: "error", structured: null, text: "boom", stopReason: "error" }),
 		);
-		const tool = new RunFlowTool(fakeComposition([flow("Alpha")]), spawn);
+		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), spawn);
 		const result = await tool.execute(
 			{ flow: "Alpha", payload: "x" },
 			{ orchestrationContext: orchestrationContext(), runContext: runContext() },

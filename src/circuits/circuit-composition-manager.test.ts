@@ -1,10 +1,10 @@
 /**
- * TEST-006 (part 1) — `FlowCompositionManager` invocable-flow discovery (INT-041).
+ * TEST-006 (part 1) — `CircuitCompositionManager` invocable-flow discovery (INT-041).
  *
  * Asserts the stateless re-scan contract: only `notor-flow-invocable: true` flows
  * are listed (each carrying its `notor-flow-inputs` / `notor-flow-returns`), a
  * flow toggled invocable on disk is reflected on the next scan with no cache
- * invalidation, and `resolveFlow` returns null for an unknown / non-invocable
+ * invalidation, and `resolveCircuit` returns null for an unknown / non-invocable
  * name. Reuses the flow-parser fake-vault fixturing.
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-7-composability.md — INT-041 / TEST-006
@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from "vitest";
 import { TFile, TFolder } from "obsidian";
-import { FlowCompositionManager } from "./flow-composition-manager";
+import { CircuitCompositionManager } from "./circuit-composition-manager";
 import { FLOW_COMPLETE } from "./types";
 
 interface FileFixture {
@@ -127,7 +127,7 @@ function flowFiles(
 	};
 }
 
-describe("FlowCompositionManager", () => {
+describe("CircuitCompositionManager", () => {
 	it("lists only invocable flows, each carrying its inputs/returns contract", async () => {
 		const files = {
 			...flowFiles("callee", "Callee", {
@@ -138,9 +138,9 @@ describe("FlowCompositionManager", () => {
 			...flowFiles("private", "Private"), // invocable defaults false
 		};
 		const { vault, metadataCache } = buildMutableVault(files);
-		const mgr = new FlowCompositionManager(vault, metadataCache, "notor");
+		const mgr = new CircuitCompositionManager(vault, metadataCache, "notor");
 
-		const invocable = await mgr.listInvocableFlows();
+		const invocable = await mgr.listInvocableCircuits();
 		expect(invocable.map((f) => f.name)).toEqual(["Callee"]);
 		expect(invocable[0]!.flowInputs).toBe("a research question");
 		expect(invocable[0]!.flowReturns).toBe("a cited report");
@@ -149,28 +149,28 @@ describe("FlowCompositionManager", () => {
 	it("holds no active state — a flow toggled invocable on disk shows up on the next scan", async () => {
 		const files = flowFiles("callee", "Callee"); // not invocable yet
 		const { vault, metadataCache } = buildMutableVault(files);
-		const mgr = new FlowCompositionManager(vault, metadataCache, "notor");
+		const mgr = new CircuitCompositionManager(vault, metadataCache, "notor");
 
-		expect(await mgr.listInvocableFlows()).toHaveLength(0);
+		expect(await mgr.listInvocableCircuits()).toHaveLength(0);
 
 		// Flip the field on disk; the stateless manager picks it up with no cache bust.
 		files["notor/orchestrations/callee/definition.md"]!.frontmatter![
 			"notor-flow-invocable"
 		] = true;
-		const after = await mgr.listInvocableFlows();
+		const after = await mgr.listInvocableCircuits();
 		expect(after.map((f) => f.name)).toEqual(["Callee"]);
 	});
 
-	it("resolveFlow returns the matching invocable flow, or null for unknown/non-invocable", async () => {
+	it("resolveCircuit returns the matching invocable flow, or null for unknown/non-invocable", async () => {
 		const files = {
 			...flowFiles("callee", "Callee", { "notor-flow-invocable": true }),
 			...flowFiles("private", "Private"),
 		};
 		const { vault, metadataCache } = buildMutableVault(files);
-		const mgr = new FlowCompositionManager(vault, metadataCache, "notor");
+		const mgr = new CircuitCompositionManager(vault, metadataCache, "notor");
 
-		expect((await mgr.resolveFlow("Callee"))?.name).toBe("Callee");
-		expect(await mgr.resolveFlow("Private")).toBeNull(); // exists but not invocable
-		expect(await mgr.resolveFlow("Nope")).toBeNull(); // unknown
+		expect((await mgr.resolveCircuit("Callee"))?.name).toBe("Callee");
+		expect(await mgr.resolveCircuit("Private")).toBeNull(); // exists but not invocable
+		expect(await mgr.resolveCircuit("Nope")).toBeNull(); // unknown
 	});
 });

@@ -18,7 +18,7 @@
  *
  * The actual child-flow execution (child session, child `RunLoop`, the
  * `child.spawned`/`child.result` ledger) lives behind the injected
- * {@link SpawnChildFlow} callback (wired in `launch.ts`), so this tool stays free
+ * {@link SpawnChildCircuit} callback (wired in `launch.ts`), so this tool stays free
  * of the plugin/launch stack.
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-7-composability.md — INT-042 / INT-043
@@ -26,14 +26,14 @@
  */
 
 import type { Tool, JSONSchema, ToolExecuteOptions, ToolResult } from "./tool";
-import type { FlowCompositionManager } from "../circuits/flow-composition-manager";
-import type { SpawnChildFlow } from "../circuits/child-flow";
+import type { CircuitCompositionManager } from "../circuits/circuit-composition-manager";
+import type { SpawnChildCircuit } from "../circuits/child-circuit";
 import { canSpawnChild } from "../run-loop/budget";
 import { logger } from "../utils/logger";
 
-const log = logger("RunFlowTool");
+const log = logger("RunCircuitTool");
 
-export const RUN_FLOW_TOOL_NAME = "run_flow";
+export const RUN_CIRCUIT_TOOL_NAME = "run_flow";
 
 /** A discovered invocable flow's name + its self-describing input contract. */
 interface InvocableFlowSummary {
@@ -41,15 +41,15 @@ interface InvocableFlowSummary {
 	inputs: string | null;
 }
 
-export class RunFlowTool implements Tool {
-	readonly name = RUN_FLOW_TOOL_NAME;
+export class RunCircuitTool implements Tool {
+	readonly name = RUN_CIRCUIT_TOOL_NAME;
 	readonly mode = "write" as const;
 
 	private cachedInvocable: InvocableFlowSummary[] = [];
 
 	constructor(
-		private readonly compositionManager: FlowCompositionManager,
-		private readonly spawnChildFlow: SpawnChildFlow,
+		private readonly compositionManager: CircuitCompositionManager,
+		private readonly spawnChildFlow: SpawnChildCircuit,
 	) {}
 
 	// -- Dynamic description & schema (mirrors UseSubagentTool) ----------------
@@ -87,13 +87,13 @@ export class RunFlowTool implements Tool {
 	}
 
 	/**
-	 * Refresh the cached invocable-flow list from the {@link FlowCompositionManager}
+	 * Refresh the cached invocable-flow list from the {@link CircuitCompositionManager}
 	 * (a stateless re-scan). Called at registration and at the start of each
 	 * `execute()` (hot-reload), exactly like `UseSubagentTool.refreshVisibleProfiles`.
 	 */
-	async refreshInvocableFlows(): Promise<void> {
+	async refreshInvocableCircuits(): Promise<void> {
 		try {
-			const flows = await this.compositionManager.listInvocableFlows();
+			const flows = await this.compositionManager.listInvocableCircuits();
 			this.cachedInvocable = flows.map((f) => ({ name: f.name, inputs: f.flowInputs }));
 		} catch (e) {
 			log.warn("Failed to refresh invocable flows", { error: String(e) });
@@ -106,7 +106,7 @@ export class RunFlowTool implements Tool {
 		params: Record<string, unknown>,
 		options?: ToolExecuteOptions,
 	): Promise<ToolResult> {
-		await this.refreshInvocableFlows();
+		await this.refreshInvocableCircuits();
 
 		const flowName = typeof params["flow"] === "string" ? params["flow"] : "";
 		const payload = typeof params["payload"] === "string" ? params["payload"] : "";
@@ -124,7 +124,7 @@ export class RunFlowTool implements Tool {
 		if (!flowName) {
 			return this.fail("Missing required parameter: flow.");
 		}
-		const flow = await this.compositionManager.resolveFlow(flowName);
+		const flow = await this.compositionManager.resolveCircuit(flowName);
 		if (!flow) {
 			return this.fail(
 				`Flow '${flowName}' is not an invocable flow (set notor-flow-invocable: true on its definition.md).`,
@@ -212,7 +212,7 @@ export class RunFlowTool implements Tool {
 				? JSON.stringify(spawned.structured)
 				: spawned.text;
 		return {
-			tool_name: RUN_FLOW_TOOL_NAME,
+			tool_name: RUN_CIRCUIT_TOOL_NAME,
 			success: spawned.status !== "error",
 			result: resultText || `Flow '${flow.name}' finished (${spawned.status}).`,
 			error: spawned.status === "error" ? spawned.text || "Child flow errored." : null,
@@ -230,6 +230,6 @@ export class RunFlowTool implements Tool {
 	}
 
 	private fail(error: string): ToolResult {
-		return { tool_name: RUN_FLOW_TOOL_NAME, success: false, result: "", error };
+		return { tool_name: RUN_CIRCUIT_TOOL_NAME, success: false, result: "", error };
 	}
 }

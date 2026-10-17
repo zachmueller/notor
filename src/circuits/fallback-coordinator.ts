@@ -23,7 +23,7 @@
  */
 
 import { logger } from "../utils/logger";
-import { FLOW_ERROR, type OrchestrationEvent, type OrchestrationFlow } from "./types";
+import { FLOW_ERROR, type CircuitEvent, type Circuit } from "./types";
 
 const log = logger("FallbackCoordinator");
 
@@ -45,8 +45,8 @@ export class FallbackCoordinator {
 	 * `.stream_error`) is recognized and produces a *diagnosable* `FLOW_ERROR`
 	 * that names the originating step, rather than an anonymous orphan.
 	 */
-	handle(event: OrchestrationEvent, flow: OrchestrationFlow): OrchestrationEvent {
-		const stamp = (payload: string): OrchestrationEvent => ({
+	handle(event: CircuitEvent, flow: Circuit): CircuitEvent {
+		const stamp = (payload: string): CircuitEvent => ({
 			topic: FLOW_ERROR,
 			payload,
 			source_step: event.source_step,

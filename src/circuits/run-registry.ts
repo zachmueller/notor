@@ -1,5 +1,5 @@
 /**
- * `OrchestrationRunRegistry` (F1 Fix 1) — the in-memory owner of live
+ * `CircuitRunRegistry` (F1 Fix 1) — the in-memory owner of live
  * orchestration runs, giving a running flow a lifecycle handle it never had.
  *
  * A launched flow registers a handle (its abort controller + a `lastProgressAt`
@@ -19,7 +19,7 @@
  */
 
 /** A live orchestration run's lifecycle handle. */
-export interface OrchestrationRunHandle {
+export interface CircuitRunHandle {
 	sessionId: string;
 	flowName: string;
 	controller: AbortController;
@@ -28,11 +28,11 @@ export interface OrchestrationRunHandle {
 }
 
 /** In-memory registry of live orchestration runs, keyed by session id. */
-export class OrchestrationRunRegistry {
-	private runs = new Map<string, OrchestrationRunHandle>();
+export class CircuitRunRegistry {
+	private runs = new Map<string, CircuitRunHandle>();
 
 	/** Register a live run's handle (called after the controller is created). */
-	register(handle: OrchestrationRunHandle): void {
+	register(handle: CircuitRunHandle): void {
 		this.runs.set(handle.sessionId, handle);
 	}
 
@@ -42,12 +42,12 @@ export class OrchestrationRunRegistry {
 	}
 
 	/** The handle for a session, or `undefined` when it is not live. */
-	get(sessionId: string): OrchestrationRunHandle | undefined {
+	get(sessionId: string): CircuitRunHandle | undefined {
 		return this.runs.get(sessionId);
 	}
 
 	/** A snapshot of every live run's handle (e.g. for a Stop picker). */
-	listActive(): OrchestrationRunHandle[] {
+	listActive(): CircuitRunHandle[] {
 		return [...this.runs.values()];
 	}
 

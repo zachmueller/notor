@@ -28,15 +28,15 @@
  */
 
 import { EVENT_HISTORY_PROMPT_LIMIT } from "./constants";
-import { FLOW_COMPLETE, type OrchestrationEvent, type OrchestrationFlow, type StepDefinition } from "./types";
+import { FLOW_COMPLETE, type CircuitEvent, type Circuit, type StepDefinition } from "./types";
 
 export interface StepPromptBuildArgs {
 	step: StepDefinition;
-	flow: OrchestrationFlow;
+	flow: Circuit;
 	/** The incoming trigger event for this turn. */
-	event: OrchestrationEvent;
+	event: CircuitEvent;
 	/** Recent event history (the builder takes the last {@link EVENT_HISTORY_PROMPT_LIMIT}). */
-	eventHistory: OrchestrationEvent[];
+	eventHistory: CircuitEvent[];
 	/** The original user objective, set once at flow start, injected every turn. */
 	objective: string;
 	/** `sessions/{id}/scratchpad/`. */
@@ -162,13 +162,13 @@ export class StepPromptBuilder {
 	}
 
 	/** A step is "terminal" when it can emit the flow's completion event. */
-	private isTerminalStep(step: StepDefinition, flow: OrchestrationFlow): boolean {
+	private isTerminalStep(step: StepDefinition, flow: Circuit): boolean {
 		return (
 			step.publishes.includes(flow.completionEvent) || step.publishes.includes(FLOW_COMPLETE)
 		);
 	}
 
-	private buildHistorySection(eventHistory: OrchestrationEvent[]): string {
+	private buildHistorySection(eventHistory: CircuitEvent[]): string {
 		const recent = eventHistory.slice(-EVENT_HISTORY_PROMPT_LIMIT);
 		if (recent.length === 0) {
 			return `### EVENT HISTORY (last ${EVENT_HISTORY_PROMPT_LIMIT})\n(no prior events)`;
@@ -210,7 +210,7 @@ export class StepPromptBuilder {
 		);
 	}
 
-	private buildGuardrailsSection(flow: OrchestrationFlow): string {
+	private buildGuardrailsSection(flow: Circuit): string {
 		if (flow.guardrails.length === 0) {
 			return `### GUARDRAILS\n(none specified)`;
 		}

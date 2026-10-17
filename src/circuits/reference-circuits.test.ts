@@ -3,7 +3,7 @@
  * FEAT-002 without error.
  *
  * Feeds each reference flow's `definition.md` + step notes through a fake vault
- * into `FlowDefinitionParser`, asserting it parses (frontmatter mapping + step
+ * into `CircuitDefinitionParser`, asserting it parses (frontmatter mapping + step
  * resolution) and passes the load-time validators (reachable completion,
  * single-subscriber topics, no published-but-unsubscribed non-terminal topic,
  * required-events published). This is the verifiable bar that the
@@ -14,8 +14,8 @@
 
 import { describe, it, expect } from "vitest";
 import { TFile, TFolder } from "obsidian";
-import { FlowDefinitionParser } from "./flow-parser";
-import { REFERENCE_FLOWS, materializeReferenceFlows, type ReferenceFlowFs } from "./reference-flows";
+import { CircuitDefinitionParser } from "./circuit-parser";
+import { REFERENCE_CIRCUITS, materializeReferenceCircuits, type ReferenceCircuitFs } from "./reference-circuits";
 
 /**
  * Build a fake Vault + MetadataCache from a `{ path → rawFileContent }` map. The
@@ -118,7 +118,7 @@ function buildFakeVault(files: Record<string, string>) {
 /** Materialize the reference flows into an in-memory file map (mirrors the vault adapter). */
 async function materializeToMap(): Promise<Record<string, string>> {
 	const files: Record<string, string> = {};
-	const fs: ReferenceFlowFs = {
+	const fs: ReferenceCircuitFs = {
 		exists: (p) => Promise.resolve(p in files || Object.keys(files).some((k) => k.startsWith(p + "/"))),
 		mkdir: () => Promise.resolve(),
 		write: (p, data) => {
@@ -126,14 +126,14 @@ async function materializeToMap(): Promise<Record<string, string>> {
 			return Promise.resolve();
 		},
 	};
-	await materializeReferenceFlows("notor", fs);
+	await materializeReferenceCircuits("notor", fs);
 	return files;
 }
 
 describe("reference flows (POL-002)", () => {
 	it("materializes all three flows with their definition + steps", async () => {
 		const files = await materializeToMap();
-		for (const flow of REFERENCE_FLOWS) {
+		for (const flow of REFERENCE_CIRCUITS) {
 			expect(files[`notor/orchestrations/${flow.slug}/definition.md`]).toBeDefined();
 			for (const stepFile of Object.keys(flow.steps)) {
 				expect(files[`notor/orchestrations/${flow.slug}/steps/${stepFile}`]).toBeDefined();
@@ -145,7 +145,7 @@ describe("reference flows (POL-002)", () => {
 		const files = await materializeToMap();
 		const before = files["notor/orchestrations/code-assist/definition.md"];
 		files["notor/orchestrations/code-assist/definition.md"] = "USER EDITED";
-		const fs: ReferenceFlowFs = {
+		const fs: ReferenceCircuitFs = {
 			exists: (p) => Promise.resolve(p in files || Object.keys(files).some((k) => k.startsWith(p + "/"))),
 			mkdir: () => Promise.resolve(),
 			write: (p, data) => {
@@ -153,46 +153,46 @@ describe("reference flows (POL-002)", () => {
 				return Promise.resolve();
 			},
 		};
-		await materializeReferenceFlows("notor", fs);
+		await materializeReferenceCircuits("notor", fs);
 		// The user edit survives; the constant did NOT clobber it.
 		expect(files["notor/orchestrations/code-assist/definition.md"]).toBe("USER EDITED");
 		expect(before).not.toBe("USER EDITED");
 	});
 
-	it("each reference flow parses + validates under FlowDefinitionParser (FEAT-002)", async () => {
+	it("each reference flow parses + validates under CircuitDefinitionParser (FEAT-002)", async () => {
 		const files = await materializeToMap();
 		const { vault, metadataCache } = buildFakeVault(files);
-		const parser = new FlowDefinitionParser(vault, metadataCache, "notor");
+		const parser = new CircuitDefinitionParser(vault, metadataCache, "notor");
 
-		for (const flow of REFERENCE_FLOWS) {
+		for (const flow of REFERENCE_CIRCUITS) {
 			const dir = `notor/orchestrations/${flow.slug}`;
-			// parseFlowByDir throws FlowParseError on any load-time validation failure.
-			const result = await parser.parseFlowByDir(dir);
+			// parseCircuitByDir throws CircuitParseError on any load-time validation failure.
+			const result = await parser.parseCircuitByDir(dir);
 			expect(result.flow.name.length).toBeGreaterThan(0);
 			expect(result.flow.steps.length).toBeGreaterThan(0);
 		}
 	});
 
-	it("each materializeReferenceFlows output parses with ZERO errors AND zero warnings (F6 §5.5 gate)", async () => {
+	it("each materializeReferenceCircuits output parses with ZERO errors AND zero warnings (F6 §5.5 gate)", async () => {
 		// The cheap, verifiable gate on the reference-flow content (F6 §4.4 / §5.5):
 		// each first-party example must parse AND validate clean — no hard error
-		// (parseFlowByDir throws on those) and no non-blocking topology warning.
+		// (parseCircuitByDir throws on those) and no non-blocking topology warning.
 		const files = await materializeToMap();
 		const { vault, metadataCache } = buildFakeVault(files);
-		const parser = new FlowDefinitionParser(vault, metadataCache, "notor");
+		const parser = new CircuitDefinitionParser(vault, metadataCache, "notor");
 
-		for (const flow of REFERENCE_FLOWS) {
+		for (const flow of REFERENCE_CIRCUITS) {
 			const dir = `notor/orchestrations/${flow.slug}`;
-			const result = await parser.parseFlowByDir(dir);
+			const result = await parser.parseCircuitByDir(dir);
 			expect(result.warnings, `${flow.slug} produced parse warnings`).toEqual([]);
 		}
 	});
 
-	it("discovers all three flows via discoverFlows() (the picker path)", async () => {
+	it("discovers all three flows via discoverCircuits() (the picker path)", async () => {
 		const files = await materializeToMap();
 		const { vault, metadataCache } = buildFakeVault(files);
-		const parser = new FlowDefinitionParser(vault, metadataCache, "notor");
-		const discovered = await parser.discoverFlows();
+		const parser = new CircuitDefinitionParser(vault, metadataCache, "notor");
+		const discovered = await parser.discoverCircuits();
 		const names = discovered.map((p) => p.flow.name).sort();
 		expect(names).toEqual(["Code Assist", "Research", "Review"]);
 	});
@@ -200,8 +200,8 @@ describe("reference flows (POL-002)", () => {
 	it("code-assist + research are invocable; review is not", async () => {
 		const files = await materializeToMap();
 		const { vault, metadataCache } = buildFakeVault(files);
-		const parser = new FlowDefinitionParser(vault, metadataCache, "notor");
-		const byName = new Map((await parser.discoverFlows()).map((p) => [p.flow.name, p.flow]));
+		const parser = new CircuitDefinitionParser(vault, metadataCache, "notor");
+		const byName = new Map((await parser.discoverCircuits()).map((p) => [p.flow.name, p.flow]));
 		expect(byName.get("Code Assist")?.invocable).toBe(true);
 		expect(byName.get("Research")?.invocable).toBe(true);
 		expect(byName.get("Review")?.invocable).toBe(false);

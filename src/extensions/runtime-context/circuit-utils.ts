@@ -33,7 +33,7 @@ const log = logger("OrchestrationUtils");
  * @see specs/ZZ-misc/orchestration/tasks/phase-2-session-nav.md — INT-002
  * @see specs/ZZ-misc/orchestration/tasks/phase-5-interactive-workflow.md — INT-031
  */
-export function buildOrchestrationUtils(
+export function buildCircuitUtils(
 	ctx: BuilderContext,
 ): Pick<ExtensionUtils, "orchestrationTasks" | "invokeWorkflow"> {
 	const { plugin } = ctx;

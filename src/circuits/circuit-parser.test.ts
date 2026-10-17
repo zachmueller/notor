@@ -1,5 +1,5 @@
 /**
- * TEST-003 — `FlowDefinitionParser` + `StepNoteParser` unit tests (FEAT-002).
+ * TEST-003 — `CircuitDefinitionParser` + `StepNoteParser` unit tests (FEAT-002).
  *
  * Fixtures are fed through a fake Vault + MetadataCache that mirror the real
  * `metadataCache.getFileCache()` / `vault.read()` / `getAbstractFileByPath()`
@@ -16,7 +16,7 @@ import {
 	DEFAULT_MAX_ITERATIONS,
 	DEFAULT_MAX_RUNTIME_MINUTES,
 } from "./constants";
-import { FlowDefinitionParser, FlowParseError } from "./flow-parser";
+import { CircuitDefinitionParser, CircuitParseError } from "./circuit-parser";
 import { FLOW_COMPLETE } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -164,16 +164,16 @@ function validFlowFiles(flowOver: Record<string, unknown> = {}): Record<string, 
 
 function parserFor(files: Record<string, FileFixture>, personaDisablesEmit?: (n: string) => boolean) {
 	const { vault, metadataCache } = buildFakeVault(files);
-	return new FlowDefinitionParser(vault, metadataCache, "notor", personaDisablesEmit);
+	return new CircuitDefinitionParser(vault, metadataCache, "notor", personaDisablesEmit);
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("FlowDefinitionParser", () => {
+describe("CircuitDefinitionParser", () => {
 	it("parses a valid flow with every field populated + documented defaults", async () => {
-		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
 
 		expect(flow.name).toBe("Demo");
 		expect(flow.description).toBe("A demo flow");
@@ -189,27 +189,27 @@ describe("FlowDefinitionParser", () => {
 	});
 
 	it("defaults notor-step-mode to conversation and captures the body verbatim", async () => {
-		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
 		const planner = flow.steps[0]!;
 		expect(planner.mode).toBe("conversation");
 		expect(planner.bodyContent).toContain("Plan the work.");
 	});
 
 	it("preserves <include_note> tags verbatim in bodyContent (resolution is the prompt builder's job)", async () => {
-		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
 		expect(flow.steps[0]!.bodyContent).toContain(
 			"<include_note>orchestrations/demo/steps/_rubric</include_note>",
 		);
 	});
 
 	it("never surfaces the definition.md body as flow data", async () => {
-		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
 		const serialized = JSON.stringify(flow);
 		expect(serialized).not.toContain("documentation only");
 	});
 
 	it("injects FINITE ceiling defaults when the three ceiling fields are omitted (never Infinity)", async () => {
-		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
 		expect(flow.maxIterations).toBe(DEFAULT_MAX_ITERATIONS);
 		expect(flow.maxRuntimeMinutes).toBe(DEFAULT_MAX_RUNTIME_MINUTES);
 		expect(flow.maxCostUsd).toBe(DEFAULT_MAX_COST_USD);
@@ -224,7 +224,7 @@ describe("FlowDefinitionParser", () => {
 			"notor-max-runtime-minutes": 30,
 			"notor-max-cost-usd": 2.5,
 		});
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.maxIterations).toBe(7);
 		expect(flow.maxRuntimeMinutes).toBe(30);
 		expect(flow.maxCostUsd).toBe(2.5);
@@ -232,20 +232,20 @@ describe("FlowDefinitionParser", () => {
 
 	it("raises a clear error for an unresolved notor-steps wikilink", async () => {
 		const files = validFlowFiles({ "notor-steps": ["[[planner]]", "[[ghost]]"] });
-		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(/ghost/);
+		await expect(parserFor(files).parseCircuitByDir(FLOW_DIR)).rejects.toThrow(/ghost/);
 	});
 
 	it("rejects an undeclared multi-subscriber topic at load (naming the topic + both steps)", async () => {
 		const files = validFlowFiles();
 		// Make finisher ALSO trigger on "start" → two subscribers, no fanout decl.
 		files[`${FLOW_DIR}/steps/finisher.md`]!.frontmatter!["notor-step-triggers"] = ["start", "work"];
-		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(/start.*Planner|Planner.*start/);
+		await expect(parserFor(files).parseCircuitByDir(FLOW_DIR)).rejects.toThrow(/start.*Planner|Planner.*start/);
 	});
 
 	it("accepts a declared notor-fanout-topics topic with >1 subscriber", async () => {
 		const files = validFlowFiles({ "notor-fanout-topics": ["start"] });
 		files[`${FLOW_DIR}/steps/finisher.md`]!.frontmatter!["notor-step-triggers"] = ["start", "work"];
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.fanoutTopics).toEqual(["start"]);
 	});
 
@@ -255,14 +255,14 @@ describe("FlowDefinitionParser", () => {
 		files[`${FLOW_DIR}/steps/planner.md`]!.frontmatter!["notor-step-publishes"] = ["dead"];
 		files[`${FLOW_DIR}/steps/planner.md`]!.frontmatter!["notor-step-default-publishes"] = "dead";
 		// finisher still triggers on "work" (never published now) → completion unreachable.
-		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(/not reachable|unreachable|orphan/i);
+		await expect(parserFor(files).parseCircuitByDir(FLOW_DIR)).rejects.toThrow(/not reachable|unreachable|orphan/i);
 	});
 
 	it("hard-errors on a published-but-unsubscribed non-terminal topic (Issue-10)", async () => {
 		const files = validFlowFiles();
 		// planner publishes both "work" (handled) and "stray" (orphan, non-terminal).
 		files[`${FLOW_DIR}/steps/planner.md`]!.frontmatter!["notor-step-publishes"] = ["work", "stray"];
-		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(/stray/);
+		await expect(parserFor(files).parseCircuitByDir(FLOW_DIR)).rejects.toThrow(/stray/);
 	});
 
 	it("exempts terminal + failure-channel topics from the static-orphan rule", async () => {
@@ -272,7 +272,7 @@ describe("FlowDefinitionParser", () => {
 			FLOW_COMPLETE,
 			"Finisher.capped",
 		];
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.steps).toHaveLength(2);
 	});
 
@@ -288,13 +288,13 @@ describe("FlowDefinitionParser", () => {
 			"work",
 			"Planner.stream_error",
 		];
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.steps).toHaveLength(2);
 	});
 
 	it("requires a required-event to be published by some step", async () => {
 		const files = validFlowFiles({ "notor-required-events": ["never.published"] });
-		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(/never\.published/);
+		await expect(parserFor(files).parseCircuitByDir(FLOW_DIR)).rejects.toThrow(/never\.published/);
 	});
 
 	it("emits the definition-lint warning when a step publishes >1 topic AND its persona disables emit_event (Issue-13f)", async () => {
@@ -304,7 +304,7 @@ describe("FlowDefinitionParser", () => {
 		files[`${FLOW_DIR}/steps/planner.md`]!.frontmatter!["notor-step-persona"] = "readonly";
 		// Wire work2 to the finisher so it is not a static orphan.
 		files[`${FLOW_DIR}/steps/finisher.md`]!.frontmatter!["notor-step-triggers"] = ["work", "work2"];
-		const { warnings } = await parserFor(files, (n) => n === "readonly").parseFlowByDir(FLOW_DIR);
+		const { warnings } = await parserFor(files, (n) => n === "readonly").parseCircuitByDir(FLOW_DIR);
 		expect(warnings.some((w) => w.kind === "definition_lint")).toBe(true);
 	});
 
@@ -316,7 +316,7 @@ describe("FlowDefinitionParser", () => {
 			"notor-handoff-isolation": "shared",
 			"notor-max-depth": 3,
 		});
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.invocable).toBe(true);
 		expect(flow.flowInputs).toBe("a description");
 		expect(flow.flowReturns).toBe("a summary");
@@ -325,44 +325,44 @@ describe("FlowDefinitionParser", () => {
 	});
 
 	it("defaults notor-open-notes-in-editor to null when absent (inherit global setting)", async () => {
-		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
 		expect(flow.openNotesInEditor).toBeNull();
 	});
 
 	it("parses notor-open-notes-in-editor: true into an explicit override", async () => {
 		const files = validFlowFiles({ "notor-open-notes-in-editor": true });
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.openNotesInEditor).toBe(true);
 	});
 
 	it("parses notor-open-notes-in-editor: false into an explicit override", async () => {
 		const files = validFlowFiles({ "notor-open-notes-in-editor": false });
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.openNotesInEditor).toBe(false);
 	});
 
 	it("defaults notor-flow-allow-concurrent to false when absent (F1 Fix 4)", async () => {
-		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
 		expect(flow.allowConcurrent).toBe(false);
 	});
 
 	it("parses notor-flow-allow-concurrent: true to opt out of the single-instance guard (F1 Fix 4)", async () => {
 		const files = validFlowFiles({ "notor-flow-allow-concurrent": true });
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.allowConcurrent).toBe(true);
 	});
 
 	it("rejects an invalid notor-handoff-isolation with a clear load error (INT-040)", async () => {
 		const files = validFlowFiles({ "notor-handoff-isolation": "sandboxed" });
-		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toThrow(
+		await expect(parserFor(files).parseCircuitByDir(FLOW_DIR)).rejects.toThrow(
 			/notor-handoff-isolation.*isolated.*shared/i,
 		);
 	});
 
-	it("throws a FlowParseError (not a generic Error) on a missing flow name", async () => {
+	it("throws a CircuitParseError (not a generic Error) on a missing flow name", async () => {
 		const files = validFlowFiles();
 		delete files[`${FLOW_DIR}/definition.md`]!.frontmatter!["notor-flow-name"];
-		await expect(parserFor(files).parseFlowByDir(FLOW_DIR)).rejects.toBeInstanceOf(FlowParseError);
+		await expect(parserFor(files).parseCircuitByDir(FLOW_DIR)).rejects.toBeInstanceOf(CircuitParseError);
 	});
 
 	it("discovers flows under orchestrations/ and skips non-flow directories", async () => {
@@ -372,7 +372,7 @@ describe("FlowDefinitionParser", () => {
 			frontmatter: { "notor-type": "something-else" },
 			body: "not a flow",
 		};
-		const results = await parserFor(files).discoverFlows();
+		const results = await parserFor(files).discoverCircuits();
 		expect(results).toHaveLength(1);
 		expect(results[0]!.flow.name).toBe("Demo");
 	});
@@ -380,19 +380,19 @@ describe("FlowDefinitionParser", () => {
 	// notor-schedule (direct flow scheduling) -------------------------------
 
 	it("defaults schedule to null when notor-schedule is absent", async () => {
-		const { flow } = await parserFor(validFlowFiles()).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
 		expect(flow.schedule).toBeNull();
 	});
 
 	it("populates schedule with a valid notor-schedule cron expression", async () => {
 		const files = validFlowFiles({ "notor-schedule": "0 9 * * 1-5" });
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.schedule).toBe("0 9 * * 1-5");
 	});
 
 	it("drops an invalid notor-schedule to null (does not hard-error the flow)", async () => {
 		const files = validFlowFiles({ "notor-schedule": "not a cron" });
-		const { flow } = await parserFor(files).parseFlowByDir(FLOW_DIR);
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.schedule).toBeNull();
 		// The rest of the flow still parses.
 		expect(flow.name).toBe("Demo");

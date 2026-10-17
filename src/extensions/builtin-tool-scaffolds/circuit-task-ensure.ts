@@ -16,7 +16,7 @@ import { scaffold } from "./_scaffold-helper";
  * @see specs/ZZ-misc/orchestration/tasks/phase-2-session-nav.md — INT-002
  * @see specs/ZZ-misc/orchestration/contracts/tools.md — Task tools
  */
-export const ORCHESTRATION_TASK_ENSURE = scaffold(
+export const CIRCUIT_TASK_ENSURE = scaffold(
 	"orchestration_task_ensure",
 	"Idempotently create an orchestration task (status open) in the current session's task registry.",
 	"write",

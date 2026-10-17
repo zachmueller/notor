@@ -46,7 +46,7 @@ import { logger } from "../utils/logger";
 import { DEFAULT_MAX_COST_USD, DEFAULT_MAX_ITERATIONS } from "./constants";
 import { SessionLogParseError, SessionLogReader } from "./session-log-reader";
 import type { SessionLogEntry } from "./session-log";
-import type { OrchestrationEvent, OrchestrationSessionMeta } from "./types";
+import type { CircuitEvent, CircuitSessionMeta } from "./types";
 
 const log = logger("SessionRecovery");
 
@@ -83,13 +83,13 @@ export type RecoveryAction =
  */
 export interface RehydratedSafetyState {
 	/** Event history (newest last) the stale detector's rolling window reads. */
-	history: OrchestrationEvent[];
+	history: CircuitEvent[];
 }
 
 /** A session selected for recovery, with its rebuilt runtime state. */
 export interface RecoverableSession {
 	sessionId: string;
-	meta: OrchestrationSessionMeta;
+	meta: CircuitSessionMeta;
 	action: RecoveryAction;
 	/** Rebuilt aggregate budget (pre-crash remaining, not reset to full). */
 	budget: AggregateBudget;
@@ -235,7 +235,7 @@ export class SessionRecovery {
 	 * rebuilt.)
 	 */
 	rehydrateSafetyState(entries: SessionLogEntry[]): RehydratedSafetyState {
-		const history: OrchestrationEvent[] = [];
+		const history: CircuitEvent[] = [];
 		for (const e of entries) {
 			if (e.type !== "event.emitted") continue;
 			history.push({
@@ -275,7 +275,7 @@ export class SessionRecovery {
 		const errors: RecoveryError[] = [];
 
 		// Pass 1: read all metas (so chaining can resolve its predecessor's status).
-		const metas = new Map<string, OrchestrationSessionMeta>();
+		const metas = new Map<string, CircuitSessionMeta>();
 		for (const id of sessionIds) {
 			const raw = await fs.readMeta(id);
 			if (raw === null) {
@@ -283,7 +283,7 @@ export class SessionRecovery {
 				continue;
 			}
 			try {
-				const meta = JSON.parse(raw) as OrchestrationSessionMeta;
+				const meta = JSON.parse(raw) as CircuitSessionMeta;
 				meta.schema_version ??= 1;
 				metas.set(id, meta);
 			} catch (e) {
@@ -344,7 +344,7 @@ export class SessionRecovery {
 	 * {@link SessionLogParseError} on interior corruption (the caller surfaces it).
 	 */
 	replay(
-		meta: OrchestrationSessionMeta,
+		meta: CircuitSessionMeta,
 		logRaw: string,
 		options?: RecoveryScanOptions,
 	): RecoverableSession {
@@ -392,8 +392,8 @@ export class SessionRecovery {
 	 *  - `run_flow` (and `chaining` with a non-terminal/unresolved parent) → no.
 	 */
 	isRecoverableRoot(
-		meta: OrchestrationSessionMeta,
-		metas: Map<string, OrchestrationSessionMeta>,
+		meta: CircuitSessionMeta,
+		metas: Map<string, CircuitSessionMeta>,
 	): boolean {
 		switch (meta.origin) {
 			// `user` / `hook` / `schedule` are all launcher-less roots with no live

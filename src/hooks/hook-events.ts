@@ -272,7 +272,7 @@ async function executeScopedWorkflowHook(
  * (FR-119b / FEAT-012). Mirrors {@link executeLifecycleHookWorkflowAction}:
  * builds a lifecycle `VaultEventHookContext` and delegates to
  * `executeRunOrchestrationAction()` (which is feature-group-gated via
- * `deps.launchOrchestration`).
+ * `deps.launchCircuit`).
  */
 async function executeLifecycleHookOrchestrationAction(
 	hook: Hook,

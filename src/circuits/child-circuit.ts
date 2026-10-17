@@ -4,9 +4,9 @@
  *
  * `run_flow` is a hand-written `Tool` (it needs the dynamic `flow` enum, mirroring
  * `UseSubagentTool`) and must not import the plugin/launch stack directly. It is
- * handed a {@link SpawnChildFlow} callback at construction; `launch.ts` provides
+ * handed a {@link SpawnChildCircuit} callback at construction; `launch.ts` provides
  * the real implementation ({@link launchChildFlow}) that creates a child session,
- * runs a child `OrchestrationRunner` with the inherited shared budget cell +
+ * runs a child `CircuitRunner` with the inherited shared budget cell +
  * `depth + 1`, and brackets the run with the parent's `child.spawned` / `child.result`
  * ledger entries (FR-125 recovery anchors).
  *
@@ -27,7 +27,7 @@ export interface ChildSpawnContext {
 }
 
 /** A request to spawn a child flow as a tool. */
-export interface SpawnChildFlowRequest {
+export interface SpawnChildCircuitRequest {
 	/** The resolved invocable flow's `notor-flow-name`. */
 	flowName: string;
 	/** The loose, natural-language payload conforming to the callee's `notor-flow-inputs`. */
@@ -60,7 +60,7 @@ export interface SpawnChildFlowRequest {
 }
 
 /** What a child-flow spawn returns to the calling `run_flow` tool. */
-export interface SpawnChildFlowResult {
+export interface SpawnChildCircuitResult {
 	/** Terminal status of the child run. */
 	status: "completed" | "cancelled" | "error";
 	/** The child's `RunResult.structured` (a terminal code step's typed return), or `null`. */
@@ -84,8 +84,8 @@ export interface SpawnChildFlowResult {
 
 /**
  * Spawn a child flow to its terminal event and return its result. Provided by
- * `launch.ts`; injected into `RunFlowTool`. Throws only on an unexpected internal
+ * `launch.ts`; injected into `RunCircuitTool`. Throws only on an unexpected internal
  * failure — a flow that errors returns `status: "error"` (the tool maps it to a
  * `ToolResult`, never a throw).
  */
-export type SpawnChildFlow = (req: SpawnChildFlowRequest) => Promise<SpawnChildFlowResult>;
+export type SpawnChildCircuit = (req: SpawnChildCircuitRequest) => Promise<SpawnChildCircuitResult>;

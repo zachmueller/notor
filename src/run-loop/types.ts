@@ -212,7 +212,7 @@ export interface OrchestrationToolContext {
 	/**
 	 * Child-flow subtree rollup accumulator (INT-043/047 / FR-177). The `run_flow`
 	 * tool pushes each settled child flow's per-subtree totals here during a step
-	 * turn; `OrchestrationRunner` drains it **after** the turn and folds them into
+	 * turn; `CircuitRunner` drains it **after** the turn and folds them into
 	 * the run-level `subtreeConsumed` + token totals so the parent's
 	 * `child_run_metadata` (and the root run-tree header rollup) reflects the
 	 * **whole** descendant subtree — not just its own turns. This is *attribution

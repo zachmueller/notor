@@ -1,5 +1,5 @@
 /**
- * TEST-004 (part 1) — `OrchestrationHelper` runtime API (INT-011).
+ * TEST-004 (part 1) — `CircuitHelper` runtime API (INT-011).
  *
  * Covers the `orchestration` helper surface a code step receives:
  *  - `emit` routing shape + the terminal-only `structured` carriage;
@@ -21,14 +21,14 @@ import type { ToolDispatcher } from "../chat/dispatcher";
 import type { OrchestrationToolContext, RunContext } from "../run-loop/types";
 import type { ToolResult } from "../types";
 import {
-	buildOrchestrationHelper,
+	buildCircuitHelper,
 	projectCodeStepEvent,
-	type BuildOrchestrationHelperArgs,
+	type BuildCircuitHelperArgs,
 	type ScratchpadFs,
-} from "./orchestration-helper";
+} from "./circuit-helper";
 import { SessionLog, type SessionLogWriter } from "./session-log";
 import { TaskRegistry, type TaskFs } from "./task-registry";
-import type { OrchestrationEvent } from "./types";
+import type { CircuitEvent } from "./types";
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -110,7 +110,7 @@ function runContext(abort: AbortSignal): RunContext {
 	};
 }
 
-function makeArgs(over: Partial<BuildOrchestrationHelperArgs> = {}): BuildOrchestrationHelperArgs {
+function makeArgs(over: Partial<BuildCircuitHelperArgs> = {}): BuildCircuitHelperArgs {
 	const fs = new FakeFs();
 	return {
 		flowName: "Demo",
@@ -139,7 +139,7 @@ function makeArgs(over: Partial<BuildOrchestrationHelperArgs> = {}): BuildOrches
 
 describe("projectCodeStepEvent", () => {
 	it("projects only topic/payload/source_step (engine-only turn/ts excluded)", () => {
-		const event: OrchestrationEvent = {
+		const event: CircuitEvent = {
 			topic: "build.done",
 			payload: "{\"projectPath\":\"/x\"}",
 			source_step: "Builder",
@@ -157,15 +157,15 @@ describe("projectCodeStepEvent", () => {
 	});
 });
 
-describe("OrchestrationHelper.emit", () => {
+describe("CircuitHelper.emit", () => {
 	it("builds a CodeStepResult with payload defaulting to \"\"", () => {
-		const o = buildOrchestrationHelper(makeArgs());
+		const o = buildCircuitHelper(makeArgs());
 		expect(o.emit("tests.passed")).toEqual({ topic: "tests.passed", payload: "" });
 		expect(o.emit("tests.failed", "boom")).toEqual({ topic: "tests.failed", payload: "boom" });
 	});
 
 	it("carries structured only when provided (terminal data path)", () => {
-		const o = buildOrchestrationHelper(makeArgs());
+		const o = buildCircuitHelper(makeArgs());
 		const withStructured = o.emit("FLOW_COMPLETE", "done", { filesChanged: ["a.ts"] });
 		expect(withStructured).toEqual({
 			topic: "FLOW_COMPLETE",
@@ -176,12 +176,12 @@ describe("OrchestrationHelper.emit", () => {
 	});
 });
 
-describe("OrchestrationHelper.once", () => {
+describe("CircuitHelper.once", () => {
 	it("runs fn once, records side_effect.committed, and skips an already-committed key", async () => {
 		const writer = new FakeWriter();
 		const sessionLog = new SessionLog("sessions/sess-1/log.jsonl", writer, () => "T");
 		const committedKeys = new Set<string>();
-		const o = buildOrchestrationHelper(makeArgs({ sessionLog, committedKeys }));
+		const o = buildCircuitHelper(makeArgs({ sessionLog, committedKeys }));
 
 		const fn = vi.fn(async () => "pushed");
 		const first = await o.once("push-main", fn);
@@ -201,7 +201,7 @@ describe("OrchestrationHelper.once", () => {
 
 	it("dedupes across a recovery-seeded committed set (Issue-2 — markers survive)", async () => {
 		const committedKeys = new Set<string>(["deploy"]);
-		const o = buildOrchestrationHelper(makeArgs({ committedKeys }));
+		const o = buildCircuitHelper(makeArgs({ committedKeys }));
 		const fn = vi.fn(async () => "deployed");
 		const result = await o.once("deploy", fn);
 		expect(result).toBeUndefined();
@@ -209,12 +209,12 @@ describe("OrchestrationHelper.once", () => {
 	});
 });
 
-describe("OrchestrationHelper.scratchpad", () => {
+describe("CircuitHelper.scratchpad", () => {
 	let fs: FakeFs;
-	let o: ReturnType<typeof buildOrchestrationHelper>;
+	let o: ReturnType<typeof buildCircuitHelper>;
 	beforeEach(() => {
 		fs = new FakeFs();
-		o = buildOrchestrationHelper(makeArgs({ scratchpadFs: scratchpadAdapter(fs) }));
+		o = buildCircuitHelper(makeArgs({ scratchpadFs: scratchpadAdapter(fs) }));
 	});
 
 	it("round-trips read/write/exists under sessions/{id}/scratchpad/", async () => {
@@ -243,13 +243,13 @@ describe("OrchestrationHelper.scratchpad", () => {
 	});
 });
 
-describe("OrchestrationHelper.callTool / callMcpTool", () => {
+describe("CircuitHelper.callTool / callMcpTool", () => {
 	it("dispatches through ToolDispatcher.dispatch threading runContext + orchestrationContext", async () => {
 		const abort = new AbortController().signal;
 		const rc = runContext(abort);
 		const oc = ctx();
 		const dispatch = vi.fn(async (..._args: unknown[]) => ok("tool said hi"));
-		const o = buildOrchestrationHelper(
+		const o = buildCircuitHelper(
 			makeArgs({ dispatcher: fakeDispatcher(dispatch), runContext: rc, orchestrationContext: oc }),
 		);
 
@@ -275,7 +275,7 @@ describe("OrchestrationHelper.callTool / callMcpTool", () => {
 			vaultRootPath: "/vault",
 			sessionAllowedPaths: ["notor/orchestrations/sessions/sess-1/scratchpad"],
 		};
-		const o = buildOrchestrationHelper(makeArgs({ dispatcher: fakeDispatcher(dispatch), policyCtx }));
+		const o = buildCircuitHelper(makeArgs({ dispatcher: fakeDispatcher(dispatch), policyCtx }));
 		await o.callTool("read_note", { path: "x.md" });
 		expect(dispatch.mock.calls[0]![6]).toBe(policyCtx); // policyCtx (7th positional)
 	});
@@ -286,20 +286,20 @@ describe("OrchestrationHelper.callTool / callMcpTool", () => {
 			success: true,
 			result: { count: 3 },
 		}));
-		const o = buildOrchestrationHelper(makeArgs({ dispatcher: fakeDispatcher(dispatch) }));
+		const o = buildCircuitHelper(makeArgs({ dispatcher: fakeDispatcher(dispatch) }));
 		expect(await o.callTool("x", {})).toBe(JSON.stringify({ count: 3 }));
 	});
 
 	it("throws on a dispatch failure (INT-010 surfaces it as {step}.code_error)", async () => {
 		const dispatch = vi.fn(async () => fail("blocked by policy"));
-		const o = buildOrchestrationHelper(makeArgs({ dispatcher: fakeDispatcher(dispatch) }));
+		const o = buildCircuitHelper(makeArgs({ dispatcher: fakeDispatcher(dispatch) }));
 		await expect(o.callTool("write_note", {})).rejects.toThrow(/blocked by policy/);
 	});
 
 	it("callMcpTool namespaces as {server}__{tool} and honors the mcp-servers filter", async () => {
 		const dispatch = vi.fn(async (..._args: unknown[]) => ok("posted"));
 		// Filter allows only "slack".
-		const o = buildOrchestrationHelper(
+		const o = buildCircuitHelper(
 			makeArgs({ dispatcher: fakeDispatcher(dispatch), mcpServers: ["slack"] }),
 		);
 		await o.callMcpTool("slack", "post_message", { text: "hi" });
@@ -312,7 +312,7 @@ describe("OrchestrationHelper.callTool / callMcpTool", () => {
 
 	it("callMcpTool with a null filter inherits all servers", async () => {
 		const dispatch = vi.fn(async (..._args: unknown[]) => ok("ok"));
-		const o = buildOrchestrationHelper(
+		const o = buildCircuitHelper(
 			makeArgs({ dispatcher: fakeDispatcher(dispatch), mcpServers: null }),
 		);
 		await o.callMcpTool("anyserver", "anytool", {});
@@ -320,11 +320,11 @@ describe("OrchestrationHelper.callTool / callMcpTool", () => {
 	});
 });
 
-describe("OrchestrationHelper.tasks", () => {
+describe("CircuitHelper.tasks", () => {
 	it("delegates to the shared TaskRegistry (ensure idempotent; list filters by status)", async () => {
 		const fs = new FakeFs();
 		const registry = new TaskRegistry(fs, () => "2026-06-28T00:00:00Z");
-		const o = buildOrchestrationHelper(makeArgs({ taskRegistry: registry }));
+		const o = buildCircuitHelper(makeArgs({ taskRegistry: registry }));
 
 		await o.tasks.ensure("step-01", "Implement the flag");
 		await o.tasks.ensure("step-01", "Implement the flag"); // idempotent — no duplicate
@@ -341,21 +341,21 @@ describe("OrchestrationHelper.tasks", () => {
 	});
 });
 
-describe("OrchestrationHelper.flow / eventHistory", () => {
+describe("CircuitHelper.flow / eventHistory", () => {
 	it("exposes flow.name/iteration/sessionId for the current turn", () => {
-		const o = buildOrchestrationHelper(makeArgs({ flowName: "Code Assist", iteration: 9 }));
+		const o = buildCircuitHelper(makeArgs({ flowName: "Code Assist", iteration: 9 }));
 		expect(o.flow).toEqual({ name: "Code Assist", iteration: 9, sessionId: "sess-1" });
 	});
 
 	it("eventHistory returns recent events newest-last; limit slices the tail; default = all", () => {
-		const history: OrchestrationEvent[] = [1, 2, 3, 4].map((n) => ({
+		const history: CircuitEvent[] = [1, 2, 3, 4].map((n) => ({
 			topic: `e${n}`,
 			payload: "",
 			source_step: null,
 			turn: n,
 			ts: "T",
 		}));
-		const o = buildOrchestrationHelper(makeArgs({ eventHistory: history }));
+		const o = buildCircuitHelper(makeArgs({ eventHistory: history }));
 		expect(o.eventHistory().map((e) => e.topic)).toEqual(["e1", "e2", "e3", "e4"]);
 		expect(o.eventHistory(2).map((e) => e.topic)).toEqual(["e3", "e4"]);
 		expect(o.eventHistory(0)).toEqual([]);
@@ -363,11 +363,11 @@ describe("OrchestrationHelper.flow / eventHistory", () => {
 	});
 });
 
-describe("OrchestrationHelper.log", () => {
+describe("CircuitHelper.log", () => {
 	it("appends a step.log entry per level, keyed by the turn + step", async () => {
 		const writer = new FakeWriter();
 		const sessionLog = new SessionLog("sessions/sess-1/log.jsonl", writer, () => "T");
-		const o = buildOrchestrationHelper(makeArgs({ sessionLog, iteration: 7, stepName: "🔍 Verify" }));
+		const o = buildCircuitHelper(makeArgs({ sessionLog, iteration: 7, stepName: "🔍 Verify" }));
 
 		o.log.debug("d");
 		o.log.info("chose branch A", { n: 3 });
@@ -392,7 +392,7 @@ describe("OrchestrationHelper.log", () => {
 	it("omits data when not provided", async () => {
 		const writer = new FakeWriter();
 		const sessionLog = new SessionLog("sessions/sess-1/log.jsonl", writer, () => "T");
-		const o = buildOrchestrationHelper(makeArgs({ sessionLog }));
+		const o = buildCircuitHelper(makeArgs({ sessionLog }));
 		o.log.info("no data");
 		await new Promise((r) => setTimeout(r, 0));
 		const entry = writer.entries().find((e) => e.type === "step.log")!;
@@ -404,7 +404,7 @@ describe("OrchestrationHelper.log", () => {
 			append: () => Promise.reject(new Error("disk full")),
 		};
 		const sessionLog = new SessionLog("sessions/sess-1/log.jsonl", writer, () => "T");
-		const o = buildOrchestrationHelper(makeArgs({ sessionLog }));
+		const o = buildCircuitHelper(makeArgs({ sessionLog }));
 		expect(() => o.log.error("still fine")).not.toThrow();
 	});
 });

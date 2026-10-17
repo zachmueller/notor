@@ -12,7 +12,7 @@
 
 import { Setting, normalizePath } from "obsidian";
 import type { SettingsContext } from "./context";
-import { materializeReferenceFlows, type ReferenceFlowFs } from "../../circuits/reference-flows";
+import { materializeReferenceCircuits, type ReferenceCircuitFs } from "../../circuits/reference-circuits";
 
 /**
  * Ensure `{notor_dir}/orchestrations/` exists (mirrors the memory toggle seeding
@@ -30,7 +30,7 @@ async function ensureOrchestrationsFolder(ctx: SettingsContext): Promise<void> {
 	// POL-002: seed the reference flows (code-assist / research / review). The
 	// materializer is edit-preserving, so re-enabling never clobbers user changes.
 	const adapter = ctx.app.vault.adapter;
-	const fs: ReferenceFlowFs = {
+	const fs: ReferenceCircuitFs = {
 		exists: (p) => adapter.exists(normalizePath(p)),
 		mkdir: async (p) => {
 			const norm = normalizePath(p);
@@ -38,11 +38,11 @@ async function ensureOrchestrationsFolder(ctx: SettingsContext): Promise<void> {
 		},
 		write: async (p, data) => adapter.write(normalizePath(p), data),
 	};
-	await materializeReferenceFlows(ctx.settings.notor_dir, fs);
+	await materializeReferenceCircuits(ctx.settings.notor_dir, fs);
 }
 
 /** Render the "Orchestration" settings section. */
-export function renderOrchestrationSection(
+export function renderCircuitsSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext,
 ): void {
@@ -80,11 +80,11 @@ export function renderOrchestrationSection(
 					// run_flow (INT-042) is a hand-written Tool, not a scaffold, so the
 					// manager reload above does not (un)register it — re-gate it here so
 					// it appears/disappears with the feature group like the scaffolds.
-					ctx.plugin.syncRunFlowToolRegistration();
+					ctx.plugin.syncRunCircuitToolRegistration();
 
 					// Refresh the scheduled-flow cache + cron jobs: enabling discovers
 					// `notor-schedule` flows, disabling clears them.
-					await ctx.plugin.rescanFlows();
+					await ctx.plugin.rescanCircuits();
 
 					ctx.redisplay();
 				}),

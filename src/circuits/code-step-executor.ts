@@ -49,11 +49,11 @@ import { logger } from "../utils/logger";
 import { withTimeout } from "../utils/with-timeout";
 import { DEFAULT_CODE_STEP_TIMEOUT_SECONDS } from "./constants";
 import {
-	buildOrchestrationHelper,
+	buildCircuitHelper,
 	projectCodeStepEvent,
 	type CodeStepResult,
 	type ScratchpadFs,
-} from "./orchestration-helper";
+} from "./circuit-helper";
 import type { SessionLog } from "./session-log";
 import type { ToolPolicyContext } from "../chat/tool-policy";
 import type { StepTurnRequest, StepTurnResult } from "./step-turn-executor";
@@ -191,7 +191,7 @@ export class CodeStepExecutor {
 				abortSignal: req.runContext.abort,
 			});
 
-			const helper = buildOrchestrationHelper({
+			const helper = buildCircuitHelper({
 				flowName: req.flow.name,
 				iteration: req.iteration,
 				stepName: step.name,

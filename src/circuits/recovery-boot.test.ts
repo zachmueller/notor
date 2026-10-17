@@ -1,5 +1,5 @@
 /**
- * F6 §5.4 — `recoverOrchestrations` scan decisions (INT-005 / FR-125).
+ * F6 §5.4 — `recoverCircuits` scan decisions (INT-005 / FR-125).
  *
  * Drives the load-time recovery scan over a `FakeRecoveryFs` + a stubbed host and
  * injected seams (no runner, no DOM), locking the branch logic the review flagged:
@@ -12,11 +12,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { recoverOrchestrations, dismissRecoveredSession } from "./recovery-boot";
-import { OrchestrationSessionManager } from "./session-manager";
+import { recoverCircuits, dismissRecoveredSession } from "./recovery-boot";
+import { CircuitSessionManager } from "./session-manager";
 import type { RecoveryFs, RecoverableSession } from "./session-recovery";
-import type { OrchestrationHost } from "./host";
-import { FLOW_COMPLETE, type OrchestrationFlow, type OrchestrationSessionMeta } from "./types";
+import type { CircuitHost } from "./host";
+import { FLOW_COMPLETE, type Circuit, type CircuitSessionMeta } from "./types";
 
 // Capture Notice messages so the error/undiscoverable paths can be asserted.
 const notices: string[] = [];
@@ -43,7 +43,7 @@ beforeEach(() => {
 
 const TS = "2026-06-28T00:00:00.000Z";
 
-function flow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
+function flow(over: Partial<Circuit> = {}): Circuit {
 	return {
 		name: "F",
 		description: "",
@@ -70,7 +70,7 @@ function flow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
 	};
 }
 
-function meta(over: Partial<OrchestrationSessionMeta> = {}): OrchestrationSessionMeta {
+function meta(over: Partial<CircuitSessionMeta> = {}): CircuitSessionMeta {
 	return {
 		session_id: "s",
 		flow_name: "F",
@@ -101,7 +101,7 @@ function danglingLog(sessionId: string, flowName: string): string {
 
 /** A fake recovery fs holding session.json + log per session. */
 class FakeRecoveryFs implements RecoveryFs {
-	constructor(private readonly sessions: Record<string, { meta?: OrchestrationSessionMeta; log?: string }>) {}
+	constructor(private readonly sessions: Record<string, { meta?: CircuitSessionMeta; log?: string }>) {}
 	async listSessions(): Promise<string[]> {
 		return Object.keys(this.sessions);
 	}
@@ -119,8 +119,8 @@ class FakeRecoveryFs implements RecoveryFs {
  * the scan — `sessionManager.updateStatus(...)` marking an error session — can
  * read+write its session.json. Seeds each session's meta at its well-known path.
  */
-function fakeHost(sessions: Record<string, { meta?: OrchestrationSessionMeta }>): {
-	host: OrchestrationHost;
+function fakeHost(sessions: Record<string, { meta?: CircuitSessionMeta }>): {
+	host: CircuitHost;
 	files: Map<string, string>;
 } {
 	const files = new Map<string, string>();
@@ -151,7 +151,7 @@ function fakeHost(sessions: Record<string, { meta?: OrchestrationSessionMeta }>)
 	const host = {
 		app: { vault: { adapter } },
 		settings: { notor_dir: "notor" },
-	} as unknown as OrchestrationHost;
+	} as unknown as CircuitHost;
 	return { host, files };
 }
 
@@ -159,12 +159,12 @@ function fakeHost(sessions: Record<string, { meta?: OrchestrationSessionMeta }>)
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("recoverOrchestrations — scan decisions (F6 §5.4)", () => {
+describe("recoverCircuits — scan decisions (F6 §5.4)", () => {
 	it("offers resume for a recoverable interrupted root", async () => {
 		const sessions = { s1: { meta: meta({ session_id: "s1" }), log: danglingLog("s1", "F") } };
 		const { host } = fakeHost(sessions);
 		const offerResume = vi.fn();
-		await recoverOrchestrations(host, undefined, {
+		await recoverCircuits(host, undefined, {
 			recoveryFs: new FakeRecoveryFs(sessions),
 			resolveFlows: async () => new Map([["F", flow()]]),
 			isLive: async () => false,
@@ -184,7 +184,7 @@ describe("recoverOrchestrations — scan decisions (F6 §5.4)", () => {
 		const sessions = { bad: { log: danglingLog("bad", "F") } };
 		const { host, files } = fakeHost({ bad: { meta: meta({ session_id: "bad" }) } });
 		const offerResume = vi.fn();
-		await recoverOrchestrations(host, undefined, {
+		await recoverCircuits(host, undefined, {
 			recoveryFs: new FakeRecoveryFs(sessions),
 			resolveFlows: async () => new Map([["F", flow()]]),
 			isLive: async () => false,
@@ -193,7 +193,7 @@ describe("recoverOrchestrations — scan decisions (F6 §5.4)", () => {
 		expect(offerResume).not.toHaveBeenCalled();
 		expect(notices.some((m) => m.includes("recovery error"))).toBe(true);
 		// The session.json seeded on the host was flipped to status "error".
-		const written = JSON.parse(files.get("notor/orchestrations/sessions/bad/session.json")!) as OrchestrationSessionMeta;
+		const written = JSON.parse(files.get("notor/orchestrations/sessions/bad/session.json")!) as CircuitSessionMeta;
 		expect(written.status).toBe("error");
 	});
 
@@ -201,7 +201,7 @@ describe("recoverOrchestrations — scan decisions (F6 §5.4)", () => {
 		const sessions = { live: { meta: meta({ session_id: "live", status: "active" }), log: danglingLog("live", "F") } };
 		const { host } = fakeHost(sessions);
 		const offerResume = vi.fn();
-		await recoverOrchestrations(host, undefined, {
+		await recoverCircuits(host, undefined, {
 			recoveryFs: new FakeRecoveryFs(sessions),
 			resolveFlows: async () => new Map([["F", flow()]]),
 			isLive: async () => true, // log mtime is fresh → live
@@ -214,7 +214,7 @@ describe("recoverOrchestrations — scan decisions (F6 §5.4)", () => {
 		const sessions = { stale: { meta: meta({ session_id: "stale", status: "active" }), log: danglingLog("stale", "F") } };
 		const { host } = fakeHost(sessions);
 		const offerResume = vi.fn();
-		await recoverOrchestrations(host, undefined, {
+		await recoverCircuits(host, undefined, {
 			recoveryFs: new FakeRecoveryFs(sessions),
 			resolveFlows: async () => new Map([["F", flow()]]),
 			isLive: async () => false,
@@ -227,7 +227,7 @@ describe("recoverOrchestrations — scan decisions (F6 §5.4)", () => {
 		const sessions = { s1: { meta: meta({ session_id: "s1", flow_name: "Gone" }), log: danglingLog("s1", "Gone") } };
 		const { host } = fakeHost(sessions);
 		const offerResume = vi.fn();
-		await recoverOrchestrations(host, undefined, {
+		await recoverCircuits(host, undefined, {
 			recoveryFs: new FakeRecoveryFs(sessions),
 			resolveFlows: async () => new Map(), // flow not discoverable
 			isLive: async () => false,
@@ -244,7 +244,7 @@ describe("recoverOrchestrations — scan decisions (F6 §5.4)", () => {
 
 describe("dismissRecoveredSession — persists a terminal status", () => {
 	/** An in-memory SessionFs seeded with one session.json. */
-	function fakeFs(sessionId: string, m: OrchestrationSessionMeta) {
+	function fakeFs(sessionId: string, m: CircuitSessionMeta) {
 		const files = new Map<string, string>([
 			[`notor/orchestrations/sessions/${sessionId}/session.json`, JSON.stringify(m)],
 		]);
@@ -266,14 +266,14 @@ describe("dismissRecoveredSession — persists a terminal status", () => {
 	it("marks the session `cancelled` so recovery excludes it on the next reload", async () => {
 		const m = meta({ session_id: "s1", status: "interrupted" });
 		const { fs, files } = fakeFs("s1", m);
-		const sessionManager = new OrchestrationSessionManager("notor", fs);
+		const sessionManager = new CircuitSessionManager("notor", fs);
 		const recovered = { sessionId: "s1", meta: m } as unknown as RecoverableSession;
 
 		await dismissRecoveredSession(recovered, sessionManager);
 
 		const written = JSON.parse(
 			files.get("notor/orchestrations/sessions/s1/session.json")!,
-		) as OrchestrationSessionMeta;
+		) as CircuitSessionMeta;
 		expect(written.status).toBe("cancelled");
 	});
 
@@ -286,7 +286,7 @@ describe("dismissRecoveredSession — persists a terminal status", () => {
 				throw new Error("boom");
 			},
 		};
-		const sessionManager = new OrchestrationSessionManager("notor", failingFs);
+		const sessionManager = new CircuitSessionManager("notor", failingFs);
 		const recovered = { sessionId: "s1", meta: meta({ session_id: "s1" }) } as unknown as RecoverableSession;
 		await expect(dismissRecoveredSession(recovered, sessionManager)).resolves.toBeUndefined();
 	});

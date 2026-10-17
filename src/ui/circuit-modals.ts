@@ -5,9 +5,9 @@
  * Orchestration" command, the interactive-pause input modal, and the step-jump
  * navigation from a progress Notice.
  *
- * Kept ui→logic: this module imports {@link launchOrchestration} from the
+ * Kept ui→logic: this module imports {@link launchCircuit} from the
  * run-lifecycle logic layer; the logic modules never import back (the
- * interactive-pause callback is injected into them via `requestOrchestrationInput`).
+ * interactive-pause callback is injected into them via `requestCircuitInput`).
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-1-engine.md — FEAT-011 / INT-030
  * @see specs/ZZ-misc/arch-review-july-2026/F6-launch-ts-decomposition.md
@@ -15,13 +15,13 @@
 
 import { FuzzySuggestModal, Modal, Notice, ButtonComponent } from "obsidian";
 import type { App } from "obsidian";
-import type { OrchestrationHost } from "../circuits/host";
+import type { CircuitHost } from "../circuits/host";
 import { logger } from "../utils/logger";
-import { FlowDefinitionParser } from "../circuits/flow-parser";
-import type { OrchestrationFlow } from "../circuits/types";
-import { launchOrchestration } from "../circuits/run-lifecycle";
+import { CircuitDefinitionParser } from "../circuits/circuit-parser";
+import type { Circuit } from "../circuits/types";
+import { launchCircuit } from "../circuits/run-lifecycle";
 
-const log = logger("OrchestrationLaunch");
+const log = logger("CircuitLaunch");
 
 /**
  * Open a step conversation by id from a progress-Notice right-click (INT-021 /
@@ -32,7 +32,7 @@ const log = logger("OrchestrationLaunch");
  * conversation that cannot be resolved surfaces the same "may have been deleted"
  * Notice the protocol handler uses.
  */
-export function jumpToStepConversation(host: OrchestrationHost, conversationId: string): void {
+export function jumpToStepConversation(host: CircuitHost, conversationId: string): void {
 	void host.openChatPanel().then(() => {
 		const orchestrator = host.getActiveOrchestrator();
 		if (!orchestrator) {
@@ -51,26 +51,26 @@ export function jumpToStepConversation(host: OrchestrationHost, conversationId: 
 // Flow picker + objective prompt (the command UI)
 // ---------------------------------------------------------------------------
 
-class FlowPickerModal extends FuzzySuggestModal<OrchestrationFlow> {
+class FlowPickerModal extends FuzzySuggestModal<Circuit> {
 	constructor(
 		app: App,
-		private readonly flows: OrchestrationFlow[],
-		private readonly onSelect: (flow: OrchestrationFlow) => void,
+		private readonly flows: Circuit[],
+		private readonly onSelect: (flow: Circuit) => void,
 		private readonly emptyMessage: string,
 	) {
 		super(app);
 		this.setPlaceholder("Select an orchestration flow to run…");
 	}
 
-	getItems(): OrchestrationFlow[] {
+	getItems(): Circuit[] {
 		return this.flows;
 	}
 
-	getItemText(flow: OrchestrationFlow): string {
+	getItemText(flow: Circuit): string {
 		return flow.description ? `${flow.name} — ${flow.description}` : flow.name;
 	}
 
-	onChooseItem(flow: OrchestrationFlow): void {
+	onChooseItem(flow: Circuit): void {
 		this.onSelect(flow);
 	}
 
@@ -204,7 +204,7 @@ class UserInputModal extends Modal {
  * layer from the composition site); resolves with the entered text or `null` on
  * dismiss/cancel.
  */
-export function requestOrchestrationInput(
+export function requestCircuitInput(
 	app: App,
 	flowName: string,
 	question: string,
@@ -216,11 +216,11 @@ export function requestOrchestrationInput(
 
 /**
  * Open the flow picker → objective prompt → launch. Discovers flows via
- * {@link FlowDefinitionParser}. Surfaced by the "Notor: Run Orchestration"
+ * {@link CircuitDefinitionParser}. Surfaced by the "Notor: Run Orchestration"
  * command (gated on `orchestration_enabled`).
  */
-export async function showOrchestrationPicker(host: OrchestrationHost): Promise<void> {
-	const parser = new FlowDefinitionParser(
+export async function showCircuitPicker(host: CircuitHost): Promise<void> {
+	const parser = new CircuitDefinitionParser(
 		host.app.vault,
 		host.app.metadataCache,
 		host.settings.notor_dir,
@@ -228,7 +228,7 @@ export async function showOrchestrationPicker(host: OrchestrationHost): Promise<
 
 	let parsed;
 	try {
-		parsed = await parser.discoverFlows();
+		parsed = await parser.discoverCircuits();
 	} catch (e) {
 		log.error("Flow discovery failed", { error: String(e) });
 		new Notice(`Orchestration discovery failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -243,10 +243,10 @@ export async function showOrchestrationPicker(host: OrchestrationHost): Promise<
 		flows,
 		(flow) => {
 			new ObjectiveModal(host.app, flow.name, (objective) => {
-				launchOrchestration(host, flow, objective, {
+				launchCircuit(host, flow, objective, {
 					origin: "user",
 					requestUserInput: (flowName, question) =>
-						requestOrchestrationInput(host.app, flowName, question),
+						requestCircuitInput(host.app, flowName, question),
 				}).catch((e) => {
 					log.error("Orchestration run failed", { flow: flow.name, error: String(e) });
 					new Notice(`Orchestration '${flow.name}' failed: ${e instanceof Error ? e.message : String(e)}`);

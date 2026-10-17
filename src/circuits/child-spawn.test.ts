@@ -1,5 +1,5 @@
 /**
- * F6 §5.1 — `makeChildFlowSpawner` ledger replay (catches F1 Fix 3).
+ * F6 §5.1 — `makeChildCircuitSpawner` ledger replay (catches F1 Fix 3).
  *
  * Task 03 landed `child-ledger.test.ts` for the pure `matchChildInLedger`; this
  * covers the *spawner* path that consumes it — over a fake ledger fs + a spy
@@ -14,11 +14,11 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { makeChildFlowSpawner, type ChildLedgerFs } from "./child-spawn";
-import type { OrchestrationHost } from "./host";
-import type { OrchestrationRunResult } from "./runner";
-import type { SpawnChildFlowRequest } from "./child-flow";
-import { FLOW_COMPLETE, type OrchestrationFlow } from "./types";
+import { makeChildCircuitSpawner, type ChildLedgerFs } from "./child-spawn";
+import type { CircuitHost } from "./host";
+import type { CircuitRunResult } from "./runner";
+import type { SpawnChildCircuitRequest } from "./child-circuit";
+import { FLOW_COMPLETE, type Circuit } from "./types";
 import type { AggregateBudget } from "../run-loop/types";
 import type { SessionLogEntry } from "./session-log";
 
@@ -28,7 +28,7 @@ import type { SessionLogEntry } from "./session-log";
 
 const TS = "2026-06-28T00:00:00.000Z";
 
-function flow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
+function flow(over: Partial<Circuit> = {}): Circuit {
 	return {
 		name: "ChildFlow",
 		description: "",
@@ -59,7 +59,7 @@ function budget(): AggregateBudget {
 	return { iterationsRemaining: 50, costRemainingUsd: 5 };
 }
 
-function runResult(over: Partial<OrchestrationRunResult> = {}): OrchestrationRunResult {
+function runResult(over: Partial<CircuitRunResult> = {}): CircuitRunResult {
 	return {
 		status: "completed",
 		terminal: { topic: FLOW_COMPLETE, payload: "child done", source_step: null, turn: 1, ts: TS },
@@ -74,7 +74,7 @@ function runResult(over: Partial<OrchestrationRunResult> = {}): OrchestrationRun
 	};
 }
 
-function req(over: Partial<SpawnChildFlowRequest> = {}): SpawnChildFlowRequest {
+function req(over: Partial<SpawnChildCircuitRequest> = {}): SpawnChildCircuitRequest {
 	return {
 		flowName: "ChildFlow",
 		payload: "do the thing",
@@ -127,7 +127,7 @@ function resultEntry(over: Partial<Extract<SessionLogEntry, { type: "child.resul
  * appends go through `VaultSessionLogWriter` → this adapter. The ledger *reads* are
  * injected via `ChildLedgerFs`, so the two are independent.
  */
-function fakeHost(): { host: OrchestrationHost; appended: string[] } {
+function fakeHost(): { host: CircuitHost; appended: string[] } {
 	const appended: string[] = [];
 	const adapter = {
 		exists: async () => true,
@@ -143,7 +143,7 @@ function fakeHost(): { host: OrchestrationHost; appended: string[] } {
 	const host = {
 		app: { vault: { adapter } },
 		settings: { notor_dir: "notor", history_path: "notor/chats" },
-	} as unknown as OrchestrationHost;
+	} as unknown as CircuitHost;
 	return { host, appended };
 }
 
@@ -159,13 +159,13 @@ function ledger(raw: string | null): ChildLedgerFs {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("makeChildFlowSpawner — ledger replay (F6 §5.1)", () => {
+describe("makeChildCircuitSpawner — ledger replay (F6 §5.1)", () => {
 	it("fresh spawn on an empty ledger — launches the child once", async () => {
 		const { host } = fakeHost();
 		const launch = vi.fn(async () => runResult());
-		const spawn = makeChildFlowSpawner(host, undefined, {
+		const spawn = makeChildCircuitSpawner(host, undefined, {
 			ledgerFs: ledger(""),
-			resolveFlow: async () => flow(),
+			resolveCircuit: async () => flow(),
 			launch,
 		});
 
@@ -181,9 +181,9 @@ describe("makeChildFlowSpawner — ledger replay (F6 §5.1)", () => {
 		const { host } = fakeHost();
 		const launch = vi.fn(async () => runResult());
 		const parentLog = jsonl([spawnedEntry(), resultEntry()]);
-		const spawn = makeChildFlowSpawner(host, undefined, {
+		const spawn = makeChildCircuitSpawner(host, undefined, {
 			ledgerFs: ledger(parentLog),
-			resolveFlow: async () => flow(),
+			resolveCircuit: async () => flow(),
 			launch,
 		});
 
@@ -206,9 +206,9 @@ describe("makeChildFlowSpawner — ledger replay (F6 §5.1)", () => {
 			spawnedEntry({ ordinal: 1, child_session_id: "child-b", via_tool_call_id: "id-b" }),
 			resultEntry({ child_session_id: "child-b", text: "second child" }),
 		]);
-		const spawn = makeChildFlowSpawner(host, undefined, {
+		const spawn = makeChildCircuitSpawner(host, undefined, {
 			ledgerFs: ledger(parentLog),
-			resolveFlow: async () => flow(),
+			resolveCircuit: async () => flow(),
 			launch,
 		});
 
@@ -225,9 +225,9 @@ describe("makeChildFlowSpawner — ledger replay (F6 §5.1)", () => {
 		const launch = vi.fn(async () => runResult({ text: "freshly spawned" }));
 		// Legacy entry: step held a conversation UUID, no flow_name/ordinal.
 		const legacy = { type: "child.spawned", turn: 4, step: "conv-uuid", via_tool_call_id: "old", child_session_id: "child-legacy", ts: TS } as unknown as SessionLogEntry;
-		const spawn = makeChildFlowSpawner(host, undefined, {
+		const spawn = makeChildCircuitSpawner(host, undefined, {
 			ledgerFs: ledger(jsonl([legacy])),
-			resolveFlow: async () => flow(),
+			resolveCircuit: async () => flow(),
 			launch,
 		});
 
@@ -241,9 +241,9 @@ describe("makeChildFlowSpawner — ledger replay (F6 §5.1)", () => {
 	it("returns an error result (no launch) when the callee flow is not invocable", async () => {
 		const { host } = fakeHost();
 		const launch = vi.fn(async () => runResult());
-		const spawn = makeChildFlowSpawner(host, undefined, {
+		const spawn = makeChildCircuitSpawner(host, undefined, {
 			ledgerFs: ledger(""),
-			resolveFlow: async () => null,
+			resolveCircuit: async () => null,
 			launch,
 		});
 

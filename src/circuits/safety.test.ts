@@ -12,13 +12,13 @@
 import { describe, it, expect } from "vitest";
 import { STALE_REPEAT_THRESHOLD } from "./constants";
 import { LoopSafetyGuards, isStale } from "./safety";
-import type { OrchestrationEvent, OrchestrationFlow } from "./types";
+import type { CircuitEvent, Circuit } from "./types";
 
-function ev(topic: string, source: string | null, payload = "x"): OrchestrationEvent {
+function ev(topic: string, source: string | null, payload = "x"): CircuitEvent {
 	return { topic, payload, source_step: source, turn: 0, ts: "2026-06-28T00:00:00Z" };
 }
 
-function flow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
+function flow(over: Partial<Circuit> = {}): Circuit {
 	return {
 		name: "Demo",
 		description: "",

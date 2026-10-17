@@ -689,7 +689,7 @@ export class NotorChatView extends ItemView {
 		});
 		// F1 Fix 1: a live flow-run entry's Stop button aborts the run via the registry.
 		this.workflowActivityIndicator.setOnStopFlowRun((sessionId: string) => {
-			const stopped = this.plugin.getOrchestrationRunRegistry().abort(sessionId);
+			const stopped = this.plugin.getCircuitRunRegistry().abort(sessionId);
 			// `abort` returns false when no live handle exists (a background child, a
 			// stale post-crash entry, or a run that finalized between render and click).
 			// The button is gated by the liveness predicate below, so this is a
@@ -698,7 +698,7 @@ export class NotorChatView extends ItemView {
 		});
 		// F1 Fix 1: only offer Stop for a run the registry can actually abort.
 		this.workflowActivityIndicator.setIsFlowRunLive(
-			(sessionId: string) => !!this.plugin.getOrchestrationRunRegistry().get(sessionId),
+			(sessionId: string) => !!this.plugin.getCircuitRunRegistry().get(sessionId),
 		);
 
 		this.workflowActivityIndicator.render();

@@ -1,5 +1,5 @@
 /**
- * TEST-002 (part 1) — `OrchestrationEventEngine` unit tests (FEAT-003).
+ * TEST-002 (part 1) — `CircuitEventEngine` unit tests (FEAT-003).
  *
  * No LLM, no real vault — a fake `SessionLog` records the order of appends vs.
  * subscriber resolution to prove write-before-route.
@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { COMPLETION_NOPROGRESS_THRESHOLD } from "./constants";
-import { OrchestrationEventEngine } from "./event-engine";
+import { CircuitEventEngine } from "./event-engine";
 import type { SessionLog } from "./session-log";
 import type { StepDefinition } from "./types";
 
@@ -40,10 +40,10 @@ function fakeLog(order: string[]): SessionLog {
 	} as unknown as SessionLog;
 }
 
-describe("OrchestrationEventEngine", () => {
+describe("CircuitEventEngine", () => {
 	it("publish() appends event.emitted BEFORE the caller resolves subscribers (write-before-route)", () => {
 		const order: string[] = [];
-		const engine = new OrchestrationEventEngine();
+		const engine = new CircuitEventEngine();
 		const a = step("A", ["t"]);
 		engine.subscribe("t", a);
 
@@ -57,14 +57,14 @@ describe("OrchestrationEventEngine", () => {
 	});
 
 	it("getSubscribers returns the single subscriber for a normal topic", () => {
-		const engine = new OrchestrationEventEngine();
+		const engine = new CircuitEventEngine();
 		const a = step("A", ["t"]);
 		engine.subscribe("t", a);
 		expect(engine.getSubscribers("t").map((s) => s.name)).toEqual(["A"]);
 	});
 
 	it("returns fan-out subscribers in subscribe (notor-steps) order", () => {
-		const engine = new OrchestrationEventEngine();
+		const engine = new CircuitEventEngine();
 		const a = step("A", ["fan"]);
 		const b = step("B", ["fan"]);
 		const c = step("C", ["fan"]);
@@ -75,7 +75,7 @@ describe("OrchestrationEventEngine", () => {
 	});
 
 	it("auto-subscribes a synthesized re-trigger topic to the completing step when none is declared", () => {
-		const engine = new OrchestrationEventEngine();
+		const engine = new CircuitEventEngine();
 		const completing = step("Closer", ["work"], ["FLOW_COMPLETE"]);
 		// No explicit subscriber for flow.tasks_remaining.
 		const subs = engine.getSubscribers("flow.tasks_remaining", completing);
@@ -83,7 +83,7 @@ describe("OrchestrationEventEngine", () => {
 	});
 
 	it("lets an explicit subscriber override the synthesized-topic auto-subscription", () => {
-		const engine = new OrchestrationEventEngine();
+		const engine = new CircuitEventEngine();
 		const handler = step("Handler", ["flow.requirements_unmet"]);
 		const completing = step("Closer", ["work"]);
 		engine.subscribe("flow.requirements_unmet", handler);
@@ -92,19 +92,19 @@ describe("OrchestrationEventEngine", () => {
 	});
 
 	it("does NOT auto-subscribe an ordinary topic to the completing step", () => {
-		const engine = new OrchestrationEventEngine();
+		const engine = new CircuitEventEngine();
 		const completing = step("Closer", ["work"]);
 		expect(engine.getSubscribers("not.synthesized", completing)).toEqual([]);
 	});
 
 	it("rejects a second '*' wildcard subscription (cannot be overridden)", () => {
-		const engine = new OrchestrationEventEngine();
+		const engine = new CircuitEventEngine();
 		engine.subscribe("*", step("Fallback1", ["*"]));
 		expect(() => engine.subscribe("*", step("Fallback2", ["*"]))).toThrow(/wildcard/i);
 	});
 
 	it("getEventHistory returns events in publish order with the full shape", () => {
-		const engine = new OrchestrationEventEngine();
+		const engine = new CircuitEventEngine();
 		const order: string[] = [];
 		const log = fakeLog(order);
 		engine.setEmissionContext(1, null);
@@ -121,7 +121,7 @@ describe("OrchestrationEventEngine", () => {
 
 	describe("completion no-progress guard (Issue-9)", () => {
 		it("terminates after N consecutive blocked completions from the same step with a non-shrinking set", () => {
-			const engine = new OrchestrationEventEngine();
+			const engine = new CircuitEventEngine();
 			let verdict = { terminate: false, count: 0 };
 			for (let i = 0; i < COMPLETION_NOPROGRESS_THRESHOLD; i++) {
 				verdict = engine.recordBlockedCompletion("Closer", ["taskA"]);
@@ -131,7 +131,7 @@ describe("OrchestrationEventEngine", () => {
 		});
 
 		it("resets the counter when the blocking set shrinks (real progress)", () => {
-			const engine = new OrchestrationEventEngine();
+			const engine = new CircuitEventEngine();
 			engine.recordBlockedCompletion("Closer", ["taskA", "taskB"]);
 			engine.recordBlockedCompletion("Closer", ["taskA", "taskB"]);
 			// Set shrank → reset.
@@ -141,7 +141,7 @@ describe("OrchestrationEventEngine", () => {
 		});
 
 		it("resets the counter when a different step blocks", () => {
-			const engine = new OrchestrationEventEngine();
+			const engine = new CircuitEventEngine();
 			engine.recordBlockedCompletion("Closer", ["taskA"]);
 			engine.recordBlockedCompletion("Closer", ["taskA"]);
 			const other = engine.recordBlockedCompletion("Other", ["taskA"]);

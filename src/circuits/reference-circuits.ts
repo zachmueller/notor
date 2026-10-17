@@ -8,13 +8,13 @@
  * script uses them — all 10 `e2e/scripts/orchestration-*-test.ts` write bespoke
  * inline flows against live Bedrock. The verifiable gate on this content is the
  * unit-level flow-parse test (`reference-flows.test.ts`), which asserts each
- * `materializeReferenceFlows` output parses + validates through
- * `FlowDefinitionParser` with zero errors/warnings. A live-provider e2e for one
+ * `materializeReferenceCircuits` output parses + validates through
+ * `CircuitDefinitionParser` with zero errors/warnings. A live-provider e2e for one
  * reference flow (a real TEST-007) remains a separate team decision — the e2e
  * harness has no provider stub today — and is deliberately out of scope here.
  *
  * Lifecycle mirrors the built-in personas: the content lives here as constants and
- * is **materialized on first enable, preserving user edits** ({@link materializeReferenceFlows}
+ * is **materialized on first enable, preserving user edits** ({@link materializeReferenceCircuits}
  * never overwrites an existing file). Each flow is authored to pass the FEAT-002
  * load-time validators (reachable completion, single-subscriber topics, no
  * published-but-unsubscribed non-terminal topic, required-events published).
@@ -35,7 +35,7 @@ import { logger } from "../utils/logger";
 const log = logger("ReferenceFlows");
 
 /** A reference flow: its `definition.md` + a `{stepFileName: body}` map. */
-export interface ReferenceFlow {
+export interface ReferenceCircuit {
 	/** Directory slug under `{notor_dir}/orchestrations/`. */
 	slug: string;
 	/** Full `definition.md` content (frontmatter + documentation body). */
@@ -48,7 +48,7 @@ export interface ReferenceFlow {
 // 1. code-assist — conversation steps + a code-step verifier (invocable)
 // ---------------------------------------------------------------------------
 
-const CODE_ASSIST: ReferenceFlow = {
+const CODE_ASSIST: ReferenceCircuit = {
 	slug: "code-assist",
 	definition: `---
 notor-type: orchestration-flow
@@ -231,7 +231,7 @@ return orchestration.emit("FLOW_COMPLETE", summary, {
 // 2. research — conversation steps + a structured-return terminal code step
 // ---------------------------------------------------------------------------
 
-const RESEARCH: ReferenceFlow = {
+const RESEARCH: ReferenceCircuit = {
 	slug: "research",
 	definition: `---
 notor-type: orchestration-flow
@@ -368,7 +368,7 @@ return orchestration.emit("FLOW_COMPLETE", "Research complete.", {
 // 3. review — composition demo (run_flow caller) + a report step
 // ---------------------------------------------------------------------------
 
-const REVIEW: ReferenceFlow = {
+const REVIEW: ReferenceCircuit = {
 	slug: "review",
 	definition: `---
 notor-type: orchestration-flow
@@ -453,10 +453,10 @@ notor-step-persona: null
 };
 
 /** The three first-party reference flows (FR-161). */
-export const REFERENCE_FLOWS: readonly ReferenceFlow[] = [CODE_ASSIST, RESEARCH, REVIEW];
+export const REFERENCE_CIRCUITS: readonly ReferenceCircuit[] = [CODE_ASSIST, RESEARCH, REVIEW];
 
 /** Minimal durable FS surface the materializer needs (vault adapter in production). */
-export interface ReferenceFlowFs {
+export interface ReferenceCircuitFs {
 	exists(path: string): Promise<boolean>;
 	mkdir(path: string): Promise<void>;
 	write(path: string, data: string): Promise<void>;
@@ -469,14 +469,14 @@ export interface ReferenceFlowFs {
  * edits" lifecycle), so re-enabling the feature group is safe. Returns the slugs
  * that were freshly written.
  */
-export async function materializeReferenceFlows(
+export async function materializeReferenceCircuits(
 	notorDir: string,
-	fs: ReferenceFlowFs,
+	fs: ReferenceCircuitFs,
 ): Promise<string[]> {
 	const root = `${notorDir.replace(/\/+$/, "")}/orchestrations`;
 	const written: string[] = [];
 
-	for (const flow of REFERENCE_FLOWS) {
+	for (const flow of REFERENCE_CIRCUITS) {
 		const flowDir = `${root}/${flow.slug}`;
 		const stepsDir = `${flowDir}/steps`;
 		try {

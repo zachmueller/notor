@@ -2,7 +2,7 @@
  * TEST-006 (part 3) — composition at the runner level (INT-043 / INT-046 / INT-047)
  * + `child_run_metadata` back-compat parse.
  *
- * Drives `OrchestrationRunner` with a fake executor that simulates per-turn spend
+ * Drives `CircuitRunner` with a fake executor that simulates per-turn spend
  * (decrementing the shared budget cell + folding into the carriage) and a
  * `run_flow`-style child fold, asserting:
  *  - a child run inherits the shared budget cell **by reference** + `depth + 1`
@@ -16,12 +16,12 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { OrchestrationRunner } from "./runner";
+import { CircuitRunner } from "./runner";
 import { decrementAggregate } from "../run-loop/budget";
 import type { StepTurnExecutor, StepTurnRequest, StepTurnResult } from "./step-turn-executor";
 import type { SessionLog } from "./session-log";
 import type { AggregateBudget } from "../run-loop/types";
-import { FLOW_COMPLETE, type OrchestrationFlow, type StepDefinition } from "./types";
+import { FLOW_COMPLETE, type Circuit, type StepDefinition } from "./types";
 import { readChildRunMetadata, type ToolResult } from "../types";
 
 function noopLog(): SessionLog {
@@ -59,7 +59,7 @@ function step(name: string, over: Partial<StepDefinition> = {}): StepDefinition 
 	};
 }
 
-function flow(steps: StepDefinition[], over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
+function flow(steps: StepDefinition[], over: Partial<Circuit> = {}): Circuit {
 	return {
 		name: "Demo",
 		description: "",
@@ -130,12 +130,12 @@ function spendExecutor(opts: {
 }
 
 function makeRunner(
-	f: OrchestrationFlow,
+	f: Circuit,
 	executor: StepTurnExecutor,
 	inheritedContext?: { budget: AggregateBudget; depth: number },
 ) {
 	let convId = 0;
-	return new OrchestrationRunner({
+	return new CircuitRunner({
 		executor,
 		sessionLog: noopLog(),
 		makeOrchestrationContext: () => ({
@@ -156,7 +156,7 @@ function makeRunner(
 	});
 }
 
-describe("OrchestrationRunner — composition (INT-043/046/047)", () => {
+describe("CircuitRunner — composition (INT-043/046/047)", () => {
 	it("a child run inherits the SHARED budget cell by reference + depth+1", async () => {
 		const planner = step("Planner", { triggers: ["start"], publishes: ["work"] });
 		const finisher = step("Finisher", { triggers: ["work"], publishes: [FLOW_COMPLETE] });

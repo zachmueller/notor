@@ -8,11 +8,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { VaultEventScheduler } from "./vault-event-scheduler";
-import { flowJobKey } from "../circuits/flow-enabled";
-import type { OrchestrationFlow } from "../circuits/types";
+import { circuitJobKey } from "../circuits/circuit-enabled";
+import type { Circuit } from "../circuits/types";
 import type { NotorSettings } from "../settings/types";
 
-function makeFlow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
+function makeFlow(over: Partial<Circuit> = {}): Circuit {
 	return {
 		name: "Demo",
 		description: "",
@@ -63,7 +63,7 @@ describe("VaultEventScheduler — scheduled orchestration flows", () => {
 
 		scheduler.syncJobs([]);
 
-		expect(scheduler.isJobActive(flowJobKey(flow.flowDir))).toBe(true);
+		expect(scheduler.isJobActive(circuitJobKey(flow.flowDir))).toBe(true);
 	});
 
 	it("does not register a job for a flow without a schedule", () => {
@@ -73,7 +73,7 @@ describe("VaultEventScheduler — scheduled orchestration flows", () => {
 
 		scheduler.syncJobs([]);
 
-		expect(scheduler.isJobActive(flowJobKey(flow.flowDir))).toBe(false);
+		expect(scheduler.isJobActive(circuitJobKey(flow.flowDir))).toBe(false);
 	});
 
 	it("skips a flow disabled via flow_enabled", () => {
@@ -83,7 +83,7 @@ describe("VaultEventScheduler — scheduled orchestration flows", () => {
 
 		scheduler.syncJobs([]);
 
-		expect(scheduler.isJobActive(flowJobKey(flow.flowDir))).toBe(false);
+		expect(scheduler.isJobActive(circuitJobKey(flow.flowDir))).toBe(false);
 	});
 
 	it("removes the job when the flow is later disabled", () => {
@@ -93,11 +93,11 @@ describe("VaultEventScheduler — scheduled orchestration flows", () => {
 		scheduler.setDiscoveredFlows(() => [flow], vi.fn());
 
 		scheduler.syncJobs([]);
-		expect(scheduler.isJobActive(flowJobKey(flow.flowDir))).toBe(true);
+		expect(scheduler.isJobActive(circuitJobKey(flow.flowDir))).toBe(true);
 
 		enabled = { [flow.flowDir]: false };
 		scheduler.syncJobs([]);
-		expect(scheduler.isJobActive(flowJobKey(flow.flowDir))).toBe(false);
+		expect(scheduler.isJobActive(circuitJobKey(flow.flowDir))).toBe(false);
 	});
 
 	it("fires the flow launcher when a second-resolution cron job triggers", async () => {
@@ -107,7 +107,7 @@ describe("VaultEventScheduler — scheduled orchestration flows", () => {
 		scheduler.setDiscoveredFlows(() => [flow], launch);
 
 		scheduler.syncJobs([]);
-		expect(scheduler.isJobActive(flowJobKey(flow.flowDir))).toBe(true);
+		expect(scheduler.isJobActive(circuitJobKey(flow.flowDir))).toBe(true);
 
 		// Real timer: wait just over a second for the cron to fire once.
 		await new Promise((resolve) => setTimeout(resolve, 1200));

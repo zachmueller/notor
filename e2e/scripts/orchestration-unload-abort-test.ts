@@ -37,7 +37,7 @@ async function tests(ctx: TestContext): Promise<void> {
 	const registered = await page.evaluate(() => {
 		const plugin = (window as any).app?.plugins?.plugins?.["notor"];
 		if (!plugin) return { error: "plugin not found" };
-		const registry = plugin.getOrchestrationRunRegistry?.();
+		const registry = plugin.getCircuitRunRegistry?.();
 		if (!registry) return { error: "no run registry accessor" };
 		const controller = new AbortController();
 		(window as any).__e2eAbortController = controller;
@@ -89,7 +89,7 @@ async function tests(ctx: TestContext): Promise<void> {
 		// Give the fresh instance a moment to construct.
 		await new Promise((r) => setTimeout(r, 2_000));
 		const plugin = app.plugins.plugins?.["notor"];
-		const registry = plugin?.getOrchestrationRunRegistry?.();
+		const registry = plugin?.getCircuitRunRegistry?.();
 		return {
 			pluginPresent: plugin != null,
 			liveRuns: registry ? registry.listActive().length : -1,

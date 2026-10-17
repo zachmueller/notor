@@ -1,5 +1,5 @@
 /**
- * `FlowCompositionManager` (INT-041 / FR-171) — stateless invocable-flow
+ * `CircuitCompositionManager` (INT-041 / FR-171) — stateless invocable-flow
  * discovery behind the `run_flow` tool (INT-042).
  *
  * It mirrors `SubAgentManager` (`src/sub-agents/manager.ts`) precisely: **no
@@ -8,12 +8,12 @@
  * `SubAgentManager` re-discovers profiles each call.
  *
  * It is the resolver behind `run_flow`'s dynamic `flow` enum: the tool calls
- * {@link listInvocableFlows} to build the enum + the per-flow `notor-flow-inputs`
+ * {@link listInvocableCircuits} to build the enum + the per-flow `notor-flow-inputs`
  * descriptions for its dynamic `get description()` / `get input_schema()`,
  * exactly as `UseSubagentTool` calls `SubAgentManager`. Resolution
- * ({@link resolveFlow}) looks up one invocable flow by name.
+ * ({@link resolveCircuit}) looks up one invocable flow by name.
  *
- * Discovery reuses {@link FlowDefinitionParser.discoverFlows} (which already
+ * Discovery reuses {@link CircuitDefinitionParser.discoverCircuits} (which already
  * excludes `sessions/`, `steps/`, and `memories.md`) and the `INT-040`
  * composition-field parse — no new scan/parser is introduced.
  *
@@ -22,21 +22,21 @@
  */
 
 import type { Vault, MetadataCache } from "obsidian";
-import { FlowDefinitionParser } from "./flow-parser";
-import type { OrchestrationFlow } from "./types";
+import { CircuitDefinitionParser } from "./circuit-parser";
+import type { Circuit } from "./types";
 import { logger } from "../utils/logger";
 
-const log = logger("FlowCompositionManager");
+const log = logger("CircuitCompositionManager");
 
-export class FlowCompositionManager {
-	private readonly parser: FlowDefinitionParser;
+export class CircuitCompositionManager {
+	private readonly parser: CircuitDefinitionParser;
 
 	constructor(
 		vault: Vault,
 		metadataCache: MetadataCache,
 		private readonly notorDir: string,
 	) {
-		this.parser = new FlowDefinitionParser(vault, metadataCache, notorDir);
+		this.parser = new CircuitDefinitionParser(vault, metadataCache, notorDir);
 	}
 
 	/**
@@ -45,12 +45,12 @@ export class FlowCompositionManager {
 	 * `notor-flow-inputs` / `notor-flow-returns` contract. Holds **no** active
 	 * state: a flow toggled (un)invocable on disk is reflected on the next call.
 	 *
-	 * One unparseable flow never blocks the rest — `discoverFlows()` already logs
+	 * One unparseable flow never blocks the rest — `discoverCircuits()` already logs
 	 * and excludes a bad flow.
 	 */
-	async listInvocableFlows(): Promise<OrchestrationFlow[]> {
+	async listInvocableCircuits(): Promise<Circuit[]> {
 		try {
-			const parsed = await this.parser.discoverFlows();
+			const parsed = await this.parser.discoverCircuits();
 			return parsed.map((p) => p.flow).filter((f) => f.invocable);
 		} catch (e) {
 			log.warn("Invocable-flow discovery failed", { error: String(e) });
@@ -64,8 +64,8 @@ export class FlowCompositionManager {
 	 * caller (`run_flow`) surfaces that as a `success: false` tool error, never a
 	 * throw.
 	 */
-	async resolveFlow(name: string): Promise<OrchestrationFlow | null> {
-		const flows = await this.listInvocableFlows();
+	async resolveCircuit(name: string): Promise<Circuit | null> {
+		const flows = await this.listInvocableCircuits();
 		return flows.find((f) => f.name === name) ?? null;
 	}
 }

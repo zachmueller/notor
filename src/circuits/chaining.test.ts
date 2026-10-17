@@ -13,7 +13,7 @@
  *    drift, corrected in the module);
  *  - `parentScratchpadPath` is forwarded only for a `shared`-handoff successor.
  *
- * The launch-time guard (`launchOrchestration` only calls this when
+ * The launch-time guard (`launchCircuit` only calls this when
  * `result.status === "completed" && flow.onCompleteFlow`) is asserted structurally
  * by locking `chainToSuccessor`'s no-op-on-missing-`onCompleteFlow` early return.
  *
@@ -22,9 +22,9 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { chainToSuccessor, type ChainLauncher } from "./chaining";
-import type { OrchestrationHost } from "./host";
-import type { OrchestrationRunResult } from "./runner";
-import { FLOW_COMPLETE, type OrchestrationFlow } from "./types";
+import type { CircuitHost } from "./host";
+import type { CircuitRunResult } from "./runner";
+import { FLOW_COMPLETE, type Circuit } from "./types";
 import type { AggregateBudget } from "../run-loop/types";
 
 // Capture Notice messages so the blocked/undiscoverable paths can be asserted.
@@ -50,7 +50,7 @@ beforeEach(() => {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function flow(over: Partial<OrchestrationFlow> = {}): OrchestrationFlow {
+function flow(over: Partial<Circuit> = {}): Circuit {
 	return {
 		name: "Predecessor",
 		description: "",
@@ -81,7 +81,7 @@ function budget(over: Partial<AggregateBudget> = {}): AggregateBudget {
 	return { iterationsRemaining: 50, costRemainingUsd: 5, ...over };
 }
 
-function result(over: Partial<OrchestrationRunResult> = {}): OrchestrationRunResult {
+function result(over: Partial<CircuitRunResult> = {}): CircuitRunResult {
 	return {
 		status: "completed",
 		terminal: { topic: FLOW_COMPLETE, payload: "done", source_step: null, turn: 1, ts: "t" },
@@ -97,16 +97,16 @@ function result(over: Partial<OrchestrationRunResult> = {}): OrchestrationRunRes
 }
 
 /** A host stub — the injected `resolveSuccessor`/`launch` seams keep it inert. */
-function fakeHost(): OrchestrationHost {
+function fakeHost(): CircuitHost {
 	return {
 		settings: { notor_dir: "notor" },
 		app: {},
-	} as unknown as OrchestrationHost;
+	} as unknown as CircuitHost;
 }
 
 /** A spy launcher capturing the args the gate forwards to the successor run. */
-function spyLauncher(): { launch: ChainLauncher; calls: Array<{ flow: OrchestrationFlow; prompt: string; options: NonNullable<Parameters<ChainLauncher>[3]> }> } {
-	const calls: Array<{ flow: OrchestrationFlow; prompt: string; options: NonNullable<Parameters<ChainLauncher>[3]> }> = [];
+function spyLauncher(): { launch: ChainLauncher; calls: Array<{ flow: Circuit; prompt: string; options: NonNullable<Parameters<ChainLauncher>[3]> }> } {
+	const calls: Array<{ flow: Circuit; prompt: string; options: NonNullable<Parameters<ChainLauncher>[3]> }> = [];
 	const launch: ChainLauncher = vi.fn(async (_host, f, prompt, options) => {
 		calls.push({ flow: f, prompt, options: options ?? {} });
 		return result();

@@ -31,7 +31,7 @@
  */
 
 import { STALE_REPEAT_THRESHOLD } from "./constants";
-import type { OrchestrationEvent, OrchestrationFlow } from "./types";
+import type { CircuitEvent, Circuit } from "./types";
 
 /** A terminal verdict from a guard (or `null` when no guard fires). */
 export interface SafetyGuardResult {
@@ -48,10 +48,10 @@ export interface SafetyGuardResult {
  * so a payload-keyed signature missed the common non-converging-LLM loop). Fewer
  * than `STALE_REPEAT_THRESHOLD` events → false.
  */
-export function isStale(history: OrchestrationEvent[]): boolean {
+export function isStale(history: CircuitEvent[]): boolean {
 	if (history.length < STALE_REPEAT_THRESHOLD) return false;
 	const recent = history.slice(-STALE_REPEAT_THRESHOLD);
-	const sig = (e: OrchestrationEvent): string => `${e.topic}:${e.source_step}`;
+	const sig = (e: CircuitEvent): string => `${e.topic}:${e.source_step}`;
 	const first = sig(recent[0]!);
 	return recent.every((e) => sig(e) === first);
 }
@@ -63,18 +63,18 @@ export class LoopSafetyGuards {
 	 * `llmTurns`, so a code-step-only flow is bounded by the runtime cap +
 	 * stale-loop, not this.
 	 */
-	checkIteration(llmTurns: number, flow: OrchestrationFlow): boolean {
+	checkIteration(llmTurns: number, flow: Circuit): boolean {
 		return llmTurns >= flow.maxIterations;
 	}
 
 	/** Runtime cap (FR-117). Fires when wall-clock since `startedAtMs` exceeds `flow.maxRuntimeMinutes`. */
-	checkRuntime(startedAtMs: number, flow: OrchestrationFlow, nowMs: number = Date.now()): boolean {
+	checkRuntime(startedAtMs: number, flow: Circuit, nowMs: number = Date.now()): boolean {
 		const elapsedMinutes = (nowMs - startedAtMs) / 60_000;
 		return elapsedMinutes > flow.maxRuntimeMinutes;
 	}
 
 	/** Stale-loop detection — delegates to the pure {@link isStale}. */
-	isStale(history: OrchestrationEvent[]): boolean {
+	isStale(history: CircuitEvent[]): boolean {
 		return isStale(history);
 	}
 
@@ -85,10 +85,10 @@ export class LoopSafetyGuards {
 	 * guard's terminal verdict, or `null` when the flow is healthy.
 	 */
 	evaluate(args: {
-		flow: OrchestrationFlow;
+		flow: Circuit;
 		llmTurns: number;
 		startedAtMs: number;
-		history: OrchestrationEvent[];
+		history: CircuitEvent[];
 		nowMs?: number;
 	}): SafetyGuardResult | null {
 		const { flow, llmTurns, startedAtMs, history, nowMs } = args;

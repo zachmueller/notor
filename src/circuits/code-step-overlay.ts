@@ -17,7 +17,7 @@
  *     next conversation-turn.
  *
  * Both are **pure** (no Obsidian / view dependency) so they unit-test directly.
- * The view ({@link OrchestrationRunTreeView}) owns reading the log files and
+ * The view ({@link CircuitRunTreeView}) owns reading the log files and
  * constructing real `RunTreeNode`s via the injected factory.
  */
 

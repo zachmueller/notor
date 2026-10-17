@@ -35,7 +35,7 @@ export type OpenRunTreeCallback = (sessionId: string) => void;
 
 /**
  * Callback to stop a live orchestration flow run (F1 Fix 1). Wired to the
- * plugin's `OrchestrationRunRegistry.abort(sessionId)`; surfaced as a stop
+ * plugin's `CircuitRunRegistry.abort(sessionId)`; surfaced as a stop
  * icon-button on `active` flow-run rows.
  */
 export type StopFlowRunCallback = (sessionId: string) => void;

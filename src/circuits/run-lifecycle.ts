@@ -2,7 +2,7 @@
  * Orchestration run lifecycle (FEAT-011 / FEAT-012) — the "run a flow to a
  * terminal event" half of the former `launch.ts`.
  *
- * Exposes {@link launchOrchestration} — resolve/parse a flow + run it to a
+ * Exposes {@link launchCircuit} — resolve/parse a flow + run it to a
  * terminal event (used by the command and by the `run_orchestration` hook) — plus
  * the chaining handoff (`notor-on-complete-flow`) and the shared finalize
  * invariant ({@link finalizeRun}) that both a fresh launch and a crash-recovery
@@ -13,23 +13,23 @@
  */
 
 import { Notice } from "obsidian";
-import type { OrchestrationHost } from "./host";
+import type { CircuitHost } from "./host";
 import type { ConversationMode } from "../types";
 import type { AggregateBudget, OrchestrationToolContext } from "../run-loop/types";
 import { logger } from "../utils/logger";
 import { SessionLog } from "./session-log";
-import { OrchestrationSessionManager } from "./session-manager";
+import { CircuitSessionManager } from "./session-manager";
 import { seedMemoriesNote } from "./memories";
 import { writeFailureReport, shouldWriteFailureReport } from "./failure-report";
-import { OrchestrationRunner, type OrchestrationRunResult } from "./runner";
+import { CircuitRunner, type CircuitRunResult } from "./runner";
 import { newRootBudget } from "../run-loop/budget";
 import { FLOW_CANCELLED } from "./types";
-import type { OrchestrationFlow } from "./types";
+import type { Circuit } from "./types";
 import type { FlowRunEntry } from "../workflows/workflow-activity-tracker";
 import { VaultSessionFs, VaultSessionLogWriter, buildExecutor, listOpenTaskKeys } from "./launch-wiring";
 import { chainToSuccessor, resolveSuccessorInputs } from "./chaining";
 
-const log = logger("OrchestrationLaunch");
+const log = logger("CircuitLaunch");
 
 /**
  * The interactive-pause callback the runner uses when a flow pauses for user
@@ -56,11 +56,11 @@ export function newSessionId(): string {
  * and swallowed so the report never masks the original run error.
  */
 export async function maybeWriteFailureReport(
-	host: OrchestrationHost,
-	sessionManager: OrchestrationSessionManager,
+	host: CircuitHost,
+	sessionManager: CircuitSessionManager,
 	sessionId: string,
-	flow: OrchestrationFlow,
-	result: OrchestrationRunResult,
+	flow: Circuit,
+	result: CircuitRunResult,
 ): Promise<void> {
 	if (!shouldWriteFailureReport(result.status, host.settings.orchestration_write_failure_notes)) {
 		return;
@@ -94,11 +94,11 @@ export async function maybeWriteFailureReport(
  * invariant structural rather than a copy pair that can drift.
  */
 export async function finalizeRun(
-	host: OrchestrationHost,
-	sessionManager: OrchestrationSessionManager,
+	host: CircuitHost,
+	sessionManager: CircuitSessionManager,
 	sessionId: string,
-	flow: OrchestrationFlow,
-	result: OrchestrationRunResult,
+	flow: Circuit,
+	result: CircuitRunResult,
 ): Promise<"completed" | "cancelled" | "error"> {
 	// INT-001: `completed` → done; `cancelled`/`error` map to their statuses.
 	const finalStatus =
@@ -128,7 +128,7 @@ export async function finalizeRun(
  * finalize time) so completed entries keep sorting by when they began.
  */
 export function reflectFlowRunStatus(
-	host: OrchestrationHost,
+	host: CircuitHost,
 	sessionId: string,
 	flowName: string,
 	status: FlowRunEntry["status"],
@@ -141,9 +141,9 @@ export function reflectFlowRunStatus(
  * Resolve, parse, and run a flow by directory to a terminal event. Used by both
  * the command (FEAT-011) and the `run_orchestration` hook (FEAT-012).
  */
-export async function launchOrchestration(
-	host: OrchestrationHost,
-	flow: OrchestrationFlow,
+export async function launchCircuit(
+	host: CircuitHost,
+	flow: Circuit,
 	promptText: string,
 	options?: {
 		origin?: "user" | "hook" | "schedule" | "run_flow" | "chaining";
@@ -180,7 +180,7 @@ export async function launchOrchestration(
 		 */
 		requestUserInput?: RequestUserInput;
 	},
-): Promise<OrchestrationRunResult> {
+): Promise<CircuitRunResult> {
 	const sessionId = options?.sessionId ?? newSessionId();
 	const origin = options?.origin ?? "user";
 	const parentSessionId = options?.parentSessionId ?? null;
@@ -196,7 +196,7 @@ export async function launchOrchestration(
 	// per-flow with `notor-flow-allow-concurrent: true`. In-memory only: after a
 	// crash the recovery liveness guard (Fix 2) is the protection.
 	if (origin !== "run_flow" && origin !== "chaining" && !flow.allowConcurrent) {
-		const registry = host.getOrchestrationRunRegistry();
+		const registry = host.getCircuitRunRegistry();
 		if (registry.isFlowRunning(flow.name)) {
 			const running = registry.listActive().find((h) => h.flowName === flow.name);
 			log.info("Skipping launch — flow already running", {
@@ -212,7 +212,7 @@ export async function launchOrchestration(
 
 	// INT-001: create the session workspace (dir + scratchpad/ + tasks/ +
 	// session.json status `active`) before the first turn runs.
-	const sessionManager = new OrchestrationSessionManager(
+	const sessionManager = new CircuitSessionManager(
 		host.settings.notor_dir,
 		new VaultSessionFs(host.app),
 	);
@@ -255,7 +255,7 @@ export async function launchOrchestration(
 	// guard, and onunload teardown can find and cancel it. A child / chaining run
 	// that inherits a parent abort signal (`options.abortSignal`) is cancelled
 	// transitively via the cascade, so only register the controller we own here.
-	const registry = host.getOrchestrationRunRegistry();
+	const registry = host.getCircuitRunRegistry();
 	if (!options?.abortSignal) {
 		registry.register({
 			sessionId,
@@ -273,7 +273,7 @@ export async function launchOrchestration(
 		: null;
 
 	const requestUserInput = options?.requestUserInput;
-	const runner = new OrchestrationRunner({
+	const runner = new CircuitRunner({
 		executor,
 		sessionLog,
 		makeOrchestrationContext: (_conversationId): OrchestrationToolContext => ({
@@ -323,7 +323,7 @@ export async function launchOrchestration(
 
 	log.info("Launching orchestration flow", { flow: flow.name, sessionId, origin });
 
-	let result: OrchestrationRunResult;
+	let result: CircuitRunResult;
 	try {
 		result = await runner.start(flow, promptText);
 	} catch (e) {
@@ -374,7 +374,7 @@ export async function launchOrchestration(
  * terminal so a caller (e.g. a scheduler) treats it as a benign no-op, not an
  * error — no session was created.
  */
-function skippedRunResult(flow: OrchestrationFlow): OrchestrationRunResult {
+function skippedRunResult(flow: Circuit): CircuitRunResult {
 	return {
 		status: "cancelled",
 		terminal: {

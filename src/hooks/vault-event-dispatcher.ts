@@ -83,7 +83,7 @@ export interface DispatcherDeps {
 	 * when `orchestration_enabled` is off (the dispatcher then skips the action
 	 * with a diagnostic Notice). Stamps the session `origin: "hook"`.
 	 */
-	launchOrchestration?: (flowNameOrDir: string, objective: string) => Promise<void>;
+	launchCircuit?: (flowNameOrDir: string, objective: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -500,15 +500,15 @@ export async function executeRunWorkflowAction(
  * Execute a "run an orchestration flow" hook action. Mirrors
  * {@link executeRunWorkflowAction}: assembles the hook's `TriggerContext` into
  * the flow's starting-event objective and delegates to the orchestration launch
- * module (`deps.launchOrchestration`, which stamps `origin: "hook"`).
+ * module (`deps.launchCircuit`, which stamps `origin: "hook"`).
  *
  * Gated on `orchestration_enabled`: when the feature group is off,
- * `deps.launchOrchestration` is absent and the action is skipped with a
+ * `deps.launchCircuit` is absent and the action is skipped with a
  * diagnostic Notice (mirroring how an unresolved `run_workflow` target degrades).
  * Loop prevention reuses the existing `ExecutionChainTracker` — the launch
  * extends the same execution chain a hook-launched workflow does, so a flow that
  * re-triggers its own launching hook is cycle-broken by the existing path.
- * Dispatch is fire-and-forget; the flow runs on `OrchestrationRunner`, not the
+ * Dispatch is fire-and-forget; the flow runs on `CircuitRunner`, not the
  * background-workflow loop.
  *
  * @see specs/ZZ-misc/orchestration/tasks/phase-1-engine.md — FEAT-012
@@ -524,7 +524,7 @@ export async function executeRunOrchestrationAction(
 		hookEvent: context.hookEvent,
 	});
 
-	if (!deps.launchOrchestration) {
+	if (!deps.launchCircuit) {
 		// orchestration_enabled is off — skip with a diagnostic Notice.
 		log.warn("run_orchestration hook skipped: orchestration is disabled", { flowRef });
 		new Notice(`Orchestration hook skipped: enable orchestration in Settings → Notor to run '${flowRef}'.`);
@@ -549,7 +549,7 @@ export async function executeRunOrchestrationAction(
 	void extendedChain; // chain is carried by the launch path; recorded for parity with run_workflow
 
 	try {
-		await deps.launchOrchestration(flowRef, objective);
+		await deps.launchCircuit(flowRef, objective);
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
 		log.error("run_orchestration launch failed", { flowRef, error: msg });

@@ -1,7 +1,7 @@
 /**
  * Orchestration engine constants (design Phase 1).
  *
- * The finite runaway-ceiling defaults the `FlowDefinitionParser` (FEAT-002)
+ * The finite runaway-ceiling defaults the `CircuitDefinitionParser` (FEAT-002)
  * injects when a flow omits them — so every flow is bounded by construction
  * (FR-117 / FR-119a; Issue-8). Values are the authority of
  * specs/ZZ-misc/orchestration/data-model.md and contracts/vault-schema.md.

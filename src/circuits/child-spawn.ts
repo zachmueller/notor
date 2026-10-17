@@ -2,7 +2,7 @@
  * Child-flow spawn (INT-043 / INT-044) — the `run_flow` execution body split out
  * of the former `launch.ts`.
  *
- * Builds the {@link SpawnChildFlow} callback injected into `RunFlowTool`, plus the
+ * Builds the {@link SpawnChildCircuit} callback injected into `RunCircuitTool`, plus the
  * durable-ledger reconciliation that makes a `run_flow` dispatch replay-safe on a
  * recovery re-run (reuse a terminal child's recorded result; resume a non-terminal
  * child in place — never tombstone-and-respawn).
@@ -11,32 +11,32 @@
  * @see specs/ZZ-misc/arch-review-july-2026/F6-launch-ts-decomposition.md
  */
 
-import type { OrchestrationHost } from "./host";
+import type { CircuitHost } from "./host";
 import type { AggregateBudget } from "../run-loop/types";
 import { logger } from "../utils/logger";
-import { FlowCompositionManager } from "./flow-composition-manager";
+import { CircuitCompositionManager } from "./circuit-composition-manager";
 import type {
-	SpawnChildFlow,
-	SpawnChildFlowRequest,
-	SpawnChildFlowResult,
-} from "./child-flow";
+	SpawnChildCircuit,
+	SpawnChildCircuitRequest,
+	SpawnChildCircuitResult,
+} from "./child-circuit";
 import { SessionLog } from "./session-log";
-import { OrchestrationSessionManager } from "./session-manager";
+import { CircuitSessionManager } from "./session-manager";
 import { SessionRecovery, type RecoverableSession } from "./session-recovery";
 import { matchChildInLedger, parseLedgerEntries } from "./child-ledger";
-import type { OrchestrationRunResult } from "./runner";
-import type { OrchestrationFlow, OrchestrationSessionMeta } from "./types";
+import type { CircuitRunResult } from "./runner";
+import type { Circuit, CircuitSessionMeta } from "./types";
 import { VaultStepConversationStore } from "./step-conversation-store";
 import { VaultSessionFs, VaultSessionLogWriter } from "./launch-wiring";
-import { launchOrchestration, newSessionId, type RequestUserInput } from "./run-lifecycle";
+import { launchCircuit, newSessionId, type RequestUserInput } from "./run-lifecycle";
 import { makeRecoveryFs, resumeRecoveredSession } from "./recovery-boot";
 
-const log = logger("OrchestrationLaunch");
+const log = logger("CircuitLaunch");
 
 /**
  * The minimal read surface the child-ledger reconciliation + entry-conversation
  * resolution need (F1 Fix 3). Mirrors the `exists`/`read` half of `RecoveryFs`;
- * `makeChildFlowSpawner` builds the vault-backed adapter in production, and tests
+ * `makeChildCircuitSpawner` builds the vault-backed adapter in production, and tests
  * inject a fake so the replay path is unit-testable without a host.
  */
 export interface ChildLedgerFs {
@@ -45,7 +45,7 @@ export interface ChildLedgerFs {
 }
 
 /**
- * Behavior-preserving test seams for {@link makeChildFlowSpawner} (production
+ * Behavior-preserving test seams for {@link makeChildCircuitSpawner} (production
  * defaults built inline). Injecting these lets the reuse/no-double-spawn/ordinal
  * paths (F1 Fix 3 / F6 §5.1) be driven over a fake ledger without a vault or a
  * live runner.
@@ -53,14 +53,14 @@ export interface ChildLedgerFs {
 export interface ChildSpawnDeps {
 	/** The `(exists/read)` ledger reader (defaults to the `VaultSessionFs` seam). */
 	ledgerFs?: ChildLedgerFs;
-	/** Resolve the callee flow by name (defaults to `FlowCompositionManager`). */
-	resolveFlow?: (flowName: string) => Promise<OrchestrationFlow | null>;
-	/** Launch the child run (defaults to {@link launchOrchestration}). */
-	launch?: typeof launchOrchestration;
+	/** Resolve the callee flow by name (defaults to `CircuitCompositionManager`). */
+	resolveCircuit?: (flowName: string) => Promise<Circuit | null>;
+	/** Launch the child run (defaults to {@link launchCircuit}). */
+	launch?: typeof launchCircuit;
 }
 
 /**
- * Build the {@link SpawnChildFlow} callback injected into `RunFlowTool`.
+ * Build the {@link SpawnChildCircuit} callback injected into `RunCircuitTool`.
  * Closes over the host; for each `run_flow` call it:
  *  1. resolves the parent session's depth (from the parent's `RunContext` cascade,
  *     passed by the tool) and writes a **`child.spawned`** ledger entry on the
@@ -91,13 +91,13 @@ export interface ChildSpawnDeps {
  * pauses interactively surfaces the same modal a root run does (INT-030); injected
  * from the composition site (main.ts) so this logic module never imports ui.
  */
-export function makeChildFlowSpawner(
-	host: OrchestrationHost,
+export function makeChildCircuitSpawner(
+	host: CircuitHost,
 	requestUserInput?: RequestUserInput,
 	deps?: ChildSpawnDeps,
-): SpawnChildFlow {
+): SpawnChildCircuit {
 	const fsVault = new VaultSessionFs(host.app);
-	const sessionManager = new OrchestrationSessionManager(host.settings.notor_dir, fsVault);
+	const sessionManager = new CircuitSessionManager(host.settings.notor_dir, fsVault);
 	// The vault-backed reader the ledger reconciliation + entry-conversation
 	// resolution read through (F1 Fix 3 — injected so both are unit-testable). A
 	// `RecoveryFs`-shaped reader (exists/read); routed through the `VaultSessionFs`
@@ -106,24 +106,24 @@ export function makeChildFlowSpawner(
 		exists: (p) => fsVault.exists(p),
 		read: (p) => fsVault.read(p),
 	};
-	const resolveFlow =
-		deps?.resolveFlow ??
+	const resolveCircuit =
+		deps?.resolveCircuit ??
 		((flowName: string) =>
-			new FlowCompositionManager(
+			new CircuitCompositionManager(
 				host.app.vault,
 				host.app.metadataCache,
 				host.settings.notor_dir,
-			).resolveFlow(flowName));
-	const launch = deps?.launch ?? launchOrchestration;
+			).resolveCircuit(flowName));
+	const launch = deps?.launch ?? launchCircuit;
 	// The single owner for step-conversation header surgery (F6 §4.2) — the
 	// reciprocal `parent`-edge backfill goes through the store's atomic fs seam
 	// instead of raw adapter I/O.
 	const stepConversationStore = new VaultStepConversationStore(fsVault, host.settings.history_path);
 
-	return async (req: SpawnChildFlowRequest): Promise<SpawnChildFlowResult> => {
+	return async (req: SpawnChildCircuitRequest): Promise<SpawnChildCircuitResult> => {
 		// Resolve the callee flow (the tool already validated it is invocable, but
 		// re-resolve so the spawner is self-contained / testable).
-		const flow = await resolveFlow(req.flowName);
+		const flow = await resolveCircuit(req.flowName);
 		if (!flow) {
 			return childErrorResult(req, `Flow '${req.flowName}' is not invocable.`);
 		}
@@ -132,7 +132,7 @@ export function makeChildFlowSpawner(
 		const parentLog = new SessionLog(parentWs.logPath, new VaultSessionLogWriter(host.app));
 
 		// --- Recovery reuse/resume (INT-044 / F1 Fix 3) --------------------------
-		const reconciled = await reconcileChildLedger(host, req, ledgerFs, sessionManager, requestUserInput, resolveFlow);
+		const reconciled = await reconcileChildLedger(host, req, ledgerFs, sessionManager, requestUserInput, resolveCircuit);
 		if (reconciled) return reconciled;
 
 		// --- Fresh spawn ---------------------------------------------------------
@@ -153,7 +153,7 @@ export function makeChildFlowSpawner(
 			})
 			.catch((e) => log.warn("child.spawned append failed", { error: String(e) }));
 
-		let result: OrchestrationRunResult;
+		let result: CircuitRunResult;
 		try {
 			result = await launch(host, flow, req.payload, {
 				origin: "run_flow",
@@ -226,13 +226,13 @@ export function makeChildFlowSpawner(
  * id-keyed match could never hit and the child would double-execute.
  */
 async function reconcileChildLedger(
-	host: OrchestrationHost,
-	req: SpawnChildFlowRequest,
+	host: CircuitHost,
+	req: SpawnChildCircuitRequest,
 	fs: ChildLedgerFs,
-	sessionManager: OrchestrationSessionManager,
+	sessionManager: CircuitSessionManager,
 	requestUserInput: RequestUserInput | undefined,
-	resolveFlow: (flowName: string) => Promise<OrchestrationFlow | null>,
-): Promise<SpawnChildFlowResult | null> {
+	resolveCircuit: (flowName: string) => Promise<Circuit | null>,
+): Promise<SpawnChildCircuitResult | null> {
 	// Without a step identity (defensive — real step turns always thread one) there
 	// is no stable key, so never match: fall through to a fresh spawn.
 	if (req.stepName === undefined || req.ordinal === undefined) return null;
@@ -275,7 +275,7 @@ async function reconcileChildLedger(
 
 	// Non-terminal child → RESUME it in place (replay its own log), never respawn.
 	log.info("run_flow recovery: resuming non-terminal child in place", { childSessionId });
-	const flow = await resolveFlow(req.flowName);
+	const flow = await resolveCircuit(req.flowName);
 	if (!flow) return childErrorResult(req, `Flow '${req.flowName}' is no longer invocable.`, childSessionId);
 
 	const recovery = new SessionRecovery();
@@ -285,7 +285,7 @@ async function reconcileChildLedger(
 	if (!logRaw || !metaRaw) {
 		return childErrorResult(req, "Child session log/meta missing on resume.", childSessionId);
 	}
-	const childMeta = JSON.parse(metaRaw) as OrchestrationSessionMeta;
+	const childMeta = JSON.parse(metaRaw) as CircuitSessionMeta;
 	const recovered = recovery.replay(childMeta, logRaw, {
 		resolveCeilings: () => ({ maxIterations: flow.maxIterations, maxCostUsd: flow.maxCostUsd }),
 	});
@@ -309,10 +309,10 @@ async function reconcileChildLedger(
 
 /** A child-run error result (no usable child output). */
 function childErrorResult(
-	req: SpawnChildFlowRequest,
+	req: SpawnChildCircuitRequest,
 	message: string,
 	childSessionId = "",
-): SpawnChildFlowResult {
+): SpawnChildCircuitResult {
 	return {
 		status: "error",
 		structured: null,
@@ -333,7 +333,7 @@ function childErrorResult(
  */
 async function resolveChildEntryConversationId(
 	fs: ChildLedgerFs,
-	sessionManager: OrchestrationSessionManager,
+	sessionManager: CircuitSessionManager,
 	childSessionId: string,
 ): Promise<string | null> {
 	const ws = sessionManager.resolveWorkspace(childSessionId);
@@ -357,7 +357,7 @@ async function resolveChildEntryConversationId(
 
 /**
  * Resume a non-terminal `run_flow` child in place (INT-044). The parent's replay
- * (via {@link makeChildFlowSpawner}'s reconciliation) calls this to replay the
+ * (via {@link makeChildCircuitSpawner}'s reconciliation) calls this to replay the
  * child's own log and await its terminal result, inheriting the parent's shared
  * budget cell + `depth + 1` — never tombstone-and-respawn, so the child's `once()`
  * markers survive.
@@ -367,13 +367,13 @@ async function resolveChildEntryConversationId(
  * calls {@link resumeRecoveredSession} directly.
  */
 async function resumeChildSession(
-	host: OrchestrationHost,
-	flow: OrchestrationFlow,
+	host: CircuitHost,
+	flow: Circuit,
 	recovered: RecoverableSession,
-	sessionManager: OrchestrationSessionManager,
+	sessionManager: CircuitSessionManager,
 	cascade: { budget: AggregateBudget; depth: number; abort: AbortSignal },
 	requestUserInput?: RequestUserInput,
-): Promise<OrchestrationRunResult> {
+): Promise<CircuitRunResult> {
 	return resumeRecoveredSession(host, flow, recovered, sessionManager, {
 		budget: cascade.budget,
 		depth: cascade.depth,

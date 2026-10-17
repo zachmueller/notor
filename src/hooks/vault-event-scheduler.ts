@@ -20,8 +20,8 @@ import type { VaultEventHookContext } from "./vault-event-hook-engine";
 import type { ExecutionChain } from "../types";
 import type { NotorSettings } from "../settings/types";
 import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
-import type { OrchestrationFlow } from "../circuits/types";
-import { flowEnabledKey, flowJobKey } from "../circuits/flow-enabled";
+import type { Circuit } from "../circuits/types";
+import { circuitEnabledKey, circuitJobKey } from "../circuits/circuit-enabled";
 import { logger } from "../utils/logger";
 
 const log = logger("VaultEventScheduler");
@@ -96,14 +96,14 @@ export class VaultEventScheduler {
 	 * Used to collect flows with a `notor-schedule` cron expression.
 	 * Set via `setDiscoveredFlows()` during plugin initialization.
 	 */
-	private getDiscoveredFlows: (() => OrchestrationFlow[]) | null = null;
+	private getDiscoveredCircuits: (() => Circuit[]) | null = null;
 
 	/**
 	 * Launcher for a scheduled orchestration flow. Encapsulates resolving the
-	 * runtime + calling `launchOrchestration(..., { origin: "schedule" })`.
+	 * runtime + calling `launchCircuit(..., { origin: "schedule" })`.
 	 * Set via `setDiscoveredFlows()`.
 	 */
-	private flowLaunchExecutor: ((flow: OrchestrationFlow) => Promise<void>) | null = null;
+	private flowLaunchExecutor: ((flow: Circuit) => Promise<void>) | null = null;
 
 	// ---------------------------------------------------------------------------
 	// Initialization
@@ -159,10 +159,10 @@ export class VaultEventScheduler {
 	 * before `syncJobs()` for scheduled flows to be registered.
 	 */
 	setDiscoveredFlows(
-		getFlows: () => OrchestrationFlow[],
-		launchFlow: (flow: OrchestrationFlow) => Promise<void>,
+		getFlows: () => Circuit[],
+		launchFlow: (flow: Circuit) => Promise<void>,
 	): void {
-		this.getDiscoveredFlows = getFlows;
+		this.getDiscoveredCircuits = getFlows;
 		this.flowLaunchExecutor = launchFlow;
 	}
 
@@ -185,7 +185,7 @@ export class VaultEventScheduler {
 	 */
 	syncJobs(hooks: VaultEventHook[]): void {
 		// Build the desired job set: settings hooks + scheduled workflow triggers + extension automations + scheduled flows
-		const desiredJobs = new Map<string, { schedule: string; label: string; isWorkflow: boolean; hook?: VaultEventHook; workflow?: Workflow; automation?: UserAutomationDefinition; flow?: OrchestrationFlow }>();
+		const desiredJobs = new Map<string, { schedule: string; label: string; isWorkflow: boolean; hook?: VaultEventHook; workflow?: Workflow; automation?: UserAutomationDefinition; flow?: Circuit }>();
 
 		// Settings-configured hooks
 		for (const hook of hooks) {
@@ -245,13 +245,13 @@ export class VaultEventScheduler {
 
 		// Scheduled orchestration flows (flows whose definition.md declares a valid
 		// `notor-schedule`). Each flow gets its own cron job keyed by `orch:{flowDir}`.
-		if (this.getDiscoveredFlows) {
+		if (this.getDiscoveredCircuits) {
 			const flowEnabled = this.getSettings?.()?.flow_enabled;
-			const scheduledFlows = this.getDiscoveredFlows().filter(
-				(f) => f.schedule && flowEnabled?.[flowEnabledKey(f.flowDir)] !== false,
+			const scheduledFlows = this.getDiscoveredCircuits().filter(
+				(f) => f.schedule && flowEnabled?.[circuitEnabledKey(f.flowDir)] !== false,
 			);
 			for (const flow of scheduledFlows) {
-				const key = flowJobKey(flow.flowDir);
+				const key = circuitJobKey(flow.flowDir);
 				desiredJobs.set(key, {
 					schedule: flow.schedule!,
 					label: flow.name,
@@ -360,7 +360,7 @@ export class VaultEventScheduler {
 		this.getDiscoveredWorkflows = null;
 		this.extensionAutomationsAccessor = null;
 		this.extensionAutomationExecutor = null;
-		this.getDiscoveredFlows = null;
+		this.getDiscoveredCircuits = null;
 		this.flowLaunchExecutor = null;
 		log.debug("VaultEventScheduler destroyed");
 	}
@@ -391,7 +391,7 @@ export class VaultEventScheduler {
 		hook?: VaultEventHook,
 		workflow?: Workflow,
 		automation?: UserAutomationDefinition,
-		flow?: OrchestrationFlow,
+		flow?: Circuit,
 	): void {
 		try {
 			const job = new Cron(schedule, () => {
@@ -447,7 +447,7 @@ export class VaultEventScheduler {
 		hook?: VaultEventHook,
 		workflow?: Workflow,
 		automation?: UserAutomationDefinition,
-		flow?: OrchestrationFlow,
+		flow?: Circuit,
 	): void {
 		log.debug("on_schedule job fired", { id, label });
 

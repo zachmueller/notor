@@ -1,7 +1,7 @@
 /**
- * `OrchestrationHelper` runtime API (INT-011) — the `orchestration` object
+ * `CircuitHelper` runtime API (INT-011) — the `orchestration` object
  * injected as the sixth code-step argument, plus the read-only `event`
- * (`CodeStepEvent`) projection of the routed `OrchestrationEvent`.
+ * (`CodeStepEvent`) projection of the routed `CircuitEvent`.
  *
  * A code step (`notor-step-mode: code`) runs deterministically — no LLM, no
  * conversation, zero tokens. This module builds the orchestration-specific
@@ -11,7 +11,7 @@
  *
  * Authority for this interface + per-member semantics:
  * specs/ZZ-misc/orchestration/contracts/orchestration-helper.md. The shapes
- * (`CodeStepEvent` / `CodeStepResult` / `OrchestrationHelper`) are defined here
+ * (`CodeStepEvent` / `CodeStepResult` / `CircuitHelper`) are defined here
  * (data-model.md links here).
  *
  * The factory is **pure over injected seams** (`ScratchpadFs`, `TaskRegistry`,
@@ -30,9 +30,9 @@ import type { OrchestrationToolContext, RunContext } from "../run-loop/types";
 import { logger, type Logger } from "../utils/logger";
 import type { SessionLog } from "./session-log";
 import { TaskRegistry, type TaskNote, type TaskStatus } from "./task-registry";
-import type { OrchestrationEvent } from "./types";
+import type { CircuitEvent } from "./types";
 
-const log = logger("OrchestrationHelper");
+const log = logger("CircuitHelper");
 
 // ---------------------------------------------------------------------------
 // Injected shapes (authority: contracts/orchestration-helper.md)
@@ -40,7 +40,7 @@ const log = logger("OrchestrationHelper");
 
 /**
  * The incoming trigger event, injected as `event`. The read-only projection of
- * the routed {@link OrchestrationEvent} — the engine-only fields (`turn`, `ts`)
+ * the routed {@link CircuitEvent} — the engine-only fields (`turn`, `ts`)
  * are not exposed. `payload` is always a string (author conventions JSON-encode
  * structured data and `JSON.parse` it in the step).
  */
@@ -69,7 +69,7 @@ export interface CodeStepResult {
  * The orchestration-specific helper injected as `orchestration`. Single
  * authority: contracts/orchestration-helper.md.
  */
-export interface OrchestrationHelper {
+export interface CircuitHelper {
 	/** Build the terminal {@link CodeStepResult} that routes the next event (MUST be returned). */
 	emit(topic: string, payload?: string, structured?: unknown): CodeStepResult;
 	/** At-least-once side-effect guard for crash recovery (FR-125). */
@@ -99,7 +99,7 @@ export interface OrchestrationHelper {
 		sessionId: string;
 	};
 	/** Recent event history for the current session (newest last), most-recent `limit` (default: all). */
-	eventHistory(limit?: number): OrchestrationEvent[];
+	eventHistory(limit?: number): CircuitEvent[];
 	/**
 	 * Persisted logic-path logger. Each call appends a `step.log` entry to
 	 * `session-log.jsonl` (**always** — independent of the console log level) AND
@@ -128,7 +128,7 @@ export interface ScratchpadFs {
 	list(dir: string): Promise<string[]>;
 }
 
-export interface BuildOrchestrationHelperArgs {
+export interface BuildCircuitHelperArgs {
 	/** Owning flow's `notor-flow-name` (for `flow.name`). */
 	flowName: string;
 	/** Engine step-turn / HOP counter for this turn (`flow.iteration`; includes code steps). */
@@ -154,7 +154,7 @@ export interface BuildOrchestrationHelperArgs {
 	/** `side_effect.committed` keys already recorded this session (seeded from recovery). */
 	committedKeys: Set<string>;
 	/** Event history snapshot for `eventHistory()` (newest last). */
-	eventHistory: OrchestrationEvent[];
+	eventHistory: CircuitEvent[];
 	/** Optional message-id generator for dispatch event correlation (default: deterministic counter). */
 	makeMessageId?: () => string;
 	/**
@@ -170,8 +170,8 @@ export interface BuildOrchestrationHelperArgs {
 // CodeStepEvent projection
 // ---------------------------------------------------------------------------
 
-/** Project the routed {@link OrchestrationEvent} into the read-only {@link CodeStepEvent}. */
-export function projectCodeStepEvent(event: OrchestrationEvent): CodeStepEvent {
+/** Project the routed {@link CircuitEvent} into the read-only {@link CodeStepEvent}. */
+export function projectCodeStepEvent(event: CircuitEvent): CodeStepEvent {
 	return { topic: event.topic, payload: event.payload, source_step: event.source_step };
 }
 
@@ -202,7 +202,7 @@ function makeStepLogger(sessionLog: SessionLog, stepName: string, iteration: num
  * Build the `orchestration` helper for one code-step turn. Every path/registry
  * is closed over — the returned object resolves nothing globally.
  */
-export function buildOrchestrationHelper(args: BuildOrchestrationHelperArgs): OrchestrationHelper {
+export function buildCircuitHelper(args: BuildCircuitHelperArgs): CircuitHelper {
 	const {
 		flowName,
 		iteration,
@@ -330,7 +330,7 @@ export function buildOrchestrationHelper(args: BuildOrchestrationHelperArgs): Or
 
 		flow: { name: flowName, iteration, sessionId },
 
-		eventHistory(limit?: number): OrchestrationEvent[] {
+		eventHistory(limit?: number): CircuitEvent[] {
 			if (limit === undefined || limit >= eventHistory.length) return [...eventHistory];
 			if (limit <= 0) return [];
 			return eventHistory.slice(eventHistory.length - limit);

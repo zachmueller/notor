@@ -9,7 +9,7 @@
  */
 
 export { VaultSessionFs } from "./launch-wiring";
-export { launchOrchestration } from "./run-lifecycle";
-export { makeChildFlowSpawner } from "./child-spawn";
-export { recoverOrchestrations } from "./recovery-boot";
-export { showOrchestrationPicker } from "../ui/circuit-modals";
+export { launchCircuit } from "./run-lifecycle";
+export { makeChildCircuitSpawner } from "./child-spawn";
+export { recoverCircuits } from "./recovery-boot";
+export { showCircuitPicker } from "../ui/circuit-modals";

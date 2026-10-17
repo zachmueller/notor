@@ -1,5 +1,5 @@
 /**
- * `OrchestrationRunRegistry` unit tests (F1 Fix 1).
+ * `CircuitRunRegistry` unit tests (F1 Fix 1).
  *
  * The registry is the in-memory owner of live orchestration runs: register /
  * unregister / get / isFlowRunning / abort / abortAll / touch semantics that the
@@ -9,9 +9,9 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { OrchestrationRunRegistry, type OrchestrationRunHandle } from "./run-registry";
+import { CircuitRunRegistry, type CircuitRunHandle } from "./run-registry";
 
-function handle(over: Partial<OrchestrationRunHandle> = {}): OrchestrationRunHandle {
+function handle(over: Partial<CircuitRunHandle> = {}): CircuitRunHandle {
 	return {
 		sessionId: "sess-1",
 		flowName: "Flow A",
@@ -21,9 +21,9 @@ function handle(over: Partial<OrchestrationRunHandle> = {}): OrchestrationRunHan
 	};
 }
 
-describe("OrchestrationRunRegistry", () => {
+describe("CircuitRunRegistry", () => {
 	it("registers and gets a handle by session id", () => {
-		const reg = new OrchestrationRunRegistry();
+		const reg = new CircuitRunRegistry();
 		const h = handle();
 		reg.register(h);
 		expect(reg.get("sess-1")).toBe(h);
@@ -31,14 +31,14 @@ describe("OrchestrationRunRegistry", () => {
 	});
 
 	it("unregisters a handle", () => {
-		const reg = new OrchestrationRunRegistry();
+		const reg = new CircuitRunRegistry();
 		reg.register(handle());
 		reg.unregister("sess-1");
 		expect(reg.get("sess-1")).toBeUndefined();
 	});
 
 	it("isFlowRunning reflects live runs of a named flow", () => {
-		const reg = new OrchestrationRunRegistry();
+		const reg = new CircuitRunRegistry();
 		expect(reg.isFlowRunning("Flow A")).toBe(false);
 		reg.register(handle({ sessionId: "s1", flowName: "Flow A" }));
 		expect(reg.isFlowRunning("Flow A")).toBe(true);
@@ -48,7 +48,7 @@ describe("OrchestrationRunRegistry", () => {
 	});
 
 	it("abort aborts the matching controller and reports whether one was found", () => {
-		const reg = new OrchestrationRunRegistry();
+		const reg = new CircuitRunRegistry();
 		const controller = new AbortController();
 		reg.register(handle({ sessionId: "s1", controller }));
 		expect(controller.signal.aborted).toBe(false);
@@ -59,7 +59,7 @@ describe("OrchestrationRunRegistry", () => {
 	});
 
 	it("abortAll aborts every live controller and returns them (without unregistering)", () => {
-		const reg = new OrchestrationRunRegistry();
+		const reg = new CircuitRunRegistry();
 		const c1 = new AbortController();
 		const c2 = new AbortController();
 		reg.register(handle({ sessionId: "s1", controller: c1 }));
@@ -74,14 +74,14 @@ describe("OrchestrationRunRegistry", () => {
 	});
 
 	it("listActive returns a snapshot of every live handle", () => {
-		const reg = new OrchestrationRunRegistry();
+		const reg = new CircuitRunRegistry();
 		reg.register(handle({ sessionId: "s1" }));
 		reg.register(handle({ sessionId: "s2" }));
 		expect(reg.listActive().map((h) => h.sessionId).sort()).toEqual(["s1", "s2"]);
 	});
 
 	it("touch refreshes lastProgressAt for a live run and no-ops for an unknown one", () => {
-		const reg = new OrchestrationRunRegistry();
+		const reg = new CircuitRunRegistry();
 		const h = handle({ sessionId: "s1", lastProgressAt: 0 });
 		reg.register(h);
 		const before = Date.now();
