@@ -260,7 +260,7 @@ export class CodeStepExecutor {
 		}
 		return {
 			topic: `${step.name}.no_emit`,
-			payload: `Code step '${step.name}' returned no orchestration.emit(...) result and declares no default_publishes.`,
+			payload: `Code step '${step.name}' returned no circuit.emit(...) result and declares no default_publishes.`,
 		};
 	}
 

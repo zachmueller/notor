@@ -36,23 +36,23 @@ async function seedReferenceCircuits(ctx: SettingsContext): Promise<void> {
 	await materializeReferenceCircuits(ctx.settings.notor_dir, fs);
 }
 
-/** Render the "Orchestration" settings section. */
+/** Render the "Circuits" settings section. */
 export function renderCircuitsSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext,
 ): void {
-	new Setting(containerEl).setHeading().setName("Orchestration");
+	new Setting(containerEl).setHeading().setName("Circuits");
 	containerEl.createEl("p", {
 		text:
-			"Multi-step orchestration flows: event-driven pipelines of conversation " +
-			"and code steps with cascading guardrails (depth, iteration, cost, runtime). " +
-			"When disabled, all orchestration tools are excluded.",
+			"Circuits are event-driven pipelines of conversation and code steps with " +
+			"cascading guardrails (depth, iteration, cost, runtime). Formerly called " +
+			"orchestrations. When disabled, all circuit tools are excluded.",
 		cls: "setting-item-description",
 	});
 
 	new Setting(containerEl)
-		.setName("Enable orchestration")
-		.setDesc("Master toggle for the orchestration subsystem.")
+		.setName("Enable circuits")
+		.setDesc("Master toggle for circuits.")
 		.addToggle((toggle) =>
 			toggle
 				.setValue(ctx.settings.circuits_enabled)
@@ -90,8 +90,8 @@ export function renderCircuitsSection(
 	new Setting(containerEl)
 		.setName("Write failed-run debug notes")
 		.setDesc(
-			"On a failed orchestration run, write a Markdown debug report under " +
-				"orchestrations/failures/ (the objective, failure reason, failing step + stack, " +
+			"On a failed circuit run, write a Markdown debug report under the " +
+				"failures/ folder (the objective, failure reason, failing step + stack, " +
 				"and event timeline) that you can open or point Notor at to debug.",
 		)
 		.addToggle((toggle) =>
@@ -110,9 +110,9 @@ export function renderCircuitsSection(
 	new Setting(containerEl)
 		.setName("Open notes in editor")
 		.setDesc(
-			"When a flow's steps read or write notes, open each one in the editor so " +
-				"you can follow along. Off by default so a flow that touches many notes " +
-				"doesn't spray tabs across your workspace. A flow can override this with " +
+			"When a circuit's steps read or write notes, open each one in the editor so " +
+				"you can follow along. Off by default so a circuit that touches many notes " +
+				"doesn't spray tabs across your workspace. A circuit can override this with " +
 				"'notor-open-notes-in-editor' in its frontmatter. Independent of the " +
 				"General \"Open notes on access\" setting.",
 		)

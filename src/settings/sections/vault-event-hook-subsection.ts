@@ -167,7 +167,7 @@ export function renderVaultEventHookSubsection(
 	let newSchedule = "";
 	let newDelayMs: number | null = null;
 
-	// Whether the "Run an orchestration" action is offered (gated on the feature group).
+	// Whether the "Run a circuit" action is offered (gated on the feature group).
 	const orchestrationEnabled = ctx.settings.circuits_enabled;
 
 	// Placeholder for the shared command/path/flow input, by action type.
@@ -175,7 +175,7 @@ export function renderVaultEventHookSubsection(
 		action === "run_workflow"
 			? "daily/review.md"
 			: action === "run_circuit"
-				? "code-assist (flow name or directory)"
+				? "code-assist (circuit name or directory)"
 				: "Shell command";
 
 	// Action type selector
@@ -279,7 +279,7 @@ export function renderVaultEventHookSubsection(
 					newActionType === "run_workflow"
 						? "Enter a workflow path."
 						: newActionType === "run_circuit"
-							? "Enter an orchestration flow name or directory."
+							? "Enter a circuit name or directory."
 							: "Enter a shell command."
 				);
 				return;

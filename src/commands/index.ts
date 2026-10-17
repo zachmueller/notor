@@ -17,7 +17,7 @@ import { logger } from "../utils/logger";
 
 const log = logger("Commands");
 
-/** Fuzzy picker over live orchestration runs for the Stop Orchestration command. */
+/** Fuzzy picker over live circuit runs for the Stop circuit command. */
 class CircuitRunStopModal extends FuzzySuggestModal<CircuitRunHandle> {
 	constructor(
 		app: App,
@@ -25,7 +25,7 @@ class CircuitRunStopModal extends FuzzySuggestModal<CircuitRunHandle> {
 		private readonly onChoose: (sessionId: string, flowName: string) => void,
 	) {
 		super(app);
-		this.setPlaceholder("Select a running orchestration flow to stop…");
+		this.setPlaceholder("Select a running circuit to stop…");
 	}
 
 	getItems(): CircuitRunHandle[] {
@@ -368,29 +368,31 @@ export function registerCommands(plugin: NotorPlugin): void {
 		},
 	});
 
-	// Run Orchestration — gated on the orchestration feature group (FEAT-011).
+	// Run circuit — gated on the circuits feature group (FEAT-011). The command
+	// ID keeps its original value so users' hotkeys survive the rename.
 	plugin.addCommand({
 		id: "run-orchestration",
-		name: "Run orchestration",
+		name: "Run circuit",
 		checkCallback: (checking: boolean) => {
 			if (!plugin.settings.circuits_enabled) return false;
 			if (checking) return true;
 			void import("../circuits/launch").then(({ showCircuitPicker }) =>
 				showCircuitPicker(plugin).catch((e) => {
-					log.error("Run Orchestration command failed", { error: String(e) });
-					new Notice(`Run Orchestration failed: ${e instanceof Error ? e.message : String(e)}`);
+					log.error("Run circuit command failed", { error: String(e) });
+					new Notice(`Run circuit failed: ${e instanceof Error ? e.message : String(e)}`);
 				}),
 			);
 			return true;
 		},
 	});
 
-	// Stop Orchestration — abort a live flow run via the run registry (F1 Fix 1).
+	// Stop circuit — abort a live circuit run via the run registry (F1 Fix 1).
+	// The command ID keeps its original value so users' hotkeys survive the rename.
 	// The activity dropdown is the canonical Stop surface; this command is a cheap
 	// picker over the currently-live registry entries.
 	plugin.addCommand({
 		id: "stop-orchestration",
-		name: "Stop orchestration",
+		name: "Stop circuit",
 		checkCallback: (checking: boolean) => {
 			if (!plugin.settings.circuits_enabled) return false;
 			const registry = plugin.getCircuitRunRegistry();
@@ -399,12 +401,12 @@ export function registerCommands(plugin: NotorPlugin): void {
 			if (checking) return true;
 			if (live.length === 1) {
 				registry.abort(live[0]!.sessionId);
-				new Notice(`Stopping orchestration '${live[0]!.flowName}'…`);
+				new Notice(`Stopping circuit '${live[0]!.flowName}'…`);
 				return true;
 			}
 			new CircuitRunStopModal(plugin.app, live, (sessionId, flowName) => {
 				registry.abort(sessionId);
-				new Notice(`Stopping orchestration '${flowName}'…`);
+				new Notice(`Stopping circuit '${flowName}'…`);
 			}).open();
 			return true;
 		},

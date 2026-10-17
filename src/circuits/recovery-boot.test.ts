@@ -234,7 +234,7 @@ describe("recoverCircuits — scan decisions (F6 §5.4)", () => {
 			offerResume,
 		});
 		expect(offerResume).not.toHaveBeenCalled();
-		expect(notices.some((m) => m.includes("its flow definition is missing"))).toBe(true);
+		expect(notices.some((m) => m.includes("its definition is missing"))).toBe(true);
 	});
 });
 

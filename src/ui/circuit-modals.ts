@@ -59,7 +59,7 @@ class FlowPickerModal extends FuzzySuggestModal<Circuit> {
 		private readonly emptyMessage: string,
 	) {
 		super(app);
-		this.setPlaceholder("Select an orchestration flow to run…");
+		this.setPlaceholder("Select a circuit to run…");
 	}
 
 	getItems(): Circuit[] {
@@ -97,7 +97,7 @@ class ObjectiveModal extends Modal {
 		contentEl.empty();
 		contentEl.createEl("h2", { text: `Run "${this.flowName}"` });
 		contentEl.createEl("p", {
-			text: "Describe the objective for this flow run.",
+			text: "Describe the objective for this circuit run.",
 			cls: "setting-item-description",
 		});
 
@@ -122,7 +122,7 @@ class ObjectiveModal extends Modal {
 
 	private submit(objective: string): void {
 		if (!objective) {
-			new Notice("Enter an objective to run the flow.");
+			new Notice("Enter an objective to run the circuit.");
 			return;
 		}
 		this.close();
@@ -231,7 +231,7 @@ export async function showCircuitPicker(host: CircuitHost): Promise<void> {
 		parsed = await parser.discoverCircuits();
 	} catch (e) {
 		log.error("Flow discovery failed", { error: String(e) });
-		new Notice(`Orchestration discovery failed: ${e instanceof Error ? e.message : String(e)}`);
+		new Notice(`Circuit discovery failed: ${e instanceof Error ? e.message : String(e)}`);
 		return;
 	}
 
@@ -250,7 +250,7 @@ export async function showCircuitPicker(host: CircuitHost): Promise<void> {
 						requestCircuitInput(host.app, flowName, question),
 				}).catch((e) => {
 					log.error("Orchestration run failed", { flow: flow.name, error: String(e) });
-					new Notice(`Orchestration '${flow.name}' failed: ${e instanceof Error ? e.message : String(e)}`);
+					new Notice(`Circuit '${flow.name}' failed: ${e instanceof Error ? e.message : String(e)}`);
 				});
 			}).open();
 		},

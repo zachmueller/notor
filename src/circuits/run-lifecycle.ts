@@ -80,7 +80,7 @@ export async function maybeWriteFailureReport(
 			sessionDir: ws.sessionDir,
 			rootName: circuitDataRootOf(host),
 		});
-		new Notice(`Orchestration '${flow.name}' failed — debug report: ${path}`);
+		new Notice(`Circuit '${flow.name}' failed — debug report: ${path}`);
 	} catch (e) {
 		log.warn("Failed to write orchestration failure report", { sessionId, error: String(e) });
 	}
@@ -206,7 +206,7 @@ export async function launchCircuit(
 				runningSessionId: running?.sessionId,
 			});
 			new Notice(
-				`Orchestration '${flow.name}' is already running (${running?.sessionId ?? "active"}); skipped.`,
+				`Circuit '${flow.name}' is already running (${running?.sessionId ?? "active"}); skipped.`,
 			);
 			return skippedRunResult(flow);
 		}

@@ -381,7 +381,7 @@ export class WorkflowActivityDropdown {
 		}
 
 		const bottomRow = entryEl.createDiv({ cls: "notor-workflow-activity-entry-bottom" });
-		bottomRow.createSpan({ cls: "trigger-source", text: "orchestration flow" });
+		bottomRow.createSpan({ cls: "trigger-source", text: "circuit" });
 
 		entryEl.addEventListener("click", () => {
 			if (this.onOpenRunTree) this.onOpenRunTree(run.sessionId);

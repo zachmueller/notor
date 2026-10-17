@@ -1160,7 +1160,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 								(f) => f.flow.name === ref || f.flow.flowDir === ref || f.flow.flowDir.endsWith(`/${ref}`),
 							);
 							if (!match) {
-								new Notice(`Orchestration flow '${ref}' not found; hook skipped.`);
+								new Notice(`Circuit '${ref}' not found; hook skipped.`);
 								return;
 							}
 							await launchCircuit(this, match.flow, objective, {
@@ -1256,7 +1256,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				if (!this.settings.circuits_enabled) return;
 				const { launchCircuit } = await import("./circuits/launch");
 				const { requestCircuitInput } = await import("./ui/circuit-modals");
-				const objective = `Scheduled run of orchestration flow '${flow.name}'.`;
+				const objective = `Scheduled run of circuit '${flow.name}'.`;
 				await launchCircuit(this, flow, objective, {
 					origin: "schedule",
 					requestUserInput: (flowName, question) =>

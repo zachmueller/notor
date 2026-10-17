@@ -143,7 +143,7 @@ function buildReportMarkdown({ meta, result, entries, sessionDir }: BuildArgs): 
 		].join("\n"),
 	);
 
-	sections.push(`# Orchestration failure: ${meta.flow_name}`);
+	sections.push(`# Circuit failure: ${meta.flow_name}`);
 
 	sections.push(
 		[

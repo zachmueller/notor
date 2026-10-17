@@ -135,7 +135,7 @@ export async function recoverCircuits(
 	// Surface loud recovery errors and mark those sessions `error`.
 	for (const err of scan.errors) {
 		log.error("Orchestration recovery error", { sessionId: err.sessionId, reason: err.reason });
-		new Notice(`Orchestration recovery error (${err.sessionId}): ${err.reason}`);
+		new Notice(`Circuit recovery error (${err.sessionId}): ${err.reason}`);
 		await sessionManager.updateStatus(err.sessionId, "error").catch(() => undefined);
 	}
 
@@ -149,7 +149,7 @@ export async function recoverCircuits(
 				flow: recovered.meta.flow_name,
 			});
 			new Notice(
-				`Cannot resume orchestration '${recovered.meta.flow_name}' — its flow definition is missing.`,
+				`Cannot resume circuit '${recovered.meta.flow_name}' — its definition is missing.`,
 			);
 			continue;
 		}
@@ -211,7 +211,7 @@ function offerResumeNotice(
 	const fragment = document.createDocumentFragment();
 	const wrapper = fragment.createDiv({ cls: "notor-orchestration-resume-notice" });
 	wrapper.createDiv({
-		text: `Orchestration '${flow.name}' was interrupted (${recovered.action.kind}). Resume it?`,
+		text: `Circuit '${flow.name}' was interrupted (${recovered.action.kind}). Resume it?`,
 	});
 	const buttonRow = wrapper.createDiv({ cls: "notor-orchestration-resume-actions" });
 	const notice = new Notice(fragment, 0);

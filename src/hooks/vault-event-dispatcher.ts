@@ -318,10 +318,10 @@ async function _executeOneHook(
 		// group; chain-extended for loop prevention (reuses ExecutionChainTracker).
 		const flowRef = hookCircuitRef(vaultHook);
 		if (!flowRef?.trim()) {
-			log.warn("run_orchestration hook has no orchestration_flow; skipping", {
+			log.warn("run_circuit hook has no circuit; skipping", {
 				hookId: vaultHook.id,
 			});
-			new Notice(`Vault event hook '${vaultHook.label || vaultHook.id}' has no orchestration flow configured.`);
+			new Notice(`Vault event hook '${vaultHook.label || vaultHook.id}' has no circuit configured.`);
 			return;
 		}
 		await executeRunOrchestrationAction(flowRef, context, chain, deps);
@@ -520,15 +520,15 @@ export async function executeRunOrchestrationAction(
 	chain: ExecutionChain | null,
 	deps: DispatcherDeps,
 ): Promise<void> {
-	log.info("Executing run_orchestration action", {
+	log.info("Executing run_circuit action", {
 		flowRef,
 		hookEvent: context.hookEvent,
 	});
 
 	if (!deps.launchCircuit) {
 		// circuits_enabled is off — skip with a diagnostic Notice.
-		log.warn("run_orchestration hook skipped: orchestration is disabled", { flowRef });
-		new Notice(`Orchestration hook skipped: enable orchestration in Settings → Notor to run '${flowRef}'.`);
+		log.warn("run_circuit hook skipped: circuits are disabled", { flowRef });
+		new Notice(`Circuit hook skipped: enable circuits in Settings → Notor → Circuits to run '${flowRef}'.`);
 		return;
 	}
 
@@ -553,8 +553,8 @@ export async function executeRunOrchestrationAction(
 		await deps.launchCircuit(flowRef, objective);
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
-		log.error("run_orchestration launch failed", { flowRef, error: msg });
-		new Notice(`Orchestration flow '${flowRef}' failed to launch: ${msg}`);
+		log.error("run_circuit launch failed", { flowRef, error: msg });
+		new Notice(`Circuit '${flowRef}' failed to launch: ${msg}`);
 	}
 }
 

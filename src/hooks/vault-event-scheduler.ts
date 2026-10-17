@@ -463,8 +463,8 @@ export class VaultEventScheduler {
 					await this.flowLaunchExecutor!(flow);
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
-					log.error("Scheduled orchestration launch failed", { id, error: msg });
-					new Notice(`Scheduled orchestration '${label}' failed to launch: ${msg}`);
+					log.error("Scheduled circuit launch failed", { id, error: msg });
+					new Notice(`Scheduled circuit '${label}' failed to launch: ${msg}`);
 				}
 			})();
 			return;

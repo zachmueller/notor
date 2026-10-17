@@ -288,10 +288,10 @@ function renderFlowRow(
 		.setName(item.name)
 		.setDesc(desc);
 
-	// "Orchestration" badge to distinguish flows from workflows in the list.
+	// "circuit" badge to distinguish circuits from workflows in the list.
 	setting.nameEl.createSpan({
 		cls: "notor-automation-builtin-badge",
-		text: "orchestration",
+		text: "circuit",
 	});
 
 	// Status dot
@@ -324,7 +324,7 @@ function renderFlowRow(
 	setting.addExtraButton((btn) =>
 		btn
 			.setIcon("square-arrow-out-up-right")
-			.setTooltip("Open flow definition")
+			.setTooltip("Open circuit definition")
 			.onClick(async () => {
 				await ctx.app.workspace.openLinkText(`${flow.flowDir}/definition.md`, "", true);
 			}),

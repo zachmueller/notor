@@ -487,7 +487,7 @@ export class CircuitDefinitionParser {
 			const step = await this.stepParser.parse(file);
 			if (!step) {
 				throw new CircuitParseError(
-					`Flow '${flowName}': note '${file.path}' is not a valid orchestration step.`,
+					`Flow '${flowName}': note '${file.path}' is not a valid circuit step.`,
 				);
 			}
 			steps.push(step);

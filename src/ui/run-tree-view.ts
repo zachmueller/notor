@@ -157,7 +157,7 @@ export class CircuitRunTreeView extends ItemView {
 		if (!this.rootSessionId && !this.rootConversationId) {
 			this.treeEl.createDiv({
 				cls: "notor-run-tree-empty",
-				text: "No run selected. Open the run tree from a run_flow / sub-agent card, the activity indicator, or a progress Notice.",
+				text: "No run selected. Open the run tree from a run_circuit / sub-agent card, the activity indicator, or a progress Notice.",
 			});
 			return;
 		}

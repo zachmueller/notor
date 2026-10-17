@@ -22,9 +22,9 @@ import { circuitDataRootPath, LEGACY_CIRCUIT_DATA_ROOT, type CircuitDataRootName
 const log = logger("OrchestrationMemories");
 
 /** The section skeleton seeded on first use (free-form thereafter). */
-export const MEMORIES_SKELETON = `# Orchestration Memories
+export const MEMORIES_SKELETON = `# Circuit Memories
 
-Cross-session memory for orchestration flows. Free-form — consult before acting
+Cross-session memory for circuits. Free-form — consult before acting
 in unfamiliar territory, and append a fix-memory when you get blocked and recover.
 
 ## Patterns

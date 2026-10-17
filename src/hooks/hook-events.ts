@@ -282,11 +282,11 @@ async function executeLifecycleHookOrchestrationAction(
 ): Promise<void> {
 	const flowRef = hookCircuitRef(hook);
 	if (!flowRef?.trim()) {
-		log.warn("run_orchestration lifecycle hook has no orchestration_flow; skipping", {
+		log.warn("run_circuit lifecycle hook has no circuit; skipping", {
 			hookId: hook.id,
 			hookEvent: context.hookEvent,
 		});
-		new Notice(`Hook '${hook.label || hook.id}' has no orchestration flow configured; skipping.`);
+		new Notice(`Hook '${hook.label || hook.id}' has no circuit configured; skipping.`);
 		return;
 	}
 
@@ -317,7 +317,7 @@ async function executeScopedOrchestrationHook(
 ): Promise<void> {
 	const flowRef = hookCircuitRef(scopedHook);
 	if (!flowRef?.trim()) {
-		log.warn("Scoped run_orchestration hook has no orchestration_flow; skipping", {
+		log.warn("Scoped run_circuit hook has no circuit; skipping", {
 			event: scopedHook.event,
 		});
 		return;

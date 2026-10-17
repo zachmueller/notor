@@ -694,7 +694,7 @@ export class NotorChatView extends ItemView {
 			// stale post-crash entry, or a run that finalized between render and click).
 			// The button is gated by the liveness predicate below, so this is a
 			// race-window fallback — always give feedback rather than a silent no-op.
-			new Notice(stopped ? "Stopping orchestration flow…" : "Orchestration run is no longer live.");
+			new Notice(stopped ? "Stopping circuit…" : "Circuit run is no longer live.");
 		});
 		// F1 Fix 1: only offer Stop for a run the registry can actually abort.
 		this.workflowActivityIndicator.setIsFlowRunLive(
