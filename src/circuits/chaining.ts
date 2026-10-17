@@ -26,6 +26,7 @@ import type { CircuitRunResult } from "./runner";
 import type { Circuit } from "./types";
 import { VaultSessionFs } from "./launch-wiring";
 import { launchCircuit, type RequestUserInput } from "./run-lifecycle";
+import { circuitDataRootOf } from "./data-root";
 
 const log = logger("CircuitLaunch");
 
@@ -169,6 +170,7 @@ export async function chainToSuccessor(
 				? new CircuitSessionManager(
 						host.settings.notor_dir,
 						new VaultSessionFs(host.app),
+						circuitDataRootOf(host),
 					).resolveWorkspace(predecessorSessionId).scratchpadPath
 				: undefined,
 		requestUserInput,

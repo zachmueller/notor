@@ -31,6 +31,7 @@
  * @see specs/ZZ-misc/orchestration/contracts/vault-schema.md — Directory Structure / session.json
  */
 
+import { circuitDataRootPath, LEGACY_CIRCUIT_DATA_ROOT, type CircuitDataRootName } from "./data-root";
 import { logger } from "../utils/logger";
 import type { CircuitSessionMeta } from "./types";
 
@@ -94,11 +95,12 @@ export class CircuitSessionManager {
 	constructor(
 		notorDir: string,
 		private readonly fs: SessionFs,
+		rootName: CircuitDataRootName = LEGACY_CIRCUIT_DATA_ROOT,
 	) {
-		this.orchestrationsRoot = `${trimSlash(notorDir)}/orchestrations`;
+		this.orchestrationsRoot = circuitDataRootPath(trimSlash(notorDir), rootName);
 	}
 
-	/** `{notor_dir}/orchestrations`. */
+	/** `{notor_dir}/{data root}` (`circuits` or legacy `orchestrations`; see `data-root.ts`). */
 	get rootPath(): string {
 		return this.orchestrationsRoot;
 	}

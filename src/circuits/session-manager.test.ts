@@ -41,6 +41,12 @@ beforeEach(() => {
 });
 
 describe("CircuitSessionManager", () => {
+	it("roots sessions under circuits/ when constructed with the circuits data root", () => {
+		const circuitsMgr = new CircuitSessionManager("notor/", fs, "circuits");
+		expect(circuitsMgr.rootPath).toBe("notor/circuits");
+		expect(circuitsMgr.resolveWorkspace("s1").metaPath).toBe("notor/circuits/sessions/s1/session.json");
+	});
+
 	it("resolves the well-known workspace paths under orchestrations/sessions", () => {
 		const ws = mgr.resolveWorkspace("sess-abc");
 		expect(ws.sessionDir).toBe("notor/orchestrations/sessions/sess-abc");

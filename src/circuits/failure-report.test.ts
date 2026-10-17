@@ -100,6 +100,12 @@ describe("failureReportPath / slugifyFlowName", () => {
 			"vault/notor/orchestrations/failures/review-s1.md",
 		);
 	});
+
+	it("builds the failures/ path under the circuits data root when that root is active", () => {
+		expect(failureReportPath("notor", "Review", "s1", "circuits")).toBe(
+			"notor/circuits/failures/review-s1.md",
+		);
+	});
 });
 
 describe("shouldWriteFailureReport (the toggle gate)", () => {

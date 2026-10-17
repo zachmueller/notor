@@ -1,6 +1,6 @@
 /**
  * Reference flows (POL-002 / FR-161) — three first-party example flows
- * materialized into `{notor_dir}/orchestrations/` when the user enables the
+ * materialized into `{notor_dir}/circuits/` when the user enables the
  * orchestration feature group. They demonstrate the three pillars of the engine —
  * **conversation steps**, **code steps**, and **composition**.
  *
@@ -36,7 +36,7 @@ const log = logger("ReferenceFlows");
 
 /** A reference flow: its `definition.md` + a `{stepFileName: body}` map. */
 export interface ReferenceCircuit {
-	/** Directory slug under `{notor_dir}/orchestrations/`. */
+	/** Directory slug under `{notor_dir}/circuits/`. */
 	slug: string;
 	/** Full `definition.md` content (frontmatter + documentation body). */
 	definition: string;
@@ -462,24 +462,44 @@ export interface ReferenceCircuitFs {
 	write(path: string, data: string): Promise<void>;
 }
 
+/** What `materializeReferenceCircuits` did, per slug. */
+export interface MaterializeReferenceCircuitsResult {
+	/** Slugs with at least one freshly written file under `{notorDir}/circuits/`. */
+	written: string[];
+	/** Slugs skipped because the user already has them under the legacy `{notorDir}/orchestrations/`. */
+	skipped: string[];
+}
+
 /**
- * Materialize the reference flows under `{notorDir}/orchestrations/` (POL-002).
- * **Idempotent + edit-preserving**: a flow file that already exists is never
+ * Materialize the reference circuits under `{notorDir}/circuits/` (POL-002).
+ * **Idempotent + edit-preserving**: a file that already exists is never
  * overwritten (mirrors the built-in-persona "materialize-on-enable, preserve-user-
- * edits" lifecycle), so re-enabling the feature group is safe. Returns the slugs
- * that were freshly written.
+ * edits" lifecycle), so re-enabling the feature group is safe.
+ *
+ * A slug that already exists under the legacy `{notorDir}/orchestrations/` is
+ * skipped entirely: seeding it again under `circuits/` would create a second
+ * circuit with the same name. `circuits/` itself is only created when at least
+ * one slug is seeded.
  */
 export async function materializeReferenceCircuits(
 	notorDir: string,
 	fs: ReferenceCircuitFs,
-): Promise<string[]> {
-	const root = `${notorDir.replace(/\/+$/, "")}/orchestrations`;
+): Promise<MaterializeReferenceCircuitsResult> {
+	const base = notorDir.replace(/\/+$/, "");
+	const root = `${base}/circuits`;
+	const legacyRoot = `${base}/orchestrations`;
 	const written: string[] = [];
+	const skipped: string[] = [];
 
 	for (const flow of REFERENCE_CIRCUITS) {
 		const flowDir = `${root}/${flow.slug}`;
 		const stepsDir = `${flowDir}/steps`;
 		try {
+			if (await fs.exists(`${legacyRoot}/${flow.slug}`)) {
+				skipped.push(flow.slug);
+				continue;
+			}
+			if (!(await fs.exists(root))) await fs.mkdir(root);
 			if (!(await fs.exists(flowDir))) await fs.mkdir(flowDir);
 			if (!(await fs.exists(stepsDir))) await fs.mkdir(stepsDir);
 
@@ -498,12 +518,12 @@ export async function materializeReferenceCircuits(
 			}
 			if (touched) written.push(flow.slug);
 		} catch (e) {
-			log.warn("Failed to materialize reference flow", { slug: flow.slug, error: String(e) });
+			log.warn("Failed to materialize reference circuit", { slug: flow.slug, error: String(e) });
 		}
 	}
 
-	if (written.length > 0) {
-		log.info("Materialized reference flows", { written });
+	if (written.length > 0 || skipped.length > 0) {
+		log.info("Materialized reference circuits", { written, skipped });
 	}
-	return written;
+	return { written, skipped };
 }

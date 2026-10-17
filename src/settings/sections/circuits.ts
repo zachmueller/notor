@@ -15,18 +15,13 @@ import type { SettingsContext } from "./context";
 import { materializeReferenceCircuits, type ReferenceCircuitFs } from "../../circuits/reference-circuits";
 
 /**
- * Ensure `{notor_dir}/orchestrations/` exists (mirrors the memory toggle seeding
- * its folder) and materialize the first-party reference flows (POL-002) on first
- * enable, preserving any user edits (idempotent — never overwrites). Created on
- * first enable so the flow picker / hook launch have a place to discover flows.
+ * Materialize the first-party reference circuits (POL-002) under
+ * `{notor_dir}/circuits/` on enable, preserving any user edits (idempotent —
+ * never overwrites) and skipping any the user already has under the legacy
+ * `{notor_dir}/orchestrations/`. Discovery tolerates absent directories, so no
+ * empty folder is created when nothing needs seeding.
  */
-async function ensureOrchestrationsFolder(ctx: SettingsContext): Promise<void> {
-	const dir = normalizePath(`${ctx.settings.notor_dir}/orchestrations`);
-	const existing = ctx.app.vault.getAbstractFileByPath(dir);
-	if (!existing) {
-		await ctx.app.vault.createFolder(dir);
-	}
-
+async function seedReferenceCircuits(ctx: SettingsContext): Promise<void> {
 	// POL-002: seed the reference flows (code-assist / research / review). The
 	// materializer is edit-preserving, so re-enabling never clobbers user changes.
 	const adapter = ctx.app.vault.adapter;
@@ -65,10 +60,10 @@ export function renderCircuitsSection(
 					ctx.settings.orchestration_enabled = value;
 					await ctx.saveSettings();
 
-					// Seed the orchestrations/ directory on first enable.
+					// Seed the reference circuits on enable.
 					if (value) {
 						try {
-							await ensureOrchestrationsFolder(ctx);
+							await seedReferenceCircuits(ctx);
 						} catch {
 							// Non-fatal — discovery tolerates an absent directory.
 						}

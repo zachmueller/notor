@@ -28,6 +28,7 @@ import type { Circuit } from "./types";
 import type { FlowRunEntry } from "../workflows/workflow-activity-tracker";
 import { VaultSessionFs, VaultSessionLogWriter, buildExecutor, listOpenTaskKeys } from "./launch-wiring";
 import { chainToSuccessor, resolveSuccessorInputs } from "./chaining";
+import { circuitDataRootOf } from "./data-root";
 
 const log = logger("CircuitLaunch");
 
@@ -49,7 +50,7 @@ export function newSessionId(): string {
  * `status: "error"` and `orchestration_write_failure_notes` is on, compose a
  * human-readable Markdown report from data already captured (session.json meta +
  * the run result + session-log.jsonl) and write it under
- * `{notor_dir}/orchestrations/failures/`. Called from both finalize sites (a
+ * `{notor_dir}/{data root}/failures/`. Called from both finalize sites (a
  * fresh run and a crash-recovery resume).
  *
  * Fully best-effort: a missing log, an absent meta, or a write failure is logged
@@ -77,6 +78,7 @@ export async function maybeWriteFailureReport(
 			result,
 			logJsonl,
 			sessionDir: ws.sessionDir,
+			rootName: circuitDataRootOf(host),
 		});
 		new Notice(`Orchestration '${flow.name}' failed — debug report: ${path}`);
 	} catch (e) {
@@ -215,6 +217,7 @@ export async function launchCircuit(
 	const sessionManager = new CircuitSessionManager(
 		host.settings.notor_dir,
 		new VaultSessionFs(host.app),
+		circuitDataRootOf(host),
 	);
 	const ws = await sessionManager.createSession({
 		sessionId,
@@ -226,7 +229,7 @@ export async function launchCircuit(
 
 	// INT-004: seed the persistent cross-session memories note on first use
 	// (idempotent — never overwrites an existing note).
-	await seedMemoriesNote(host.settings.notor_dir, new VaultSessionFs(host.app)).catch((e) =>
+	await seedMemoriesNote(host.settings.notor_dir, new VaultSessionFs(host.app), circuitDataRootOf(host)).catch((e) =>
 		log.warn("memories.md seeding failed", { error: String(e) }),
 	);
 

@@ -378,7 +378,9 @@ export class CircuitRunTreeView extends ItemView {
 	 */
 	private async scanCodeStepTurns(sessionIds: Set<string>): Promise<Map<string, CodeStepTurn[]>> {
 		const out = new Map<string, CodeStepTurn[]>();
-		const sessionsRoot = normalizePath(`${this.plugin.settings.notor_dir}/orchestrations/sessions`);
+		const sessionsRoot = normalizePath(
+			`${this.plugin.settings.notor_dir}/${this.plugin.getCircuitDataRootName()}/sessions`,
+		);
 		const adapter = this.plugin.app.vault.adapter;
 		const reader = new SessionLogReader();
 		for (const sid of sessionIds) {

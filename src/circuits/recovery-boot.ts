@@ -24,6 +24,7 @@ import { isSessionLogMtimeLive } from "./recovery-liveness";
 import type { Circuit } from "./types";
 import { VaultSessionFs, VaultSessionLogWriter, buildExecutor, listOpenTaskKeys } from "./launch-wiring";
 import { finalizeRun, reflectFlowRunStatus, type RequestUserInput } from "./run-lifecycle";
+import { circuitDataRootOf } from "./data-root";
 
 const log = logger("CircuitLaunch");
 
@@ -93,7 +94,7 @@ export async function recoverCircuits(
 	deps?: RecoverDeps,
 ): Promise<void> {
 	const fsVault = new VaultSessionFs(host.app);
-	const sessionManager = new CircuitSessionManager(host.settings.notor_dir, fsVault);
+	const sessionManager = new CircuitSessionManager(host.settings.notor_dir, fsVault, circuitDataRootOf(host));
 	const recoveryFs = deps?.recoveryFs ?? makeRecoveryFs(host, sessionManager);
 
 	// Resolve each flow's finite ceilings so the budget re-seeds from the real

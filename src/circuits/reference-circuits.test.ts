@@ -111,7 +111,7 @@ function buildFakeVault(files: Record<string, string>) {
 		},
 	} as unknown as import("obsidian").MetadataCache;
 
-	ensureFolder("notor/orchestrations");
+	ensureFolder("notor/circuits");
 	return { vault, metadataCache };
 }
 
@@ -131,20 +131,39 @@ async function materializeToMap(): Promise<Record<string, string>> {
 }
 
 describe("reference flows (POL-002)", () => {
+	it("seeds into circuits/ and skips slugs the user already has under orchestrations/", async () => {
+		const files: Record<string, string> = {
+			"notor/orchestrations/code-assist/definition.md": "LEGACY USER COPY",
+		};
+		const fs: ReferenceCircuitFs = {
+			exists: (p) => Promise.resolve(p in files || Object.keys(files).some((k) => k.startsWith(p + "/"))),
+			mkdir: () => Promise.resolve(),
+			write: (p, data) => {
+				files[p] = data;
+				return Promise.resolve();
+			},
+		};
+		const result = await materializeReferenceCircuits("notor", fs);
+		expect(result.skipped).toEqual(["code-assist"]);
+		expect(result.written.sort()).toEqual(["research", "review"]);
+		expect(Object.keys(files).some((k) => k.startsWith("notor/circuits/code-assist/"))).toBe(false);
+		expect(files["notor/orchestrations/code-assist/definition.md"]).toBe("LEGACY USER COPY");
+	});
+
 	it("materializes all three flows with their definition + steps", async () => {
 		const files = await materializeToMap();
 		for (const flow of REFERENCE_CIRCUITS) {
-			expect(files[`notor/orchestrations/${flow.slug}/definition.md`]).toBeDefined();
+			expect(files[`notor/circuits/${flow.slug}/definition.md`]).toBeDefined();
 			for (const stepFile of Object.keys(flow.steps)) {
-				expect(files[`notor/orchestrations/${flow.slug}/steps/${stepFile}`]).toBeDefined();
+				expect(files[`notor/circuits/${flow.slug}/steps/${stepFile}`]).toBeDefined();
 			}
 		}
 	});
 
 	it("is edit-preserving — a second materialize never overwrites existing files", async () => {
 		const files = await materializeToMap();
-		const before = files["notor/orchestrations/code-assist/definition.md"];
-		files["notor/orchestrations/code-assist/definition.md"] = "USER EDITED";
+		const before = files["notor/circuits/code-assist/definition.md"];
+		files["notor/circuits/code-assist/definition.md"] = "USER EDITED";
 		const fs: ReferenceCircuitFs = {
 			exists: (p) => Promise.resolve(p in files || Object.keys(files).some((k) => k.startsWith(p + "/"))),
 			mkdir: () => Promise.resolve(),
@@ -155,7 +174,7 @@ describe("reference flows (POL-002)", () => {
 		};
 		await materializeReferenceCircuits("notor", fs);
 		// The user edit survives; the constant did NOT clobber it.
-		expect(files["notor/orchestrations/code-assist/definition.md"]).toBe("USER EDITED");
+		expect(files["notor/circuits/code-assist/definition.md"]).toBe("USER EDITED");
 		expect(before).not.toBe("USER EDITED");
 	});
 
@@ -165,7 +184,7 @@ describe("reference flows (POL-002)", () => {
 		const parser = new CircuitDefinitionParser(vault, metadataCache, "notor");
 
 		for (const flow of REFERENCE_CIRCUITS) {
-			const dir = `notor/orchestrations/${flow.slug}`;
+			const dir = `notor/circuits/${flow.slug}`;
 			// parseCircuitByDir throws CircuitParseError on any load-time validation failure.
 			const result = await parser.parseCircuitByDir(dir);
 			expect(result.flow.name.length).toBeGreaterThan(0);
@@ -182,7 +201,7 @@ describe("reference flows (POL-002)", () => {
 		const parser = new CircuitDefinitionParser(vault, metadataCache, "notor");
 
 		for (const flow of REFERENCE_CIRCUITS) {
-			const dir = `notor/orchestrations/${flow.slug}`;
+			const dir = `notor/circuits/${flow.slug}`;
 			const result = await parser.parseCircuitByDir(dir);
 			expect(result.warnings, `${flow.slug} produced parse warnings`).toEqual([]);
 		}

@@ -40,6 +40,7 @@ import { memoriesPath } from "./memories";
 import { VaultStepConversationStore } from "./step-conversation-store";
 import { showCircuitProgressNotice } from "./notices";
 import { jumpToStepConversation } from "../ui/circuit-modals";
+import { circuitDataRootOf } from "./data-root";
 
 /**
  * Query a session's still-open/running tasks for the runner's `FLOW_COMPLETE`
@@ -104,7 +105,7 @@ export function buildExecutor(
 			settings: host.settings,
 			promptBuilder: new StepPromptBuilder(),
 			runtimeFactory: makeRuntimeFactory(host, openNotesInEditor),
-			memoriesPath: memoriesPath(host.settings.notor_dir),
+			memoriesPath: memoriesPath(host.settings.notor_dir, circuitDataRootOf(host)),
 			stepConversationStore,
 			codeStepExecutor,
 			// INT-020 / INT-021: per-turn progress Notice. The jump callback reuses

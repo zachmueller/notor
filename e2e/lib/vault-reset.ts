@@ -53,6 +53,11 @@ const TEST_GENERATED_DIRS = [
 	// session left by an earlier script (cross-script contamination surfaced by
 	// the back-to-back regression sweep).
 	"notor/orchestrations/sessions",
+	// Everything under notor/circuits/ is test-generated (the fixture vault
+	// commits only the legacy notor/orchestrations/ root). Clearing it keeps the
+	// sticky circuit data root on orchestrations/ and drops any reference
+	// circuits seeded by a settings-toggle script.
+	"notor/circuits",
 ];
 
 function rmSafe(targetPath: string): void {

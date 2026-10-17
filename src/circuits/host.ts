@@ -27,6 +27,7 @@ import type { ChatOrchestrator } from "../chat/orchestrator";
 import type { FlowRunEntry } from "../workflows/workflow-activity-tracker";
 import type { ExtensionUtils } from "../extensions/runtime-context/types";
 import type { CircuitRunRegistry } from "./run-registry";
+import type { CircuitDataRootName } from "./data-root";
 
 export interface CircuitHost {
 	readonly app: App;
@@ -49,4 +50,10 @@ export interface CircuitHost {
 	buildExtensionUtils(): ExtensionUtils;
 	/** F1 Fix 1: the in-memory live-run registry (Stop UI / liveness / teardown). */
 	getCircuitRunRegistry(): CircuitRunRegistry;
+	/**
+	 * Which root holds runtime data (sessions/, failures/, memories.md). Optional
+	 * so narrow test hosts keep compiling; read through `circuitDataRootOf()`,
+	 * which defaults to the legacy `orchestrations` root.
+	 */
+	getCircuitDataRootName?(): CircuitDataRootName;
 }

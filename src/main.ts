@@ -8,7 +8,7 @@
  * tab, and initializes all managers with clean unload support.
  */
 
-import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TAbstractFile, debounce, normalizePath, parseYaml } from "obsidian";
+import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TFolder, TAbstractFile, debounce, normalizePath, parseYaml } from "obsidian";
 import { createDefaultSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
@@ -98,6 +98,7 @@ import { buildUtils } from "./extensions/runtime-context";
 import type { ExtensionUtils } from "./extensions/runtime-context/types";
 import type { Circuit } from "./circuits/types";
 import { CIRCUIT_ROOT_DIR_NAMES } from "./circuits/schema-aliases";
+import { resolveCircuitDataRootName, type CircuitDataRootName } from "./circuits/data-root";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
@@ -288,6 +289,23 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		return this._circuitRunRegistry;
 	}
 
+	/**
+	 * Which root holds circuit runtime data (sessions/, failures/, memories.md).
+	 * See `circuits/data-root.ts` for the sticky single-root rule. Cached per
+	 * `notor_dir` once the layout is ready; before that the vault index may be
+	 * incomplete, so the rule is re-evaluated rather than locked in.
+	 */
+	getCircuitDataRootName(): CircuitDataRootName {
+		const notorDir = this.settings.notor_dir;
+		if (this._circuitDataRoot?.notorDir === notorDir) return this._circuitDataRoot.name;
+		const name = resolveCircuitDataRootName(
+			notorDir,
+			(p) => this.app.vault.getAbstractFileByPath(normalizePath(p)) instanceof TFolder,
+		);
+		if (this.app.workspace.layoutReady) this._circuitDataRoot = { notorDir, name };
+		return name;
+	}
+
 	// -----------------------------------------------------------------------
 	// Phase 4.1: MCP (ARCH-005)
 	// -----------------------------------------------------------------------
@@ -338,6 +356,8 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	private _discoveredCircuits: Circuit[] = [];
 	/** Circuit names already reported as colliding across roots (one Notice per name per load). */
 	private readonly _reportedCircuitCollisions = new Set<string>();
+	/** Cached data-root decision (see `getCircuitDataRootName`). */
+	private _circuitDataRoot: { notorDir: string; name: CircuitDataRootName } | null = null;
 
 	/** Debounce timer for vault-triggered workflow rescans. */
 	private _workflowRescanTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2645,7 +2665,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		);
 
 		// Orchestration flow definitions: keep the flow cache (and thus scheduled
-		// cron jobs) fresh when a definition.md under orchestrations/ changes.
+		// cron jobs) fresh when a definition.md under circuits/ or orchestrations/ changes.
 		this.registerEvent(
 			this.app.vault.on("create", (f) => {
 				if (this.isCircuitPath(f.path)) this.scheduleFlowRescan();

@@ -17,6 +17,7 @@
  * Mirrors {@link ./memories} — a tiny path helper + a writer over {@link SessionFs}.
  */
 
+import { circuitDataRootPath, LEGACY_CIRCUIT_DATA_ROOT, type CircuitDataRootName } from "./data-root";
 import { logger } from "../utils/logger";
 import type { SessionFs } from "./session-manager";
 import type { CircuitRunResult } from "./runner";
@@ -62,8 +63,9 @@ export function failureReportPath(
 	notorDir: string,
 	flowName: string,
 	sessionId: string,
+	rootName: CircuitDataRootName = LEGACY_CIRCUIT_DATA_ROOT,
 ): string {
-	return `${trimSlash(notorDir)}/orchestrations/failures/${slugifyFlowName(flowName)}-${sessionId}.md`;
+	return `${circuitDataRootPath(trimSlash(notorDir), rootName)}/failures/${slugifyFlowName(flowName)}-${sessionId}.md`;
 }
 
 export interface WriteFailureReportArgs {
@@ -77,6 +79,8 @@ export interface WriteFailureReportArgs {
 	logJsonl: string | null;
 	/** `sessions/{id}` dir (vault-relative) for the raw-data pointer links. */
 	sessionDir: string;
+	/** Runtime data root; defaults to the legacy `orchestrations` root. */
+	rootName?: CircuitDataRootName;
 }
 
 /**
@@ -87,8 +91,8 @@ export interface WriteFailureReportArgs {
  * original run error.
  */
 export async function writeFailureReport(args: WriteFailureReportArgs): Promise<string> {
-	const { notorDir, fs, meta, result, logJsonl, sessionDir } = args;
-	const path = failureReportPath(notorDir, meta.flow_name, meta.session_id);
+	const { notorDir, fs, meta, result, logJsonl, sessionDir, rootName } = args;
+	const path = failureReportPath(notorDir, meta.flow_name, meta.session_id, rootName);
 
 	const entries = parseLogEntriesSafe(logJsonl);
 	const content = buildReportMarkdown({ meta, result, entries, sessionDir });

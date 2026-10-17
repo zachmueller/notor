@@ -1,7 +1,7 @@
 /**
  * Persistent cross-session orchestration memory (INT-004 / FR-124).
  *
- * A single plain note at `{notor_dir}/orchestrations/memories.md`, **not** under
+ * A single plain note at `{notor_dir}/{data root}/memories.md` (see `data-root.ts`), **not** under
  * any session. Free-form (Patterns / Decisions / Fixes / Context sections); it is
  * **not parsed structurally** — steps read/append it as plain Markdown through
  * their normal note tools (its path is the orchestrations root, not the per-session
@@ -17,6 +17,7 @@
 
 import { logger } from "../utils/logger";
 import type { SessionFs } from "./session-manager";
+import { circuitDataRootPath, LEGACY_CIRCUIT_DATA_ROOT, type CircuitDataRootName } from "./data-root";
 
 const log = logger("OrchestrationMemories");
 
@@ -36,16 +37,23 @@ in unfamiliar territory, and append a fix-memory when you get blocked and recove
 `;
 
 /** Vault-relative path to the persistent memories note. */
-export function memoriesPath(notorDir: string): string {
-	return `${notorDir.replace(/\/+$/, "")}/orchestrations/memories.md`;
+export function memoriesPath(
+	notorDir: string,
+	rootName: CircuitDataRootName = LEGACY_CIRCUIT_DATA_ROOT,
+): string {
+	return `${circuitDataRootPath(notorDir, rootName)}/memories.md`;
 }
 
 /**
  * Seed `memories.md` with the section skeleton **iff it does not exist**.
  * Idempotent: an existing note is never overwritten. Returns the resolved path.
  */
-export async function seedMemoriesNote(notorDir: string, fs: SessionFs): Promise<string> {
-	const path = memoriesPath(notorDir);
+export async function seedMemoriesNote(
+	notorDir: string,
+	fs: SessionFs,
+	rootName: CircuitDataRootName = LEGACY_CIRCUIT_DATA_ROOT,
+): Promise<string> {
+	const path = memoriesPath(notorDir, rootName);
 	if (await fs.exists(path)) return path;
 	await fs.write(path, MEMORIES_SKELETON);
 	log.debug("Seeded orchestration memories.md", { path });

@@ -30,6 +30,7 @@ import { VaultStepConversationStore } from "./step-conversation-store";
 import { VaultSessionFs, VaultSessionLogWriter } from "./launch-wiring";
 import { launchCircuit, newSessionId, type RequestUserInput } from "./run-lifecycle";
 import { makeRecoveryFs, resumeRecoveredSession } from "./recovery-boot";
+import { circuitDataRootOf } from "./data-root";
 
 const log = logger("CircuitLaunch");
 
@@ -97,7 +98,7 @@ export function makeChildCircuitSpawner(
 	deps?: ChildSpawnDeps,
 ): SpawnChildCircuit {
 	const fsVault = new VaultSessionFs(host.app);
-	const sessionManager = new CircuitSessionManager(host.settings.notor_dir, fsVault);
+	const sessionManager = new CircuitSessionManager(host.settings.notor_dir, fsVault, circuitDataRootOf(host));
 	// The vault-backed reader the ledger reconciliation + entry-conversation
 	// resolution read through (F1 Fix 3 — injected so both are unit-testable). A
 	// `RecoveryFs`-shaped reader (exists/read); routed through the `VaultSessionFs`
