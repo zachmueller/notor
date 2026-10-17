@@ -142,6 +142,6 @@ Preset resolution takes precedence: if `notor-preferred-preset` is set and the p
 
 If the specified provider is not configured, the sub-agent fails with a clear error rather than silently falling back.
 
-## Orchestration run-tree
+## Circuit run-tree
 
-Sub-agents and [orchestration](orchestration.md) flows share one **run-tree view**: it renders sub-agent children (via the sub-agent parent link) and orchestration steps + child flows (via conversation edges) in a single navigable hierarchy, and both `use_subagent` and `run_flow` tool-call cards show the same inline peek card (the shared `child_run_metadata` rollup). `run_flow` generalizes the sub-agent pattern from one isolated conversation to a whole event-driven flow run.
+Sub-agents and [circuits](circuits.md) share one **run-tree view**: it renders sub-agent children (via the sub-agent parent link) and circuit steps + child circuits (via conversation edges) in a single navigable hierarchy, and both `use_subagent` and `run_circuit` (formerly `run_flow`) tool-call cards show the same inline peek card (the shared `child_run_metadata` rollup). `run_circuit` generalizes the sub-agent pattern from one isolated conversation to a whole event-driven circuit run.

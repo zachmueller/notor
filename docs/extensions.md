@@ -82,7 +82,7 @@ params:
     description: "For 'navigate': the URL to load."
 ```
 
-> If you have a **customized copy** of a built-in tool in your vault (`{notor_dir}/tools/`), its parameter schema is the one that applies — not the current built-in one. The declarations for `webview`, `write_docx`, `write_xlsx`, `read_file`, and `orchestration_task_list` were corrected when required-parameter checking was added; if you overrode one of those beforehand, either add `optional: true` to the affected parameters or reset the tool to its default in **Settings → Notor → Extensions**.
+> If you have a **customized copy** of a built-in tool in your vault (`{notor_dir}/tools/`), its parameter schema is the one that applies — not the current built-in one. The declarations for `webview`, `write_docx`, `write_xlsx`, `read_file`, and `circuit_task_list` (formerly `orchestration_task_list`; an override saved under either name applies) were corrected when required-parameter checking was added; if you overrode one of those beforehand, either add `optional: true` to the affected parameters or reset the tool to its default in **Settings → Notor → Extensions**.
 
 ### Return value
 
@@ -424,7 +424,7 @@ All extension code executes with these variables in scope:
 | `utils.staleContent` | Record reads and check for concurrent edits before writes. Methods: `recordRead(path, content)`, `check(path, currentContent)` → `{ isStale, error }`, `invalidate(path)`, `updateAfterWrite(path, newContent)`, `updateAfterFrontmatterWrite(path, newFullContent)`. |
 | `utils.checkpoints` | Snapshot a note before a destructive write for user rollback. Method: `create(path, toolName, messageId)` → `Checkpoint \| null`. (Restoring checkpoints is intentionally not exposed to extensions.) |
 | `utils.notes` | Open notes programmatically in the editor. Method: `open(path)`. |
-| `utils.logger(name)` | Create a scoped logger (prefixed with `ext:`) — console-only. (Inside an orchestration **code step**, prefer `orchestration.log`, which also persists and surfaces in the run-tree — see [orchestration.md](orchestration.md).) |
+| `utils.logger(name)` | Create a scoped logger (prefixed with `ext:`) — console-only. (Inside a circuit **code step**, prefer `circuit.log`, which also persists and surfaces in the run-tree — see [circuits.md](circuits.md).) |
 | `utils.resolveAndValidatePath(path, allowedPaths?)` | Validate and resolve filesystem paths against allowed paths. Returns `{ valid: true, resolvedPath }` or `{ valid: false, error }` — check `.valid` first. |
 | `utils.executeShellCommand(cmd, opts?)` | Run a shell command. |
 | `utils.isDomainBlocked(url, denylist)` | Check whether a URL's domain matches any denylist pattern. Returns `{ blocked: true, pattern }` or `{ blocked: false }`. |

@@ -2,6 +2,8 @@
 
 Workflows are reusable instruction sets stored as Obsidian notes that guide the AI through structured, step-by-step processes.
 
+> **Workflows and circuits.** A workflow is essentially a single-step interactive [circuit](circuits.md): one LLM step that runs in the chat panel, so you can go back and forth with it directly. Reach for a workflow when the task is interactive and conversational. Reach for a circuit when you want a headless multi-step pipeline with routing, verification, code steps, or composition. A circuit step can also call a workflow (see [Circuits](circuits.md#step--workflow-a-distinct-mechanism)).
+
 ## Defining a workflow
 
 Workflow notes are stored under `notor/workflows/` and identified by `notor-type: workflow` in their frontmatter. Workflow bodies are written as step-by-step instructions that shape *how the AI approaches a task* — not as conversational prompts.

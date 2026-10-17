@@ -75,7 +75,7 @@ Notor rides through short network drops (in-flight Wi-Fi, switching networks) an
 - **If every retry fails:** the error is shown with a **Retry** button. Select it to re-send the turn without retyping your message. Errors that retrying can't fix (bad credentials, an invalid request, a context-window overflow) fail right away and have no **Retry** button.
 - **Stopping:** select **Stop** to cancel at any time, including while Notor is waiting to retry.
 
-Automatic retry also covers sub-agents, orchestration steps, background workflows, context compaction, and extension `llmCall` requests. Each retry re-sends the full conversation, so it costs input tokens again. Prompt caching reduces this where your provider supports it.
+Automatic retry also covers sub-agents, circuit steps, background workflows, context compaction, and extension `llmCall` requests. Each retry re-sends the full conversation, so it costs input tokens again. Prompt caching reduces this where your provider supports it.
 
 Configure retries in [Settings → Notor → Providers → Network retry](notor-settings://Providers/Network%20retry):
 
@@ -97,7 +97,7 @@ All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
 | **Notor: New conversation** | Creates a fresh conversation |
 | **Notor: Compact context** | Manually compacts the current conversation's context window |
 | **Notor: Run workflow** | Opens a workflow picker to select and run a workflow |
-| **Notor: Run orchestration** | Opens an orchestration picker to select a flow and run it (visible only when orchestration is enabled) |
+| **Notor: Run circuit** | Opens a circuit picker to select a circuit and run it (visible only when circuits are enabled) |
 | **Notor: Export conversation** | Exports the active conversation to HTML or Markdown |
 | **Notor: Import conversation from HTML** | Imports a previously exported HTML conversation |
 | **Notor: Open tool config inspector** | Opens a debugging view showing the effective tool configuration |
@@ -202,16 +202,16 @@ Knowledge memory lets the AI build persistent context across conversations — r
 
 > Memory requires the `tiny` and `large` presets because the memory sub-agents use different model tiers: lightweight models for search and capture, and a capable model for the Dream consolidation pipeline.
 
-## Set up orchestration
+## Set up circuits
 
-Orchestration runs multi-step, event-driven flows — chaining LLM "conversation steps" and deterministic "code steps" to a terminal event, with cascading guardrails and crash recovery. The feature is gated behind a toggle and off by default. See [orchestration.md](orchestration.md) for the full reference.
+Circuits (formerly orchestrations) run multi-step, event-driven pipelines — chaining LLM "conversation steps" and deterministic "code steps" to a terminal event, with cascading guardrails and crash recovery. The feature is gated behind a toggle and off by default. See [circuits.md](circuits.md) for the full reference.
 
-1. Open **Settings → Notor → Orchestration** and toggle **Enable orchestration**. This seeds `orchestrations/` with three reference flows (`code-assist`, `research`, `review`) and registers the orchestration command and tool scaffolds.
-2. Open the command palette → **Notor: Run orchestration**, pick a reference flow (e.g. `research`), and enter an objective.
-3. Watch the progress Notice after each step; open the run-tree view (from the activity indicator or a `run_flow` tool-call card) to navigate the run, and right-click a Notice to jump into a step's conversation.
-4. To author your own flow, switch to the built-in **`orchestration-creator`** persona — it guides you through the topology, writes the `definition.md` and step notes, and validates the flow. Authoring a flow doesn't require the feature group; running one does.
+1. Open **Settings → Notor → Circuits** and toggle **Enable circuits**. This seeds `circuits/` with three reference circuits (`code-assist`, `research`, `review`) and registers the circuit command and tool scaffolds.
+2. Open the command palette → **Notor: Run circuit**, pick a reference circuit (e.g. `research`), and enter an objective.
+3. Watch the progress Notice after each step; open the run-tree view (from the activity indicator or a `run_circuit` tool-call card) to navigate the run, and right-click a Notice to jump into a step's conversation.
+4. To author your own circuit, switch to the built-in **`circuit-creator`** persona — it guides you through the topology, writes the `definition.md` and step notes, and validates the circuit. Authoring a circuit doesn't require the feature group; running one does.
 
-> See [orchestration.md](orchestration.md) for flow anatomy, code steps, composition, and the run-tree view.
+> See [circuits.md](circuits.md) for circuit anatomy, code steps, composition, the run-tree view, and the legacy names that keep working.
 
 ## Create your first extension
 

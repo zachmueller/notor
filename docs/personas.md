@@ -64,6 +64,6 @@ For more fine-grained control, personas also support `<notor_tool_config>` block
 - **Auto-refresh on file change** — when you save or modify a persona file, the active persona is automatically reloaded. If a parse error occurs, the previous persona state remains active and a persistent error Notice is shown.
 - **Per-panel isolation** — in multi-panel mode, each chat panel maintains independent persona state. Switching personas in one panel does not affect other open panels.
 
-## Orchestration
+## Circuits
 
-Personas also drive **orchestration flow** conversation steps: a step note's `notor-step-persona` selects the persona (system prompt, tool config, provider/model) for that step's LLM turn. The built-in `orchestration-creator` persona interactively guides authoring a flow. See [Orchestration](orchestration.md).
+Personas also drive **circuit** conversation steps: a step note's `notor-step-persona` selects the persona (system prompt, tool config, provider/model) for that step's LLM turn. The built-in `circuit-creator` persona (formerly `orchestration-creator`, a name that still resolves) interactively guides authoring a circuit. See [Circuits](circuits.md).

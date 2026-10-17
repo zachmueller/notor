@@ -8,7 +8,7 @@ Ready-to-use examples and templates for Notor. Browse the categories below, copy
 |-----------|-------------|
 | [extensions/](extensions/) | Community tool, automation, and chat block extensions |
 | [workflows/](workflows/) | Reusable workflow templates |
-| [orchestrations/](orchestrations/) | Multi-step orchestration patterns |
+| [orchestrations/](orchestrations/) | Multi-step circuit patterns (formerly orchestrations) |
 | [personas/](personas/) | Persona file examples |
 | [rules/](rules/) | Rule file examples |
 

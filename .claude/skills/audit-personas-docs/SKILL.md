@@ -1,6 +1,6 @@
 ---
 name: audit-personas-docs
-description: Audit the built-in personas (notor-help, tool-creator, orchestration-creator) and the repo docs against the real code, find drift (renamed/removed tools, dead settings deep-links, stale OR missing utils/libs API entries, missing tools in tables, stale orchestration flow/step frontmatter or CircuitHelper API), report it as a findings table, then propose diffs and apply them ONLY after the user approves. Diffs the utils/libs API in BOTH directions — flagging real supported members (e.g. utils.webview) that are documented in neither the persona nor docs/extensions.md, since that gap makes tool-creator misinform users. Use when personas or docs feel out of date, after adding/renaming/removing a built-in tool, setting, settings-section, sub-agent, extension API, or orchestration surface, before a release, or when asked to "update notor-help / tool-creator / orchestration-creator" or "bring the docs up to date".
+description: Audit the built-in personas (notor-help, tool-creator, circuit-creator) and the repo docs against the real code, find drift (renamed/removed tools, dead settings deep-links, stale OR missing utils/libs API entries, missing tools in tables, stale circuit definition/step frontmatter or CircuitHelper API, or missing legacy-alias coverage), report it as a findings table, then propose diffs and apply them ONLY after the user approves. Diffs the utils/libs API in BOTH directions — flagging real supported members (e.g. utils.webview) that are documented in neither the persona nor docs/extensions.md, since that gap makes tool-creator misinform users. Use when personas or docs feel out of date, after adding/renaming/removing a built-in tool, setting, settings-section, sub-agent, extension API, or circuit surface, before a release, or when asked to "update notor-help / tool-creator / circuit-creator" or "bring the docs up to date".
 ---
 
 # Audit Built-in Personas & Repo Docs for Drift
@@ -37,9 +37,9 @@ code-vs-prose audit.
 
 1. Read the personas you're auditing **fresh each run** (they change):
    `src/personas/builtin-personas.ts` — the `notor-help`, `tool-creator`, and
-   `orchestration-creator` `systemPromptContent` strings, including their
+   `circuit-creator` (formerly `orchestration-creator`) `systemPromptContent` strings, including their
    `<notor_tool_config>` blocks, the `tool-creator` `utils`/`libs`/frontmatter prose, and
-   the `orchestration-creator` flow/step frontmatter + `CircuitHelper` code-step prose
+   the `circuit-creator` definition/step frontmatter + `CircuitHelper` code-step prose
    + composition fields.
 2. Decide scope. **Default to a full cross-check** — drift may predate the current branch
    point, so a thorough sweep is the right default (this is what the skill is for). As an
@@ -103,10 +103,11 @@ against these — never against memory or a hand-copied list.
 | Param + setting types | `ParamSchema` / `SettingsFieldSchema` (`src/extensions/types.ts`); `VALID_SETTING_TYPES` (`src/extensions/settings-schema.ts`); param conversion (`src/extensions/param-schema.ts`) | read source |
 | `web_search` provider list | `src/web-search/providers/` (one file per provider; wired via `provider.ts`) | `ls src/web-search/providers/` |
 | Hidden `log_level` default | `src/settings/types.ts` (`log_level`) + `src/settings/defaults.ts` | read source |
-| Orchestration tool scaffolds (`emit_event`, `run_flow`, `orchestration_task_*`) | `inventory.ts` (`tools`) — they are gated `featureGroup: "orchestration"` scaffolds in `BUILTIN_TOOL_SCAFFOLDS`; `run_flow` is the hand-written `RunCircuitTool` (`src/tools/run-circuit.ts`, `RUN_CIRCUIT_TOOL_NAME`) registered in `src/main.ts` | `inventory.ts` (`tools`) + read `run-circuit.ts` for the dynamic enum |
+| Circuit tool scaffolds (`emit_event`, `run_circuit`, `circuit_task_*`) | `inventory.ts` (`tools`) — they are gated `featureGroup: "circuits"` scaffolds in `BUILTIN_TOOL_SCAFFOLDS`; `run_circuit` is the hand-written `RunCircuitTool` (`src/tools/run-circuit.ts`, `RUN_CIRCUIT_TOOL_NAME`) registered in `src/main.ts` | `inventory.ts` (`tools`) + read `run-circuit.ts` for the dynamic enum |
+| Legacy circuit aliases (old names that must keep working) | `LEGACY_TOOL_NAMES` (`src/tools/tool-aliases.ts`), `CIRCUIT_KEY_ALIASES` / discriminators (`src/circuits/schema-aliases.ts`), `TOPIC_ALIASES` (`src/circuits/types.ts`, mirrored inline in `emit-event.ts`), `SETTINGS_GROUP_ALIASES` (`src/settings/group-aliases.ts`), `BUILTIN_PERSONA_ALIASES` (`src/personas/builtin-personas.ts`), hook action aliases (`src/hooks/hook-action-type.ts`) | read source; the "Legacy names" table in `docs/circuits.md` and the `circuit-creator` vocabulary table must list every alias |
 | `CircuitHelper` code-step API | `CircuitHelper` interface (`src/circuits/circuit-helper.ts`) | read source |
-| Orchestration flow/step frontmatter fields | `CircuitDefinitionParser` / `StepNoteParser` (`src/circuits/circuit-parser.ts`) + `Circuit` / `StepDefinition` (`src/circuits/types.ts`); contract: `specs/ZZ-misc/orchestration/contracts/vault-schema.md` | read source |
-| Orchestration settings group (`notor-settings://Orchestration`) | `createSettingsGroup(containerEl, "Orchestration", …)` in `src/settings/settings-tab.ts` | read source (already covered by the settings-group row) |
+| Circuit definition/step frontmatter fields | `CircuitDefinitionParser` / `StepNoteParser` (`src/circuits/circuit-parser.ts`) + `Circuit` / `StepDefinition` (`src/circuits/types.ts`); contract: `specs/ZZ-misc/orchestration/contracts/vault-schema.md` | read source |
+| Circuits settings group (`notor-settings://Circuits`; legacy `Orchestration` resolves via `SETTINGS_GROUP_ALIASES`) | `createSettingsGroup(containerEl, "Circuits", …)` in `src/settings/settings-tab.ts` | read source (already covered by the settings-group row) |
 
 If you add a new claim surface to a persona or doc, add a row here so the next audit
 covers it.
@@ -155,16 +156,18 @@ covers it.
     surface — they belong in the docs with their null/availability caveat, not omitted.
 - **Hidden `log_level` (`notor-help`).** Confirm the setting still exists and the claimed
   default (`"error"`) still matches `src/settings/defaults.ts`.
-- **`orchestration-creator` prose — diff against the orchestration sources.** Its
+- **`circuit-creator` prose — diff against the circuit sources.** Its
   `<notor_tool_config>` tools must exist in `inventory.ts.tools`; its inlined `definition.md`
   / step-note frontmatter must match `CircuitDefinitionParser`/`StepNoteParser`
   (`src/circuits/circuit-parser.ts`) and the `vault-schema.md` contract; its inlined
   `CircuitHelper` surface (`emit`/`once`/`scratchpad`/`callTool`/`callMcpTool`/`tasks`/
   `flow`/`eventHistory`) must match the `CircuitHelper` interface
   (`src/circuits/circuit-helper.ts`); its composition fields
-  (`notor-flow-invocable`/`-inputs`/`-returns`/`-on-complete-flow`/`-handoff-isolation`/
-  `-max-depth`/`-max-cost-usd`) must match the parser. A stale frontmatter field or a
-  nonexistent helper method is high severity (the persona writes flows the parser rejects).
+  (`notor-circuit-invocable`/`-inputs`/`-returns`, `notor-on-complete-circuit`,
+  `notor-handoff-isolation`/`-max-depth`/`-max-cost-usd`) must match the parser. A stale
+  frontmatter field or a nonexistent helper method is high severity (the persona writes
+  circuits the parser rejects). Its "Vocabulary and legacy names" table must match the alias
+  sources in the map.
 
 ### Docs (in scope — see Scope section)
 
@@ -186,11 +189,12 @@ covers it.
   null/desktop-only caveat where applicable), and every documented row must still exist in
   the interface. A real, supported member missing from the table is a finding at the same
   severity it would carry in the persona.
-- **`docs/orchestration.md` — the orchestration guide.** Cross-check its flow/step
-  frontmatter, the `CircuitHelper` code-step API, the orchestration tool scaffolds
-  (`emit_event`, `run_flow`, `orchestration_task_*`), the `notor-settings://Orchestration`
-  deep-link, and the composition fields against the orchestration sources in the map (the
-  same surfaces the `orchestration-creator` persona inlines — keep the two in sync).
+- **`docs/circuits.md` — the circuits guide** (`docs/orchestration.md` is only a pointer
+  stub). Cross-check its definition/step frontmatter, the `CircuitHelper` code-step API, the
+  circuit tool scaffolds (`emit_event`, `run_circuit`, `circuit_task_*`), the
+  `notor-settings://Circuits` deep-link, the composition fields, and the "Legacy names" table
+  against the circuit and alias sources in the map (the same surfaces the `circuit-creator`
+  persona inlines — keep the two in sync).
 - **`README.md` / `AGENTS.md` / `examples/`.** Check the README feature list and any tool
   counts ("N built-in tools") against reality; check `AGENTS.md` paths/commands resolve;
   spot-check `examples/` extension templates against the current extension format.
