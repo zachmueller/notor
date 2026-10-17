@@ -81,6 +81,14 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		askMany: async (qs) => (Array.isArray(qs) ? qs : []).map(() => null),
 	};
 
+	// Circuit-vocabulary alias of the per-call `orchestrationContext` (attached
+	// after construction by UserToolAdapter), so it must be a live getter.
+	Object.defineProperty(utils, "circuitContext", {
+		get: () => utils.orchestrationContext,
+		enumerable: true,
+		configurable: true,
+	});
+
 	// Wire memory last — resolveConcept needs runSubAgent
 	const mem = buildMemoryUtils(ctx, utils.runSubAgent);
 	utils.memory = mem.memory;

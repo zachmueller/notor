@@ -16,7 +16,10 @@ vi.mock("./chat-utils", () => ({
 vi.mock("./sub-agent-utils", () => ({ buildSubAgentUtils: () => ({ runSubAgent: async () => null }) }));
 vi.mock("./memory-utils", () => ({ buildMemoryUtils: () => ({ memory: null, memoryApprovalMode: null }) }));
 vi.mock("./plugin-utils", () => ({ buildPluginUtils: () => ({}) }));
-vi.mock("./circuit-utils", () => ({ buildCircuitUtils: () => ({}) }));
+const fakeTasks = { ensure: vi.fn(), start: vi.fn(), close: vi.fn(), list: vi.fn() };
+vi.mock("./circuit-utils", () => ({
+	buildCircuitUtils: () => ({ orchestrationTasks: fakeTasks, circuitTasks: fakeTasks, invokeWorkflow: null }),
+}));
 
 import { buildUtils } from "./index";
 import { RUNTIME_API_VERSION } from "./version";
@@ -38,5 +41,21 @@ describe("buildUtils — runtime API version", () => {
 		// separate builder, so the version stamp is carried for free.
 		const utils = buildUtils(makePlugin());
 		expect(utils.api.version).toBe(RUNTIME_API_VERSION);
+	});
+});
+
+describe("buildUtils — circuit-vocabulary aliases (additive; API version unchanged)", () => {
+	it("circuitTasks is the same object as orchestrationTasks", () => {
+		const utils = buildUtils(makePlugin());
+		expect(utils.circuitTasks).toBe(utils.orchestrationTasks);
+	});
+
+	it("circuitContext is a live view of the per-call orchestrationContext", () => {
+		const utils = buildUtils(makePlugin());
+		expect(utils.circuitContext).toBeUndefined();
+		const carriage = { sessionId: "s1" } as never;
+		// UserToolAdapter attaches the carriage after construction.
+		utils.orchestrationContext = carriage;
+		expect(utils.circuitContext).toBe(carriage);
 	});
 });

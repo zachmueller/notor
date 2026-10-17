@@ -35,7 +35,7 @@ const log = logger("OrchestrationUtils");
  */
 export function buildCircuitUtils(
 	ctx: BuilderContext,
-): Pick<ExtensionUtils, "orchestrationTasks" | "invokeWorkflow"> {
+): Pick<ExtensionUtils, "orchestrationTasks" | "circuitTasks" | "invokeWorkflow"> {
 	const { plugin } = ctx;
 	const adapter = plugin.app.vault.adapter;
 
@@ -62,15 +62,20 @@ export function buildCircuitUtils(
 
 	const registry = new TaskRegistry(fs);
 
+	const tasks: ExtensionUtils["orchestrationTasks"] = {
+		ensure: (tasksDir: string, key: string, description: string) =>
+			registry.ensure(tasksDir, key, description),
+		start: (tasksDir: string, key: string) => registry.start(tasksDir, key),
+		close: (tasksDir: string, key: string) => registry.close(tasksDir, key),
+		list: (tasksDir: string, filter?: { status?: TaskStatus }): Promise<TaskNote[]> =>
+			registry.list(tasksDir, filter),
+	};
+
 	return {
-		orchestrationTasks: {
-			ensure: (tasksDir: string, key: string, description: string) =>
-				registry.ensure(tasksDir, key, description),
-			start: (tasksDir: string, key: string) => registry.start(tasksDir, key),
-			close: (tasksDir: string, key: string) => registry.close(tasksDir, key),
-			list: (tasksDir: string, filter?: { status?: TaskStatus }): Promise<TaskNote[]> =>
-				registry.list(tasksDir, filter),
-		},
+		// `circuitTasks` is the circuit-vocabulary name; `orchestrationTasks` stays
+		// forever. Both are the SAME object.
+		orchestrationTasks: tasks,
+		circuitTasks: tasks,
 		invokeWorkflow: async (workflowName: string, task: string) => {
 			// Step→workflow runs the workflow headlessly through the live
 			// orchestrator's background loop (INT-031, "wrap" the existing loop).

@@ -21,6 +21,7 @@
 		"e2e:orch:vault-health": "npx tsx e2e/scripts/orchestration-vault-health-test.ts",
 		"e2e:orch:zettelkasten": "npx tsx e2e/scripts/orchestration-zettelkasten-test.ts",
 		"e2e:orch:weekly-review": "npx tsx e2e/scripts/orchestration-weekly-review-test.ts",
+		"e2e:circuit:alias": "npx tsx e2e/scripts/circuit-alias-test.ts",
 		"test": "vitest run",
 		"test:watch": "vitest"
 	},

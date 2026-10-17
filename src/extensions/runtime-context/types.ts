@@ -408,7 +408,13 @@ export interface ExtensionUtils {
 	 */
 	orchestrationContext?: import("../../run-loop/types").OrchestrationToolContext;
 	/**
-	 * Runtime task-registry bridge for the four `orchestration_task_*` tool
+	 * Circuit-vocabulary alias of {@link orchestrationContext} (a live getter over
+	 * it). Prefer this name in new tool code; the original stays available.
+	 * @internal
+	 */
+	readonly circuitContext?: import("../../run-loop/types").OrchestrationToolContext;
+	/**
+	 * Runtime task-registry bridge for the four `circuit_task_*` (formerly `orchestration_task_*`) tool
 	 * scaffolds (INT-002). Each method takes the active session's `tasksPath`
 	 * (read off {@link orchestrationContext}); the registry resolves nothing
 	 * globally, so a step can only touch its own session's tasks. Always present
@@ -434,6 +440,11 @@ export interface ExtensionUtils {
 			filter?: { status?: import("../../circuits/task-registry").TaskStatus },
 		) => Promise<import("../../circuits/task-registry").TaskNote[]>;
 	};
+	/**
+	 * Circuit-vocabulary alias of {@link orchestrationTasks} — the same object.
+	 * Prefer this name in new tool code; the original stays available.
+	 */
+	circuitTasks: ExtensionUtils["orchestrationTasks"];
 	/**
 	 * Step→workflow invocation bridge for the `invoke_workflow` tool scaffold
 	 * (INT-031 / FR-151). Resolves a workflow by name through `discoverWorkflows`,
