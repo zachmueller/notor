@@ -14,6 +14,18 @@ export function renderGeneralSection(
 	containerEl: HTMLElement,
 	ctx: SettingsContext
 ): void {
+	renderWorkspaceBehaviorSettings(containerEl, ctx);
+	renderChatDisplaySettings(containerEl, ctx);
+}
+
+/**
+ * Render the Notor directory and open/focus-notes-on-access rows.
+ * Shared with the guided setup wizard's workspace step.
+ */
+export function renderWorkspaceBehaviorSettings(
+	containerEl: HTMLElement,
+	ctx: SettingsContext
+): void {
 	new Setting(containerEl)
 		.setName("Notor directory")
 		.setDesc(
@@ -59,7 +71,13 @@ export function renderGeneralSection(
 					await ctx.saveSettings();
 				})
 		);
+}
 
+/** Render popover, chat input sizing, and new-chat persona rows. */
+function renderChatDisplaySettings(
+	containerEl: HTMLElement,
+	ctx: SettingsContext
+): void {
 	new Setting(containerEl)
 		.setName("Popover references")
 		.setDesc(

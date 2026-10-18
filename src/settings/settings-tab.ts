@@ -13,10 +13,7 @@ import type NotorPlugin from "../main";
 import type { SettingsContext } from "./sections/context";
 
 // Section renderers
-import { renderLocalProviderSection } from "./sections/provider-local";
-import { renderAnthropicProviderSection } from "./sections/provider-anthropic";
-import { renderOpenAIProviderSection } from "./sections/provider-openai";
-import { renderBedrockProviderSection } from "./sections/provider-bedrock";
+import { renderProviderSection } from "./sections/providers";
 import { renderAddProviderButton } from "./sections/provider-add";
 import { renderNetworkRetrySection } from "./sections/network-retry";
 import { renderAutoContextSection } from "./sections/auto-context";
@@ -179,20 +176,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		// --- Providers (expanded by default) ---
 		const providerGroup = createSettingsGroup(containerEl, "Providers", true, persisted, onToggle);
 		for (const config of ctx.settings.providers) {
-			switch (config.type) {
-				case "local":
-					renderLocalProviderSection(providerGroup, ctx, config);
-					break;
-				case "anthropic":
-					renderAnthropicProviderSection(providerGroup, ctx, config);
-					break;
-				case "openai":
-					renderOpenAIProviderSection(providerGroup, ctx, config);
-					break;
-				case "bedrock":
-					renderBedrockProviderSection(providerGroup, ctx, config);
-					break;
-			}
+			renderProviderSection(providerGroup, ctx, config);
 		}
 		renderAddProviderButton(providerGroup, ctx);
 		renderNetworkRetrySection(providerGroup, ctx);

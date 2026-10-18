@@ -9,14 +9,16 @@ import { clearProviderSecrets } from "../../utils/secrets";
 import { generateProviderId } from "../helpers";
 import type { SettingsContext } from "./context";
 
-const PROVIDER_TYPE_LABELS: Record<LLMProviderType, string> = {
+/** User-facing label for each provider type. */
+export const PROVIDER_TYPE_LABELS: Record<LLMProviderType, string> = {
 	local: "Local (OpenAI-compatible)",
 	anthropic: "Anthropic",
 	openai: "OpenAI",
 	bedrock: "AWS Bedrock",
 };
 
-function createDefaultConfig(type: LLMProviderType, existingCount: number): LLMProviderConfig {
+/** Build a new, disabled provider instance with type-appropriate defaults. */
+export function createDefaultConfig(type: LLMProviderType, existingCount: number): LLMProviderConfig {
 	const suffix = existingCount > 0 ? ` (${existingCount + 1})` : "";
 	const base: LLMProviderConfig = {
 		id: generateProviderId(type),
@@ -54,10 +56,9 @@ export function renderAddProviderButton(
 		.setDesc("Add another provider instance (e.g., a second local server or AWS account).")
 		.addDropdown((dropdown) => {
 			dropdown.addOption("", "Select type…");
-			dropdown.addOption("local", "Local (OpenAI-compatible)");
-			dropdown.addOption("anthropic", "Anthropic");
-			dropdown.addOption("openai", "OpenAI");
-			dropdown.addOption("bedrock", "AWS Bedrock");
+			for (const [type, label] of Object.entries(PROVIDER_TYPE_LABELS)) {
+				dropdown.addOption(type, label);
+			}
 			dropdown.onChange(async (value) => {
 				if (!value) return;
 				const type = value as LLMProviderType;

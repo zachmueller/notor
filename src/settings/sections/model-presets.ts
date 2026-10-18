@@ -8,9 +8,9 @@
  * @see specs/ZZ-misc/model-presets-design.md — Section 5.2
  */
 
-import { Notice, Setting } from "obsidian";
+import { Notice, Setting, type DropdownComponent } from "obsidian";
 import type { SettingsContext } from "./context";
-import type { ModelPreset } from "../../types";
+import type { ModelInfo, ModelPreset } from "../../types";
 import { groupModels, parseOptionValue, buildOptionValue } from "../../providers/model-grouping";
 import { supportsThinking } from "../../providers/model-metadata";
 import { logger } from "../../utils/logger";
@@ -296,10 +296,53 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 	}
 }
 
+/**
+ * Add model options to a dropdown: grouped by region/context for Bedrock,
+ * otherwise a flat list plus `::1m` variants for extended-context models.
+ * Option values round-trip through `parseOptionValue`.
+ */
+export function addModelOptions(dropdown: DropdownComponent, models: ModelInfo[]): void {
+	const groups = groupModels(models);
+
+	// Use optgroup-style rendering for grouped models (Bedrock)
+	if (groups.some((g) => g.variants.length > 1)) {
+		for (const group of groups) {
+			for (const variant of group.variants) {
+				const label = variant.region
+					? `${group.label} ${variant.region}${variant.contextLabel ? ` (${variant.contextLabel})` : ""}`
+					: `${group.label}${variant.contextLabel ? ` (${variant.contextLabel})` : ""}`;
+				dropdown.addOption(variant.optionValue, label);
+			}
+		}
+	} else {
+		// Flat list (non-Bedrock providers)
+		for (const m of models) {
+			dropdown.addOption(m.id, m.display_name || m.id);
+		}
+		// Also add ::1m variants for models that support extended context
+		for (const group of groups) {
+			for (const variant of group.variants) {
+				if (variant.isExtendedContext) {
+					dropdown.addOption(
+						variant.optionValue,
+						`${variant.model.display_name || variant.model.id} (1M)`,
+					);
+				}
+			}
+		}
+	}
+}
+
+/** Select an option value, falling back to the base option when a persisted `id::1m` has no 1M variant. */
+export function selectModelOption(dropdown: DropdownComponent, value: string): void {
+	const hasCurrent = Array.from(dropdown.selectEl.options).some((o) => o.value === value);
+	dropdown.setValue(hasCurrent ? value : parseOptionValue(value).modelId);
+}
+
 /** Render a model dropdown for a preset row. */
 function renderModelDropdown(
 	setting: Setting,
-	models: import("../../types").ModelInfo[],
+	models: ModelInfo[],
 	currentValue: string,
 	preset: ModelPreset,
 	_index: number,
@@ -309,40 +352,8 @@ function renderModelDropdown(
 ): void {
 	setting.addDropdown((dropdown) => {
 		dropdown.addOption("", "(select model)");
-
-		const groups = groupModels(models);
-
-		// Use optgroup-style rendering for grouped models (Bedrock)
-		if (groups.some((g) => g.variants.length > 1)) {
-			for (const group of groups) {
-				for (const variant of group.variants) {
-					const label = variant.region
-						? `${group.label} ${variant.region}${variant.contextLabel ? ` (${variant.contextLabel})` : ""}`
-						: `${group.label}${variant.contextLabel ? ` (${variant.contextLabel})` : ""}`;
-					dropdown.addOption(variant.optionValue, label);
-				}
-			}
-		} else {
-			// Flat list (non-Bedrock providers)
-			for (const m of models) {
-				dropdown.addOption(m.id, m.display_name || m.id);
-			}
-			// Also add ::1m variants for models that support extended context
-			for (const group of groups) {
-				for (const variant of group.variants) {
-					if (variant.isExtendedContext) {
-						dropdown.addOption(
-							variant.optionValue,
-							`${variant.model.display_name || variant.model.id} (1M)`,
-						);
-					}
-				}
-			}
-		}
-
-		// Fall back to the base option when a persisted `id::1m` has no 1M variant.
-		const hasCurrent = Array.from(dropdown.selectEl.options).some((o) => o.value === currentValue);
-		dropdown.setValue(hasCurrent ? currentValue : parseOptionValue(currentValue).modelId);
+		addModelOptions(dropdown, models);
+		selectModelOption(dropdown, currentValue);
 		dropdown.onChange(async (value) => {
 			if (value === "") {
 				preset.model_id = null;
