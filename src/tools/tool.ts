@@ -12,6 +12,7 @@ import type { Conversation, ConversationMode, TaskItem, ToolResult } from "../ty
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
 import type { ModelSelection } from "../chat/model-selection";
+import type { ApprovalCallback } from "../chat/dispatcher";
 
 // Re-export ToolResult for tool implementations
 export type { ToolResult };
@@ -60,6 +61,12 @@ export interface ToolSessionContext {
 	 * model, …) — what the parent turn is actually using right now.
 	 */
 	getSessionModelSelection?(): ModelSelection;
+	/**
+	 * The dispatching session's approval callback, so a nested dispatcher (a
+	 * sub-agent) prompts in the same panel as the parent turn instead of
+	 * running its write tools unapproved.
+	 */
+	getApprovalCallback?(): ApprovalCallback;
 }
 
 export interface ToolExecuteOptions {

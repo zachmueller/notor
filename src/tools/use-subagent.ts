@@ -404,8 +404,11 @@ export class UseSubagentTool implements Tool {
 		if (this.resolveVaultPath) {
 			subDispatcher.setResolveVaultPath(this.resolveVaultPath);
 		}
-		if (this.parentApprovalCallback) {
-			subDispatcher.setApprovalCallback(this.parentApprovalCallback);
+		// Prompt through the parent session's panel; without a callback the
+		// dispatcher would auto-approve every write the policy didn't.
+		const approvalCallback = options?.sessionContext?.getApprovalCallback?.() ?? this.parentApprovalCallback;
+		if (approvalCallback) {
+			subDispatcher.setApprovalCallback(approvalCallback);
 		}
 
 		// Step 8: Assemble system prompt

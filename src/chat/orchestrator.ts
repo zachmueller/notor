@@ -666,12 +666,15 @@ export class ChatOrchestrator implements ToolSessionContext {
 	/**
 	 * Per-dispatch tool session context bound to `session`. Delegates the
 	 * display-oriented accessors to the orchestrator and adds session-bound
-	 * mutators, so a tool flags the right session even if the panel has been
-	 * navigated to another conversation.
+	 * state and mutators, so a tool sees and flags the right session even if
+	 * the panel has been navigated to another conversation.
 	 */
 	private buildSessionContext(session: ConversationSession): ToolSessionContext {
 		return {
-			getEffectiveToolConfig: () => this.getEffectiveToolConfig(),
+			// The session's own config (its pinned persona), not the inspector's,
+			// which follows whatever conversation the panel displays.
+			getEffectiveToolConfig: () => session.effectiveConfig,
+			getApprovalCallback: () => session.approvalCallback,
 			getActiveConversation: () => this.getActiveConversation(),
 			setConversationTasks: (tasks) => this.setConversationTasks(tasks),
 			getSessionConversationId: () => session.conversationId,

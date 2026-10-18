@@ -600,3 +600,75 @@ describe("UseSubagentTool", () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Parent session approval + config reach the sub-agent's own dispatcher
+// ---------------------------------------------------------------------------
+
+describe("UseSubagentTool — parent session approval", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockRunFn.mockResolvedValue(makeSubAgentResult());
+	});
+
+	const writerProfile = makeProfile({
+		tool_configs: [{
+			source: "subagent",
+			sourceFile: "notor/sub-agents/search-vault/system-prompt.md",
+			documentPosition: 0,
+			tools: { write_note: { enabled: true } },
+		}],
+	});
+
+	function parentConfigWithWrite(autoApprove: boolean): EffectiveToolConfig {
+		const config = makeParentConfig();
+		config.tools.write_note!.auto_approve = autoApprove;
+		return config;
+	}
+
+	/** Run the tool, then dispatch a write_note through the runner's dispatcher. */
+	async function dispatchSubAgentWrite(sessionConfig: EffectiveToolConfig, approval: ReturnType<typeof vi.fn>) {
+		const toolRegistry = makeMockToolRegistry();
+		const writeTool = toolRegistry.get("write_note") as unknown as { execute: ReturnType<typeof vi.fn> };
+		writeTool.execute.mockResolvedValue({ tool_name: "write_note", success: true, result: "ok" });
+		// The closure fallback (display config) auto-approves writes — the session's must win.
+		const tool = createTool({
+			manager: makeMockSubAgentManager([writerProfile]),
+			toolRegistry,
+			parentConfig: parentConfigWithWrite(true),
+		});
+
+		await tool.execute({ profile: "search-vault", task: "Write" }, {
+			sessionContext: {
+				getEffectiveToolConfig: () => sessionConfig,
+				getActiveConversation: () => null,
+				getApprovalCallback: () => approval,
+			},
+		});
+
+		const ctorCall = (SubAgentRunner as unknown as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+		await ctorCall.dispatcher.dispatch(
+			"write_note", { path: "A.md", content: "x" }, "act", "m1", undefined, undefined, ctorCall.policyCtx,
+		);
+		return writeTool.execute;
+	}
+
+	it("prompts through the session's callback when the session's persona doesn't auto-approve writes", async () => {
+		const approval = vi.fn().mockResolvedValue("rejected");
+		const execute = await dispatchSubAgentWrite(parentConfigWithWrite(false), approval);
+
+		expect(approval).toHaveBeenCalledTimes(1);
+		expect(approval.mock.calls[0]![0]).toMatchObject({ tool_name: "write_note" });
+		expect(approval.mock.calls[0]![3]).toBeFalsy();
+		expect(execute).not.toHaveBeenCalled();
+	});
+
+	it("runs unprompted when the session's persona auto-approves writes", async () => {
+		const approval = vi.fn().mockResolvedValue("rejected");
+		const execute = await dispatchSubAgentWrite(parentConfigWithWrite(true), approval);
+
+		// Only the informational auto-approved notification (diff card), never a prompt.
+		expect(approval.mock.calls.every((call) => !!call[3])).toBe(true);
+		expect(execute).toHaveBeenCalledTimes(1);
+	});
+});
