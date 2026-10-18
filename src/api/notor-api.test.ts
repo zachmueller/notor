@@ -16,6 +16,13 @@ import type { Workflow } from "../types";
 // The circuit runner's interactive-pause modal isn't exercised here.
 vi.mock("../ui/circuit-modals", () => ({ requestCircuitInput: vi.fn() }));
 
+// Discovery reads the fake host's fixture lists instead of a vault.
+vi.mock("./discovery", () => ({
+	discoverCircuitsNow: async (host: { settings: { circuits_enabled: boolean }; circuits?: Circuit[] }) =>
+		host.settings.circuits_enabled ? (host.circuits ?? []) : [],
+	discoverWorkflowsNow: (host: { workflows?: Workflow[] }) => host.workflows ?? [],
+}));
+
 function makeHost(over: Partial<Record<string, unknown>> = {}) {
 	const settings = {
 		external_api_enabled: true,
@@ -43,8 +50,8 @@ function makeHost(over: Partial<Record<string, unknown>> = {}) {
 		app: { vault: { getFileByPath: () => null }, metadataCache: { getFirstLinkpathDest: () => null } },
 		settings,
 		vaultRootPath: "/vault",
-		getDiscoveredCircuits: () => (over.circuits as Circuit[]) ?? [],
-		getDiscoveredWorkflows: () => (over.workflows as Workflow[]) ?? [],
+		circuits: over.circuits as Circuit[] | undefined,
+		workflows: over.workflows as Workflow[] | undefined,
 		getCircuitRunRegistry: () => registry,
 		getToolDispatcher: () => dispatcher,
 		getSystemPromptBuilder: () => ({

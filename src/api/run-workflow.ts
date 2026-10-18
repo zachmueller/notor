@@ -8,6 +8,7 @@ import type { ApprovalOverride } from "../chat/tool-policy";
 import { buildPromptWithAttachments, extractWikilinkAttachments } from "../context/wikilink-attachments";
 import type { ConversationMode, Workflow } from "../types";
 import type { NotorApiHost } from "./host";
+import { discoverWorkflowsNow } from "./discovery";
 import { collectNotesTouched } from "./notes-touched";
 import { applyInclude, linkSignal, openTargetPanel, resolveApproval, resolveDisplay, resolveMode } from "./options";
 import { matchWorkflows } from "./resolve";
@@ -29,7 +30,7 @@ export async function runWorkflow(
 	nameOrPath: string,
 	opts: NotorRunOptions = {},
 ): Promise<NotorRunResult> {
-	const matches = matchWorkflows(host.getDiscoveredWorkflows(), nameOrPath);
+	const matches = matchWorkflows(discoverWorkflowsNow(host), nameOrPath);
 	if (matches.length === 0) throw new NotorApiError("not_found", `No workflow named '${nameOrPath}'.`);
 	if (matches.length > 1) {
 		throw new NotorApiError(

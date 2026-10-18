@@ -11,6 +11,7 @@ import { buildPromptWithAttachments } from "../context/wikilink-attachments";
 import { requestCircuitInput } from "../ui/circuit-modals";
 import { logger } from "../utils/logger";
 import type { NotorApiHost } from "./host";
+import { discoverCircuitsNow } from "./discovery";
 import { collectNotesTouched } from "./notes-touched";
 import { applyInclude, linkSignal, openTargetPanel, resolveApproval, resolveDisplay, resolveMode } from "./options";
 import { matchCircuits } from "./resolve";
@@ -28,7 +29,7 @@ export async function runCircuit(
 	if (!host.settings.circuits_enabled) {
 		throw new NotorApiError("circuits_disabled", "Circuits are turned off in Settings → Notor → Circuits.");
 	}
-	const matches = matchCircuits(host.getDiscoveredCircuits(), nameOrPath);
+	const matches = matchCircuits(await discoverCircuitsNow(host), nameOrPath);
 	if (matches.length === 0) throw new NotorApiError("not_found", `No circuit named '${nameOrPath}'.`);
 	if (matches.length > 1) {
 		throw new NotorApiError(

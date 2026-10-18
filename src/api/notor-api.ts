@@ -8,6 +8,7 @@
  * and approval handling as everything else.
  */
 
+import { discoverCircuitsNow, discoverWorkflowsNow } from "./discovery";
 import type { NotorApiHost } from "./host";
 import { runCircuit } from "./run-circuit";
 import { runTool } from "./run-tool";
@@ -47,8 +48,7 @@ export function createNotorApi(host: NotorApiHost, ready: Promise<void>): NotorA
 
 		async listCircuits() {
 			await enter();
-			if (!host.settings.circuits_enabled) return [];
-			return host.getDiscoveredCircuits().map((c) => ({
+			return (await discoverCircuitsNow(host)).map((c) => ({
 				name: c.name,
 				...(c.description ? { description: c.description } : {}),
 				path: c.flowDir,
@@ -58,7 +58,7 @@ export function createNotorApi(host: NotorApiHost, ready: Promise<void>): NotorA
 
 		async listWorkflows() {
 			await enter();
-			return host.getDiscoveredWorkflows().map((w) => ({
+			return discoverWorkflowsNow(host).map((w) => ({
 				name: w.display_name,
 				path: w.file_path,
 				aliases: [...w.aliases],
