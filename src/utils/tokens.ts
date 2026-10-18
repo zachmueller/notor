@@ -48,6 +48,7 @@ export function estimateTokenCount(text: string): number {
 // ---------------------------------------------------------------------------
 
 import type { ContentBlock } from "../media/types";
+import type { ChatMessage, ToolDefinition } from "../providers/provider";
 
 function estimateImageTokens(width?: number, height?: number, provider?: string): number {
 	if (width != null && height != null) {
@@ -101,6 +102,48 @@ export function estimateContentTokens(content: string | ContentBlock[], provider
 				}
 				break;
 		}
+	}
+	return total;
+}
+
+/**
+ * Estimate the input tokens of a provider request: every message's content,
+ * tool-call arguments and tool results, plus the tool definitions.
+ *
+ * Used only when a stream was cut off before the provider reported usage
+ * (see `StreamResult.cutOff`) — the request was still billed in full.
+ */
+export function estimateRequestInputTokens(
+	messages: ChatMessage[],
+	toolDefinitions: ToolDefinition[] = [],
+): number {
+	let total = 0;
+	for (const msg of messages) {
+		total += estimateContentTokens(msg.content);
+		for (const tc of msg.tool_calls ?? []) {
+			total += estimateTokenCount(tc.tool_name) + estimateTokenCount(JSON.stringify(tc.parameters));
+		}
+		for (const tr of msg.tool_results ?? []) {
+			total += estimateTokenCount(tr.result);
+			if (tr.content_blocks?.length) total += estimateContentTokens(tr.content_blocks);
+		}
+	}
+	if (toolDefinitions.length > 0) total += estimateTokenCount(JSON.stringify(toolDefinitions));
+	return total;
+}
+
+/**
+ * Estimate the output tokens a cut-off stream generated: its text, its
+ * reasoning, and every tool call it opened (names plus finalized arguments).
+ */
+export function estimateCutOffOutputTokens(
+	text: string,
+	thinking: string,
+	calls: ReadonlyArray<{ toolName: string; parameters: Record<string, unknown> }>,
+): number {
+	let total = estimateTokenCount(text) + estimateTokenCount(thinking);
+	for (const call of calls) {
+		total += estimateTokenCount(call.toolName) + estimateTokenCount(JSON.stringify(call.parameters));
 	}
 	return total;
 }

@@ -127,34 +127,23 @@ export const AUTO_ACCEPT_WRITE_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Pure function — evaluates tool policy without reading any shared state.
- *
- * Extracts these checks from dispatcher.ts:
+ * Name-only policy checks — the subset of {@link evaluateToolPolicy} that
+ * needs no parameters:
  * - Enabled check (FR-83)
  * - Plan/Act mode check (FR-14)
- * - Domain denylist check (fetch_webpage only)
- * - Required-parameter presence check
- * - Auto-approve resolution (DISP-004)
- * - Path enforcement (FR-84)
  *
- * @param toolName   - The tool name (namespaced for MCP tools)
- * @param parameters - The tool call parameters
- * @param tool       - The tool instance from the registry
- * @param ctx        - Policy context built from the session's resolved config
- * @returns A `PolicyDecision` indicating whether the call is allowed and auto-approved
+ * Because these are decidable from the tool name alone, the stream parser runs
+ * them the moment a tool call opens and stops the stream before the model
+ * generates arguments that could never run (see `ParseStreamOpts.isToolCallBlocked`).
+ *
+ * @returns A blocking `PolicyDecision`, or `null` when the name-only checks pass
  */
-export function evaluateToolPolicy(
+export function evaluateToolNamePolicy(
 	toolName: string,
-	parameters: Record<string, unknown>,
 	tool: DispatchableTool,
 	ctx: ToolPolicyContext,
-): PolicyDecision {
-	// Internal tools bypass every check below, including argument validation —
-	// only `update_tasks` is internal, it guards its own arguments, and it owns no
-	// path params, so there is no approval prompt to spare it from.
-	if (tool.internal) {
-		return { allowed: true, autoApproved: true };
-	}
+): PolicyDecision | null {
+	if (tool.internal) return null;
 
 	// 1. Enabled check — block disabled tools (FR-83)
 	const toolEntry = ctx.effectiveConfig.tools[toolName];
@@ -179,6 +168,46 @@ export function evaluateToolPolicy(
 			error: planModeError,
 		};
 	}
+
+	return null;
+}
+
+/**
+ * Pure function — evaluates tool policy without reading any shared state.
+ *
+ * Extracts these checks from dispatcher.ts:
+ * - Enabled check (FR-83) and Plan/Act mode check (FR-14), via {@link evaluateToolNamePolicy}
+ * - Domain denylist check (fetch_webpage only)
+ * - Required-parameter presence check
+ * - Auto-approve resolution (DISP-004)
+ * - Path enforcement (FR-84)
+ *
+ * @param toolName   - The tool name (namespaced for MCP tools)
+ * @param parameters - The tool call parameters
+ * @param tool       - The tool instance from the registry
+ * @param ctx        - Policy context built from the session's resolved config
+ * @returns A `PolicyDecision` indicating whether the call is allowed and auto-approved
+ */
+export function evaluateToolPolicy(
+	toolName: string,
+	parameters: Record<string, unknown>,
+	tool: DispatchableTool,
+	ctx: ToolPolicyContext,
+): PolicyDecision {
+	// Internal tools bypass every check below, including argument validation —
+	// only `update_tasks` is internal, it guards its own arguments, and it owns no
+	// path params, so there is no approval prompt to spare it from.
+	if (tool.internal) {
+		return { allowed: true, autoApproved: true };
+	}
+
+	// 1–2. Name-only checks (enabled, Plan/Act mode). These run before the
+	// required-parameter check, which is what lets a stream cut off at a blocked
+	// call's start dispatch with `{}` and still report the real reason.
+	const nameDecision = evaluateToolNamePolicy(toolName, tool, ctx);
+	if (nameDecision) return nameDecision;
+
+	const toolEntry = ctx.effectiveConfig.tools[toolName];
 
 	// 3. Domain denylist check (fetch_webpage only)
 	if (toolName === "fetch_webpage" && ctx.domainDenylist) {

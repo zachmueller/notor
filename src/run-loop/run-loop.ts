@@ -37,7 +37,9 @@ import {
 } from "../chat/tool-orchestration";
 import { SUB_AGENT_ITERATION_CAP, SUB_AGENT_TOKEN_LIMIT } from "../sub-agents/constants";
 import { getContextWindow } from "../providers/model-metadata";
-import { estimateTokenCount, estimateContentTokens } from "../utils/tokens";
+import { estimateTokenCount, estimateContentTokens, estimateCutOffOutputTokens, estimateRequestInputTokens } from "../utils/tokens";
+import { assertUnreachable } from "../utils/assert-unreachable";
+import { openChildAbort } from "../utils/child-abort";
 import { logger } from "../utils/logger";
 import { computeTurnCostUsd, decrementAggregate, hasHeadroom } from "./budget";
 import type { RunLoopOptions, RunResult, RunStopReason, TurnOutcome } from "./types";
@@ -202,9 +204,11 @@ export class RunLoop {
 				this.reportProgress(`Turn ${iterationCount}/${this.iterationCap}...`);
 
 				// --- Send to LLM ---
+				// Per-request signal so a stream cut off at a blocked tool call closes.
+				const request = openChildAbort(this.abortController.signal);
 				const sendOptions: SendMessageOptions = {
 					model: this.options.model,
-					abort_signal: this.abortController.signal,
+					abort_signal: request.signal,
 					thinking_level: this.thinkingLevel,
 				};
 
@@ -212,32 +216,36 @@ export class RunLoop {
 				// Re-sending the same messages is safe: tools only run after a
 				// stream completes. Tokens reported by failed attempts still count.
 				let failedAttemptTokens = { input: 0, output: 0 };
-				streamResult = await withStreamRetry<ConsumedStreamResult>(
-					() => this.consumeStream(this.options.provider.sendMessage(
-						messages,
-						this.options.toolDefinitions,
-						sendOptions,
-					)),
-					{
-						policy: this.retryPolicy,
-						signal: this.abortController.signal,
-						label: this.options.model,
-						classify: ({ result, error }) => {
-							if (result === undefined) return retryableCodeOfError(error);
-							return result.type === "error" ? retryableCodeOfFailure(result) : null;
+				try {
+					streamResult = await withStreamRetry<ConsumedStreamResult>(
+						() => this.consumeStream(this.options.provider.sendMessage(
+							messages,
+							this.options.toolDefinitions,
+							sendOptions,
+						), messages),
+						{
+							policy: this.retryPolicy,
+							signal: this.abortController.signal,
+							label: this.options.model,
+							classify: ({ result, error }) => {
+								if (result === undefined) return retryableCodeOfError(error);
+								return result.type === "error" ? retryableCodeOfFailure(result) : null;
+							},
+							onFailedAttempt: ({ result }) => {
+								if (result) {
+									failedAttemptTokens = {
+										input: failedAttemptTokens.input + result.inputTokens,
+										output: failedAttemptTokens.output + result.outputTokens,
+									};
+								}
+							},
+							onStatus: (status) => this.reportProgress(formatRetryStatus(status)),
+							onAbort: () => ({ type: "cancelled", text: "", toolCalls: [], inputTokens: 0, outputTokens: 0 }),
 						},
-						onFailedAttempt: ({ result }) => {
-							if (result) {
-								failedAttemptTokens = {
-									input: failedAttemptTokens.input + result.inputTokens,
-									output: failedAttemptTokens.output + result.outputTokens,
-								};
-							}
-						},
-						onStatus: (status) => this.reportProgress(formatRetryStatus(status)),
-						onAbort: () => ({ type: "cancelled", text: "", toolCalls: [], inputTokens: 0, outputTokens: 0 }),
-					},
-				);
+					);
+				} finally {
+					request.close();
+				}
 				streamResult = {
 					...streamResult,
 					inputTokens: streamResult.inputTokens + failedAttemptTokens.input,
@@ -470,9 +478,10 @@ export class RunLoop {
 
 		// Pass toolDefinitions (NOT empty []) because Bedrock requires toolConfig
 		// when conversation history contains toolUse/toolResult blocks.
+		const request = openChildAbort(this.abortController.signal);
 		const sendOptions: SendMessageOptions = {
 			model: this.options.model,
-			abort_signal: this.abortController.signal,
+			abort_signal: request.signal,
 			thinking_level: this.thinkingLevel,
 		};
 
@@ -482,7 +491,7 @@ export class RunLoop {
 				this.options.toolDefinitions,
 				sendOptions,
 			);
-			const streamResult = await this.consumeStream(stream);
+			const streamResult = await this.consumeStream(stream, messages).finally(() => request.close());
 
 			tokenUsage.input += streamResult.inputTokens;
 			tokenUsage.output += streamResult.outputTokens;
@@ -594,27 +603,46 @@ export class RunLoop {
 
 	/**
 	 * Consume a provider stream via `parseStreamEvents()`, collecting text and
-	 * tool calls without any view rendering.
+	 * tool calls without any view rendering. `requestMessages` feeds the
+	 * input-token estimate for a stream cut off at a blocked tool call.
 	 */
 	private async consumeStream(
 		stream: AsyncIterable<StreamChunk>,
+		requestMessages: ChatMessage[],
 	): Promise<ConsumedStreamResult> {
 		let text = "";
+		let thinking = "";
 		const toolCalls: ToolCallInfo[] = [];
 		let inputTokens = 0;
 		let outputTokens = 0;
+		let cutOff = false;
+		let usageReported = false;
 
 		for await (const event of parseStreamEvents(stream, this.abortController.signal, {
 			onPartialToolCall: this.options.dispatcher.makePartialToolCallHandler(),
+			isToolCallBlocked: this.options.dispatcher.makeToolCallBlockedCheck(() => this.options.policyCtx),
 		})) {
 			switch (event.type) {
 				case "text_delta":
 					text = event.text;
 					break;
 
-				// tool_call_started / thinking_* are intentionally ignored: headless
-				// runs render no tool-call cards, so the in-progress placeholder
-				// event is a no-op here.
+				case "thinking_delta":
+					// Kept only for the cut-off output-token estimate.
+					thinking = event.text;
+					break;
+
+				// Headless runs render no tool-call cards or thinking indicator.
+				case "tool_call_started":
+				case "thinking_started":
+					break;
+
+				case "tool_call_blocked":
+					// Dispatch reports the block reason (name-only checks run before
+					// argument validation), so queue it like any other call.
+					toolCalls.push({ toolCallId: event.id, toolName: event.name, parameters: {} });
+					cutOff = true;
+					break;
 
 				case "tool_call":
 					toolCalls.push({
@@ -625,6 +653,7 @@ export class RunLoop {
 					break;
 
 				case "message_end":
+					usageReported = true;
 					inputTokens = event.inputTokens;
 					outputTokens = event.outputTokens;
 					break;
@@ -634,7 +663,16 @@ export class RunLoop {
 
 				case "cancelled":
 					return { type: "cancelled", text: event.text, toolCalls: [], inputTokens, outputTokens };
+
+				default:
+					assertUnreachable(event);
 			}
+		}
+
+		// A cut-off stream never reaches the usage report, but was still billed.
+		if (cutOff && !usageReported) {
+			inputTokens = estimateRequestInputTokens(requestMessages, this.options.toolDefinitions);
+			outputTokens = estimateCutOffOutputTokens(text, thinking, toolCalls);
 		}
 
 		return { type: "complete", text, toolCalls, inputTokens, outputTokens };

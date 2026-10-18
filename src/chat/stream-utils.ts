@@ -26,6 +26,10 @@ export type ParsedStreamEvent =
 	// name/id but no parameters yet (those arrive on `tool_call`). Lets the UI
 	// render an in-progress placeholder card during the parse window.
 	| { type: "tool_call_started"; id: string; name: string }
+	// Emitted right after `tool_call_started` when `opts.isToolCallBlocked`
+	// rejects the tool by name. The parser stops here: no parameters follow and
+	// nothing after this call in the stream is consumed.
+	| { type: "tool_call_blocked"; id: string; name: string }
 	| { type: "tool_call"; id: string; name: string; parameters: Record<string, unknown> }
 	| { type: "message_end"; inputTokens: number; outputTokens: number }
 	| { type: "error"; message: string; details?: ProviderErrorDetails; code?: ProviderErrorCode; retryable?: boolean }
@@ -57,6 +61,16 @@ export interface ParseStreamOpts {
 		partialJson: string;
 		reason: PartialToolCallReason;
 	}) => Promise<string | undefined>;
+	/**
+	 * Name-only policy check run the moment a tool call opens (on
+	 * `tool_call_start`, before any argument JSON streams). Returning `true`
+	 * stops the parse with a `tool_call_blocked` event so the caller can close
+	 * the request instead of paying for arguments that could never run.
+	 *
+	 * Only checks decidable from the name belong here (disabled tools, Plan
+	 * mode); parameter-dependent blocks stay at dispatch. Must not throw.
+	 */
+	isToolCallBlocked?: (toolName: string) => boolean;
 }
 
 /**
@@ -142,6 +156,16 @@ function formatTruncationError(
 	return `${cause} (received ${byteLength.toLocaleString()} bytes).${preserved}${recovered}`;
 }
 
+/** Parse a tool call's accumulated JSON, or `undefined` if it is malformed. */
+function tryParseToolCallJson(json: string): Record<string, unknown> | undefined {
+	if (!json.trim()) return {};
+	try {
+		return JSON.parse(json) as Record<string, unknown>;
+	} catch {
+		return undefined;
+	}
+}
+
 // ---------------------------------------------------------------------------
 // parseStreamEvents
 // ---------------------------------------------------------------------------
@@ -153,6 +177,10 @@ function formatTruncationError(
  * - `tool_call_started` is emitted as soon as a tool call opens (name/id only,
  *   no parameters); `tool_call` follows once the full JSON has been received
  *   and parsed (on `tool_call_end`).
+ * - `tool_call_blocked` follows `tool_call_started` when `opts.isToolCallBlocked`
+ *   rejects the tool, and ends the parse. A call still open from earlier in the
+ *   stream (OpenAI/local send every `tool_call_end` at the very end) is flushed
+ *   as a `tool_call` first if its JSON parses, so already-streamed calls survive.
  * - `cancelled` is emitted at most once, when the abort signal fires.
  * - `error` is emitted for provider errors or JSON parse failures.
  *
@@ -236,13 +264,33 @@ export async function* parseStreamEvents(
 					yield { type: "thinking_delta", text: thinkingContent, delta: chunk.text };
 					break;
 
-				case "tool_call_start":
+				case "tool_call_start": {
+					const blocked = opts.isToolCallBlocked?.(chunk.tool_name) ?? false;
+					if (blocked && toolCallOpen) {
+						// A previous call is still open — its arguments are complete
+						// (a new call has started), only its end is pending. Keep it if
+						// it parses; otherwise drop it, it can never be finalized now.
+						const previous = tryParseToolCallJson(toolCallJson);
+						if (previous) {
+							yield { type: "tool_call", id: currentToolCallId, name: currentToolName, parameters: previous };
+						} else {
+							log.warn("Dropped unfinished tool call preceding a blocked call", {
+								toolName: currentToolName,
+								...previewJson(toolCallJson),
+							});
+						}
+					}
 					currentToolCallId = chunk.id;
 					currentToolName = chunk.tool_name;
 					toolCallJson = "";
 					toolCallOpen = true;
 					yield { type: "tool_call_started", id: chunk.id, name: chunk.tool_name };
+					if (blocked) {
+						yield { type: "tool_call_blocked", id: chunk.id, name: chunk.tool_name };
+						return;
+					}
 					break;
+				}
 
 				case "tool_call_delta":
 					toolCallJson += chunk.partial_json;

@@ -59,7 +59,8 @@ import type { CheckpointManager } from "../checkpoints/checkpoint";
 import type { StaleContentTracker } from "./stale-tracker";
 import { logger } from "../utils/logger";
 import { resolveNote } from "../utils/resolve-note";
-import { estimateTokenCount } from "../utils/tokens";
+import { openChildAbort } from "../utils/child-abort";
+import { estimateRequestInputTokens, estimateTokenCount } from "../utils/tokens";
 import type { ChatBlockRegistry } from "../ui/chat-blocks/registry";
 import type { TemplateVariableRegistry } from "../template-vars";
 
@@ -1511,10 +1512,14 @@ export class ChatOrchestrator implements ToolSessionContext {
 				view?.setRespondingState(true);
 				const abortController = session.abortController;
 
+				// Per-request child of the session controller, so a stream stopped at
+				// a blocked tool call closes its request without reading as a Stop.
+				const request = openChildAbort(abortController.signal);
+
 				const provider = this.providerRegistry.getProvider(sel.providerId);
 				const options: SendMessageOptions = {
 					model: sel.modelId,
-					abort_signal: abortController.signal,
+					abort_signal: request.signal,
 					use_extended_context: sel.useExtendedContext,
 					thinking_level: sel.thinkingLevel,
 				};
@@ -1534,12 +1539,19 @@ export class ChatOrchestrator implements ToolSessionContext {
 				// tools only dispatch after a stream completes and partial output
 				// never reaches the conversation. A cut-off attempt's partial text
 				// stays visible (dimmed) until the retry's first chunk replaces it.
-				const result = await this.streamWithRetry(session, {
-					send: () => provider.sendMessage(chatMessages, toolDefinitions, options),
-					abortController,
-					thinkingEnabled,
-					providerId: sel.providerId,
-				});
+				let result: StreamResult & { retries: number };
+				try {
+					result = await this.streamWithRetry(session, {
+						send: () => provider.sendMessage(chatMessages, toolDefinitions, options),
+						abortController,
+						thinkingEnabled,
+						providerId: sel.providerId,
+						estimateInputTokens: () => estimateRequestInputTokens(chatMessages, toolDefinitions),
+					});
+				} finally {
+					// A no-op after a completed stream; stops generation after a cut-off one.
+					request.close();
+				}
 
 				// 8. Handle result
 				if (result.type === "text") {
@@ -1578,8 +1590,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 					// one user message with N tool_result blocks).
 
 					// Track tokens from message_end (now correctly captured
-					// because processStream consumes the full stream).
-					if (result.inputTokens || result.outputTokens) {
+					// because processStream consumes the full stream). A cut-off
+					// stream carries estimates — record it regardless so any text
+					// streamed before the blocked call is persisted.
+					if (result.inputTokens || result.outputTokens || result.cutOff) {
 						const toolTurnMsg = convManager.addMessage({
 							role: "assistant",
 							content: result.text || "",
@@ -2040,6 +2054,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 			abortController: AbortController;
 			thinkingEnabled: boolean;
 			providerId: string;
+			/** Input-token estimate for a stream cut off at a blocked tool call. */
+			estimateInputTokens?: () => number;
 		},
 	): Promise<StreamResult & { retries: number }> {
 		const viewFor = () => this.getViewForSession(session);
@@ -2071,7 +2087,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 						attemptEl,
 						viewFor,
 						opts.thinkingEnabled,
-						{ onPartialToolCall: this.dispatcher.makePartialToolCallHandler() },
+						{
+							onPartialToolCall: this.dispatcher.makePartialToolCallHandler(),
+							isToolCallBlocked: this.dispatcher.makeToolCallBlockedCheck(
+								() => session.buildPolicyContext(this.settings, this.getVaultRootPath() ?? ""),
+							),
+						},
+						opts.estimateInputTokens,
 					);
 				},
 				{

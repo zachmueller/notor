@@ -364,3 +364,85 @@ describe("parseStreamEvents — recovered-path guidance", () => {
 		expect(lastErrorMessage(events)).not.toContain("Recovered target path");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// early stop at a tool call blocked by name
+// ---------------------------------------------------------------------------
+
+describe("parseStreamEvents — isToolCallBlocked", () => {
+	const blockWrites: ParseStreamOpts = { isToolCallBlocked: (name) => name === "write_note" };
+
+	it("stops at a blocked call's start, consuming nothing after it", async () => {
+		const consumed: StreamChunk["type"][] = [];
+		async function* tracked(): AsyncIterable<StreamChunk> {
+			const chunks: StreamChunk[] = [
+				{ type: "text_delta", text: "Writing it now." },
+				{ type: "tool_call_start", id: "t1", tool_name: "write_note" },
+				{ type: "tool_call_delta", id: "t1", partial_json: '{"path":"a.md","content":"' },
+				{ type: "tool_call_end", id: "t1" },
+				{ type: "message_end", input_tokens: 1, output_tokens: 2 },
+			];
+			for (const c of chunks) {
+				consumed.push(c.type);
+				yield c;
+			}
+		}
+		const events: ParsedStreamEvent[] = [];
+		for await (const e of parseStreamEvents(tracked(), new AbortController().signal, blockWrites)) events.push(e);
+
+		expect(events.map((e) => e.type)).toEqual(["text_delta", "tool_call_started", "tool_call_blocked"]);
+		expect(events[2]).toEqual({ type: "tool_call_blocked", id: "t1", name: "write_note" });
+		expect(consumed).toEqual(["text_delta", "tool_call_start"]);
+	});
+
+	it("keeps an earlier finalized call", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "r1", tool_name: "read_note" },
+			{ type: "tool_call_delta", id: "r1", partial_json: '{"path":"a.md"}' },
+			{ type: "tool_call_end", id: "r1" },
+			{ type: "tool_call_start", id: "w1", tool_name: "write_note" },
+			{ type: "tool_call_delta", id: "w1", partial_json: '{"path":"b.md"}' },
+		], undefined, blockWrites);
+
+		const calls = events.filter((e) => e.type === "tool_call");
+		expect(calls).toEqual([{ type: "tool_call", id: "r1", name: "read_note", parameters: { path: "a.md" } }]);
+		expect(events[events.length - 1]?.type).toBe("tool_call_blocked");
+	});
+
+	it("flushes a still-open earlier call whose JSON parses (OpenAI batches ends)", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "r1", tool_name: "read_note" },
+			{ type: "tool_call_delta", id: "r1", partial_json: '{"path":"a.md"}' },
+			{ type: "tool_call_start", id: "w1", tool_name: "write_note" },
+		], undefined, blockWrites);
+
+		expect(events.map((e) => e.type)).toEqual([
+			"tool_call_started", "tool_call", "tool_call_started", "tool_call_blocked",
+		]);
+		expect(events[1]).toEqual({ type: "tool_call", id: "r1", name: "read_note", parameters: { path: "a.md" } });
+	});
+
+	it("drops a still-open earlier call whose JSON is incomplete, without preserving it", async () => {
+		const onPartialToolCall = vi.fn(async () => "/tmp/spill.json");
+		const events = await collect([
+			{ type: "tool_call_start", id: "r1", tool_name: "read_note" },
+			{ type: "tool_call_delta", id: "r1", partial_json: '{"path":"a.' },
+			{ type: "tool_call_start", id: "w1", tool_name: "write_note" },
+		], undefined, { ...blockWrites, onPartialToolCall });
+
+		expect(events.some((e) => e.type === "tool_call")).toBe(false);
+		expect(events.some((e) => e.type === "error")).toBe(false);
+		expect(onPartialToolCall).not.toHaveBeenCalled();
+	});
+
+	it("passes allowed calls through unchanged", async () => {
+		const events = await collect([
+			{ type: "tool_call_start", id: "r1", tool_name: "read_note" },
+			{ type: "tool_call_delta", id: "r1", partial_json: '{"path":"a.md"}' },
+			{ type: "tool_call_end", id: "r1" },
+			{ type: "message_end", input_tokens: 1, output_tokens: 2 },
+		], undefined, blockWrites);
+
+		expect(events.map((e) => e.type)).toEqual(["tool_call_started", "tool_call", "message_end"]);
+	});
+});

@@ -21,7 +21,7 @@ import type { ToolCallInfo } from "./tool-orchestration";
 import type { NotorChatView } from "../ui/chat-view";
 import type { NotorSettings, ModelPricing } from "../settings";
 import { logger } from "../utils/logger";
-import { estimateTokenCount } from "../utils/tokens";
+import { estimateCutOffOutputTokens, estimateTokenCount } from "../utils/tokens";
 
 const log = logger("MessagePipeline");
 
@@ -73,10 +73,17 @@ export function getWireText(
 	return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
-/** Result type for stream processing. */
+/**
+ * Result type for stream processing.
+ *
+ * `tool_calls.cutOff` marks a stream stopped at a blocked tool call (see
+ * `ParseStreamOpts.isToolCallBlocked`): the blocked call is the last entry,
+ * with `{}` parameters, and the token counts are estimates when the provider
+ * never reported usage.
+ */
 export type StreamResult =
 	| { type: "text"; text: string; thinking: string; thinkingDurationMs: number; thinkingTokens: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
-	| { type: "tool_calls"; calls: ToolCallInfo[]; text: string; thinking: string; thinkingDurationMs: number; thinkingTokens: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
+	| { type: "tool_calls"; calls: ToolCallInfo[]; cutOff?: true; text: string; thinking: string; thinkingDurationMs: number; thinkingTokens: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "cancelled"; text: string; thinking: string; thinkingDurationMs: number; thinkingTokens: number; inputTokens: number; outputTokens: number; contentEl?: HTMLElement }
 	| { type: "error"; error: string; details?: ProviderErrorDetails; code?: ProviderErrorCode; retryable?: boolean; text: string; inputTokens: number; outputTokens: number; contentEl?: HTMLElement };
 
@@ -86,6 +93,10 @@ export type StreamResult =
  * The `viewResolver` callback resolves the view dynamically per-chunk so
  * mid-stream navigation causes rendering to become a no-op while data
  * writes continue.
+ *
+ * `estimateInputTokens` supplies the request's input-token estimate for a
+ * stream cut off at a blocked tool call, which never reaches the provider's
+ * usage report.
  */
 export async function processStream(
 	stream: AsyncIterable<StreamChunk>,
@@ -94,6 +105,7 @@ export async function processStream(
 	viewResolver?: () => NotorChatView | undefined,
 	thinkingEnabled = false,
 	parseOpts?: ParseStreamOpts,
+	estimateInputTokens?: () => number,
 ): Promise<StreamResult> {
 	let textContent = "";
 	let thinkingContent = "";
@@ -149,6 +161,8 @@ export async function processStream(
 	if (thinkingEnabled) startThinking();
 
 	const accumulatedToolCalls: ToolCallInfo[] = [];
+	let cutOff = false;
+	let usageReported = false;
 
 	for await (const event of parseStreamEvents(stream, abortController.signal, parseOpts)) {
 		switch (event.type) {
@@ -213,7 +227,22 @@ export async function processStream(
 				});
 				break;
 
+			case "tool_call_blocked":
+				// The parser stopped at a call the policy rejects by name. Queue it
+				// with empty parameters: dispatch runs the same name-only checks
+				// before validating arguments, so it reports the real block reason
+				// through the normal card/hook/tool_result path.
+				stopThinking();
+				accumulatedToolCalls.push({
+					toolCallId: event.id,
+					toolName: event.name,
+					parameters: {},
+				});
+				cutOff = true;
+				break;
+
 			case "message_end":
+				usageReported = true;
 				inputTokens = event.inputTokens;
 				outputTokens = event.outputTokens;
 				log.debug("processStream message_end", {
@@ -249,6 +278,9 @@ export async function processStream(
 					outputTokens,
 					contentEl,
 				};
+
+			default:
+				assertUnreachable(event);
 		}
 	}
 
@@ -256,11 +288,19 @@ export async function processStream(
 	// hidden-thinking-only turns that emit no text and no tool calls).
 	stopThinking();
 
+	// A cut-off stream never reaches the provider's usage report, but the
+	// request was still billed — record estimates instead of zeros.
+	if (cutOff && !usageReported) {
+		inputTokens = estimateInputTokens?.() ?? 0;
+		outputTokens = estimateCutOffOutputTokens(textContent, thinkingContent, accumulatedToolCalls);
+	}
+
 	// If we accumulated tool calls, return them all
 	if (accumulatedToolCalls.length > 0) {
 		return {
 			type: "tool_calls",
 			calls: accumulatedToolCalls,
+			...(cutOff ? { cutOff: true as const } : {}),
 			text: textContent,
 			thinking: thinkingContent,
 			thinkingDurationMs,

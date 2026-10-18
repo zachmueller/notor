@@ -14,7 +14,7 @@ import type { JSONSchema, ToolExecuteOptions, ToolSessionContext } from "../tool
 import type { RunContext, OrchestrationToolContext } from "../run-loop/types";
 import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
 import { McpRegisteredTool } from "../mcp/mcp-tool-adapter";
-import { evaluateToolPolicy, type ToolPolicyContext } from "./tool-policy";
+import { evaluateToolNamePolicy, evaluateToolPolicy, type ToolPolicyContext } from "./tool-policy";
 import { buildVaultReadFilter } from "../tool-config/path-enforcer";
 import type { ParseStreamOpts } from "./stream-utils";
 import { logger } from "../utils/logger";
@@ -253,6 +253,25 @@ export class ToolDispatcher {
 		const spiller = this.spiller;
 		if (!spiller) return undefined;
 		return ({ toolName, partialJson }) => spiller.spillRaw(toolName, partialJson);
+	}
+
+	/**
+	 * Build the `isToolCallBlocked` check for `parseStreamEvents`: true when the
+	 * name-only policy checks (disabled, Plan mode) would reject the tool, so the
+	 * stream can stop before the model generates its arguments. Unknown tools
+	 * pass, keeping dispatch's "Tool not found" message. `getPolicyCtx` is read
+	 * per call so a mid-stream mode switch applies.
+	 */
+	makeToolCallBlockedCheck(getPolicyCtx: () => ToolPolicyContext): NonNullable<ParseStreamOpts["isToolCallBlocked"]> {
+		return (toolName) => {
+			const canonicalName = canonicalToolName(toolName);
+			const tool = this.tools.get(canonicalName);
+			if (!tool) return false;
+			const decision = evaluateToolNamePolicy(canonicalName, tool, getPolicyCtx());
+			if (!decision) return false;
+			log.info("Stopped stream at blocked tool call", { toolName, error: decision.error });
+			return true;
+		};
 	}
 
 	/**

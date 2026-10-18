@@ -65,6 +65,7 @@ function mockDispatcher(
 		isWriteTool: (name: string) => tools.get(name)?.mode === "write",
 		hasExplicitUserReadClassification: () => false,
 		makePartialToolCallHandler: () => undefined,
+		makeToolCallBlockedCheck: () => () => false,
 		dispatch: vi.fn(async (
 			toolName: string,
 			parameters: Record<string, unknown>,

@@ -56,6 +56,7 @@ function mockDispatcher(
 		isWriteTool: (n: string) => tools.get(n)?.mode === "write",
 		hasExplicitUserReadClassification: () => false,
 		makePartialToolCallHandler: () => undefined,
+		makeToolCallBlockedCheck: () => () => false,
 		dispatch,
 	} as unknown as ToolDispatcher;
 }
@@ -519,5 +520,54 @@ describe("RunLoop — transient failure retry", () => {
 		const result = await new RunLoop(buildOptions({ provider, retryPolicy: fastRetry })).run("go");
 		expect(result.stopReason).toBe("error");
 		expect(provider.sendMessage).toHaveBeenCalledTimes(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Stream stopped at a tool call blocked by name
+// ---------------------------------------------------------------------------
+
+describe("RunLoop — stream stopped at a blocked tool call", () => {
+	it("dispatches the blocked call with {}, closes the request, and keeps the run going", async () => {
+		const dispatch = vi.fn(async (toolName: string): Promise<ToolResult> => ({
+			tool_name: toolName, success: false, result: "",
+			error: `${toolName} is not available in Plan mode.`,
+		}));
+		const dispatcher = mockDispatcher(new Map([
+			["write_note", { mode: "write" as const, execute: vi.fn() }],
+		]), dispatch);
+		(dispatcher as unknown as { makeToolCallBlockedCheck: unknown }).makeToolCallBlockedCheck =
+			() => (name: string) => name === "write_note";
+
+		const provider = mockProvider(
+			[
+				{ type: "tool_call_start", id: "w1", tool_name: "write_note" },
+				{ type: "tool_call_delta", id: "w1", partial_json: '{"path":"a.md","content":"long"}' },
+				{ type: "tool_call_end", id: "w1" },
+				{ type: "message_end", input_tokens: 999, output_tokens: 999 },
+			],
+			textStream("Planned instead.", 10, 5),
+		);
+		const runContext = makeRunContext();
+		const loop = new RunLoop(buildOptions({ provider, dispatcher, runContext }));
+		const result = await loop.run("Write a note");
+
+		expect(dispatch).toHaveBeenCalledTimes(1);
+		expect(dispatch.mock.calls[0]?.[0]).toBe("write_note");
+		expect((dispatch.mock.calls[0] as unknown[])[1]).toEqual({});
+		expect(result.stopReason).toBe("completed");
+		expect(result.text).toBe("Planned instead.");
+
+		// The first request's signal was aborted (closes the HTTP stream) without
+		// cancelling the run.
+		const sendMock = provider.sendMessage as unknown as ReturnType<typeof vi.fn>;
+		const firstSignal = (sendMock.mock.calls[0]?.[2] as { abort_signal: AbortSignal }).abort_signal;
+		expect(firstSignal.aborted).toBe(true);
+		expect(runContext.abort.aborted).toBe(false);
+
+		// Cut-off turn recorded estimates, not the never-reached 999s.
+		expect(result.tokenUsage.input).toBeGreaterThan(10);
+		expect(result.tokenUsage.output).toBeGreaterThan(5);
+		expect(result.tokenUsage.output).toBeLessThan(999);
 	});
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { evaluateToolPolicy, ToolPolicyContext } from "./tool-policy";
+import { evaluateToolNamePolicy, evaluateToolPolicy, ToolPolicyContext } from "./tool-policy";
 import type { DispatchableTool } from "./dispatcher";
 import type { ResolvedToolConfigEntry } from "../tool-config/types";
 import { TOOL_PATH_PARAMS } from "../tool-config/path-enforcer";
@@ -699,6 +699,8 @@ describe("evaluateToolPolicy — validation precedence", () => {
 		expect(result.error).toMatch(/disabled/);
 	});
 
+	// Load-bearing for the early stream stop: a call cut off at its start
+	// dispatches with `{}` and must still report the real block reason.
 	it("a Plan-mode write reports Plan mode, not the missing parameter", () => {
 		const result = evaluateToolPolicy("write_note", {}, WRITE_NOTE, makeToolCtx("write_note", {}, { mode: "plan" }));
 		expect(result.error).toMatch(/not available in Plan mode/);
@@ -888,5 +890,48 @@ describe("evaluateToolPolicy — approvalOverride", () => {
 		const internal = { name: "update_tasks", mode: "write", internal: true } as any;
 		const ctx = makeToolCtx("update_tasks", {}, { approvalOverride: "prompt" });
 		expect(evaluateToolPolicy("update_tasks", {}, internal, ctx).autoApproved).toBe(true);
+	});
+});
+
+describe("evaluateToolNamePolicy — name-only checks", () => {
+	const WRITE_NOTE = { name: "write_note", mode: "write" } as unknown as DispatchableTool;
+
+	it("blocks a disabled tool with the same error as evaluateToolPolicy", () => {
+		const ctx = makeToolCtx("write_note", { enabled: false });
+		const early = evaluateToolNamePolicy("write_note", WRITE_NOTE, ctx);
+		expect(early?.allowed).toBe(false);
+		expect(early).toEqual(evaluateToolPolicy("write_note", {}, WRITE_NOTE, ctx));
+	});
+
+	it("blocks a Plan-mode write with the exact Plan-mode message", () => {
+		const early = evaluateToolNamePolicy("write_note", WRITE_NOTE, makeToolCtx("write_note", {}, { mode: "plan" }));
+		expect(early?.error).toBe(
+			"write_note is not available in Plan mode. Switch to Act mode to create or modify notes.",
+		);
+	});
+
+	it("uses the MCP-specific Plan-mode message for MCP tools", () => {
+		const tool = { name: "server__do_write", mode: "write" } as unknown as DispatchableTool;
+		const early = evaluateToolNamePolicy("server__do_write", tool, makeToolCtx("server__do_write", {}, { mode: "plan" }));
+		expect(early?.error).toBe(
+			"Tool 'server__do_write' is write-only and blocked in Plan mode. Switch to Act mode to use this tool.",
+		);
+	});
+
+	it("returns null for internal tools, Act-mode writes, and Plan-mode reads", () => {
+		const internal = { name: "update_tasks", mode: "write", internal: true } as unknown as DispatchableTool;
+		const read = { name: "read_note", mode: "read" } as unknown as DispatchableTool;
+		expect(evaluateToolNamePolicy("update_tasks", internal, makeToolCtx("update_tasks", { enabled: false }, { mode: "plan" }))).toBeNull();
+		expect(evaluateToolNamePolicy("write_note", WRITE_NOTE, makeToolCtx("write_note"))).toBeNull();
+		expect(evaluateToolNamePolicy("read_note", read, makeToolCtx("read_note", {}, { mode: "plan" }))).toBeNull();
+	});
+
+	it("ignores parameter-dependent checks (no required-param block)", () => {
+		const tool = {
+			name: "write_note",
+			mode: "write",
+			input_schema: { type: "object", required: ["path", "content"] },
+		} as unknown as DispatchableTool;
+		expect(evaluateToolNamePolicy("write_note", tool, makeToolCtx("write_note"))).toBeNull();
 	});
 });

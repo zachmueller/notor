@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { estimateContentTokens } from "./tokens";
+import { estimateContentTokens, estimateCutOffOutputTokens, estimateRequestInputTokens } from "./tokens";
 import type { ContentBlock } from "../media/types";
 
 describe("estimateContentTokens", () => {
@@ -125,5 +125,29 @@ describe("estimateContentTokens", () => {
 			},
 		];
 		expect(estimateContentTokens(blocks)).toBe(0);
+	});
+});
+
+describe("cut-off stream estimates", () => {
+	it("estimateRequestInputTokens counts content, tool calls, tool results and definitions", () => {
+		const base = estimateRequestInputTokens([{ role: "user", content: "x".repeat(40) }]);
+		expect(base).toBe(10);
+		const full = estimateRequestInputTokens(
+			[
+				{ role: "user", content: "x".repeat(40) },
+				{ role: "tool_call", content: "", tool_calls: [{ id: "1", tool_name: "read_note", parameters: { path: "a.md" } }] },
+				{ role: "tool_result", content: "", tool_results: [{ tool_call_id: "1", tool_name: "read_note", result: "y".repeat(400), is_error: false }] },
+			],
+			[{ name: "read_note", description: "Read a note", input_schema: { type: "object" } }],
+		);
+		expect(full).toBeGreaterThan(base + 100);
+	});
+
+	it("estimateCutOffOutputTokens counts text, thinking and opened calls", () => {
+		expect(estimateCutOffOutputTokens("", "", [])).toBe(0);
+		const est = estimateCutOffOutputTokens("x".repeat(40), "y".repeat(40), [
+			{ toolName: "write_note", parameters: {} },
+		]);
+		expect(est).toBeGreaterThan(20);
 	});
 });

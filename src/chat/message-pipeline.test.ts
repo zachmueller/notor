@@ -704,3 +704,74 @@ describe("processStream — thinking indicator", () => {
 		expect(view.stopThinkingIndicator).not.toHaveBeenCalled();
 	});
 });
+
+describe("processStream — stream stopped at a blocked tool call", () => {
+	const blockWrites = { isToolCallBlocked: (name: string) => name === "write_note" };
+
+	it("returns the blocked call with {} parameters, cutOff, and estimated tokens", async () => {
+		const { view, contentEl } = makeFakeView();
+		const result = await processStream(
+			streamOf([
+				{ type: "text_delta", text: "Let me save that." },
+				{ type: "tool_call_start", id: "w1", tool_name: "write_note" },
+				{ type: "tool_call_delta", id: "w1", partial_json: '{"path":"a.md"}' },
+				{ type: "tool_call_end", id: "w1" },
+				{ type: "message_end", input_tokens: 999, output_tokens: 999 },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+			false,
+			blockWrites,
+			() => 1234,
+		);
+
+		expect(view.renderStreamingToolCall).toHaveBeenCalledWith("w1", "write_note");
+		expect(result.type).toBe("tool_calls");
+		if (result.type !== "tool_calls") return;
+		expect(result.cutOff).toBe(true);
+		expect(result.calls).toEqual([{ toolCallId: "w1", toolName: "write_note", parameters: {} }]);
+		expect(result.text).toBe("Let me save that.");
+		// The provider's usage report was never reached — estimates, not zeros.
+		expect(result.inputTokens).toBe(1234);
+		expect(result.outputTokens).toBeGreaterThan(0);
+		expect(result.outputTokens).not.toBe(999);
+	});
+
+	it("stops a running thinking indicator", async () => {
+		const { view, contentEl } = makeFakeView();
+		await processStream(
+			streamOf([
+				{ type: "thinking_start" },
+				{ type: "tool_call_start", id: "w1", tool_name: "write_note" },
+			]),
+			new AbortController(),
+			contentEl as never,
+			() => view as never,
+			true,
+			blockWrites,
+		);
+		expect(view.stopThinkingIndicator).toHaveBeenCalled();
+	});
+
+	it("does not mark an unblocked tool turn as cut off", async () => {
+		const result = await processStream(
+			streamOf([
+				{ type: "tool_call_start", id: "r1", tool_name: "read_note" },
+				{ type: "tool_call_end", id: "r1" },
+				{ type: "message_end", input_tokens: 5, output_tokens: 6 },
+			]),
+			new AbortController(),
+			undefined,
+			undefined,
+			false,
+			blockWrites,
+			() => 1234,
+		);
+		expect(result.type).toBe("tool_calls");
+		if (result.type !== "tool_calls") return;
+		expect(result.cutOff).toBeUndefined();
+		expect(result.inputTokens).toBe(5);
+		expect(result.outputTokens).toBe(6);
+	});
+});
