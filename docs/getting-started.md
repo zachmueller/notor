@@ -43,8 +43,22 @@ npm run dev
 
 ## Configure a provider
 
+### Guided setup
+
+Until a provider or model preset is configured, **Settings → Notor** shows a **Get started with Notor** banner at the top. Select **Start guided setup** to open a step-by-step walkthrough. It covers:
+
+- Connecting one or more providers, with a connection test for each
+- Picking a model for your default preset
+- Choosing the default Plan/Act mode and whether `execute_command` is enabled
+- Setting the Notor directory and open/focus-notes-on-access behavior
+- Finding where to add MCP servers
+
+Every change saves immediately, so you can close the guide at any time and finish in the regular settings. The banner disappears on its own once setup is complete. It comes back if you later remove every configured provider.
+
+### Manual setup
+
 1. Open **Settings → Notor**
-2. Choose a provider (defaults to local OpenAI-compatible at `http://localhost:11434/v1`)
+2. Choose a provider. The seeded local OpenAI-compatible provider has no endpoint until you enter one (e.g. `http://localhost:11434/v1` for Ollama).
 3. Enter credentials if required (stored securely via Obsidian's secrets manager)
 4. Configure model presets in **Settings → Notor → Models** — assign a provider and model to at least one preset (e.g., `medium`). Optionally configure [extended thinking](model-presets.md#extended-thinking) levels for Claude or OpenAI o-series models. See [model-presets.md](model-presets.md) for the full reference.
 5. Open the Notor chat panel via the command palette (**Notor: Open chat panel**) — your default preset is selected automatically. Start a conversation.
