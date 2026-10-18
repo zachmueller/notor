@@ -13,7 +13,7 @@
  */
 
 import type { MetadataCache, TFile, TFolder, Vault } from "obsidian";
-import { TAbstractFile } from "obsidian";
+import { parseYaml, TAbstractFile } from "obsidian";
 import type { Persona, PersonaPromptMode } from "../types";
 import { BUILTIN_PERSONA_PROFILES, canonicalPersonaName } from "./builtin-personas";
 import { logger } from "../utils/logger";
@@ -149,26 +149,30 @@ async function parsePersona(
 
 	// Get frontmatter from metadata cache
 	const fileCache = metadataCache.getFileCache(promptFile);
-	const frontmatter = fileCache?.frontmatter;
+	let frontmatter: Record<string, unknown> | undefined = fileCache?.frontmatter;
 
-	// If metadata cache has no entry but we could read the file, the file
-	// may have malformed YAML. Check by trying to strip frontmatter manually.
-	// If the raw content starts with `---` but the cache has no frontmatter,
-	// this likely indicates malformed YAML.
-	if (!frontmatter && rawContent.trimStart().startsWith("---")) {
-		// Check if the frontmatter block is properly closed
-		const afterOpener = rawContent.indexOf("\n", rawContent.indexOf("---"));
-		if (afterOpener !== -1) {
-			const closerIdx = rawContent.indexOf("\n---", afterOpener);
-			if (closerIdx !== -1) {
-				// Frontmatter block exists but cache returned nothing — likely malformed YAML
-				log.warn(
-					"Persona has malformed YAML frontmatter, excluding from discovery",
-					{ name, path: promptFile.path }
-				);
-				return null;
-			}
+	const frontmatterBlock = frontmatter ? null : extractFrontmatterBlock(rawContent);
+	if (frontmatterBlock !== null) {
+		// No cache entry at all means the file isn't indexed yet — plugin load,
+		// or a file changed outside Obsidian. Parse it directly rather than
+		// mistaking it for malformed YAML (which dropped the persona and made
+		// the startup restore clear `active_persona`).
+		let parsed: unknown;
+		try {
+			parsed = fileCache ? undefined : parseYaml(frontmatterBlock);
+		} catch {
+			parsed = undefined;
 		}
+		const isRecord = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+		if (!isRecord) {
+			// Indexed with no frontmatter, or unparseable — malformed YAML
+			log.warn(
+				"Persona has malformed YAML frontmatter, excluding from discovery",
+				{ name, path: promptFile.path }
+			);
+			return null;
+		}
+		frontmatter = parsed as Record<string, unknown>;
 	}
 
 	// Parse frontmatter properties
@@ -243,6 +247,23 @@ function parseStringOrNull(value: unknown): string | null {
 // ---------------------------------------------------------------------------
 // Content helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Return the YAML text of a closed frontmatter block, or null when the
+ * content has none.
+ */
+function extractFrontmatterBlock(content: string): string | null {
+	const trimmed = content.trimStart();
+	if (!trimmed.startsWith("---")) return null;
+
+	const afterOpener = trimmed.indexOf("\n", 3);
+	if (afterOpener === -1) return null;
+
+	const closerIdx = trimmed.indexOf("\n---", afterOpener);
+	if (closerIdx === -1) return null;
+
+	return trimmed.substring(afterOpener + 1, closerIdx);
+}
 
 /**
  * Strip YAML frontmatter from Markdown content, returning only the body.
