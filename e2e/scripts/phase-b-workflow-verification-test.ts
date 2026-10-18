@@ -405,8 +405,9 @@ async function testBackgroundWorkflowInfrastructure(ctx: TestContext): Promise<v
 		return {
 			hasExecuteWorkflow: typeof orch.executeWorkflow === "function",
 			hasExecuteBackgroundWorkflow: typeof orch.executeBackgroundWorkflow === "function",
-			// _backgroundResponseLoop is private but should exist on the facade (B5 not extracted)
-			hasBgResponseLoop: typeof (orch as any)._backgroundResponseLoop === "function",
+			// _backgroundResponseLoop is private; it lives on the orchestrator's
+			// WorkflowExecutor since the B5 extraction.
+			hasBgResponseLoop: typeof (orch as any).workflowExecutor?._backgroundResponseLoop === "function",
 			// responseLoop stays on facade (per architectural decision)
 			hasResponseLoop: typeof (orch as any).responseLoop === "function",
 		};

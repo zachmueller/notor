@@ -691,8 +691,15 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 			}
 
 			if (abortSignal) {
-				if (abortSignal.aborted) { resolve("rejected"); return; }
-				abortSignal.addEventListener("abort", () => resolve("rejected"), { once: true });
+				// The signal also fires when the approval race settles another way
+				// (an on_approval_required hook or the approval timeout), so drop the
+				// now-stale prompt from this call's card.
+				const dismiss = () => {
+					toolCallEl?.querySelectorAll(".notor-approval-prompt").forEach((el) => el.remove());
+					resolve("rejected");
+				};
+				if (abortSignal.aborted) { dismiss(); return; }
+				abortSignal.addEventListener("abort", dismiss, { once: true });
 			}
 		});
 
