@@ -832,3 +832,61 @@ describe("evaluateToolPolicy — auto-accept writes (plan approval)", () => {
 		expect(r.autoApproveReason).toBeUndefined();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Per-run approval override (external API): "auto" folds in at step 4 like
+// auto-accept writes, so command patterns and path "never" verdicts still
+// prompt; "prompt" asks for everything. Blocks are never lifted.
+// ---------------------------------------------------------------------------
+describe("evaluateToolPolicy — approvalOverride", () => {
+	const write = (name: string): DispatchableTool => ({ name, mode: "write" }) as any;
+
+	beforeAll(() => {
+		TOOL_PATH_PARAMS["write_note"] = [
+			{ paramName: "path", namespace: "vault", resolveAs: "note", access: "write" as const },
+		];
+	});
+	afterAll(() => {
+		delete TOOL_PATH_PARAMS["write_note"];
+	});
+
+	it("auto approves any allowed tool, including MCP and user tools, with a reason", () => {
+		for (const name of ["write_note", "server__write_note", "my_extension_writer"]) {
+			const ctx = makeToolCtx(name, {}, { approvalOverride: "auto" });
+			const r = evaluateToolPolicy(name, { path: "a.md" }, write(name), ctx);
+			expect(r).toMatchObject({ allowed: true, autoApproved: true, autoApproveReason: "run auto-approve" });
+		}
+	});
+
+	it("auto still prompts for never_auto_approve_paths and blocked command patterns", () => {
+		const never = makeToolCtx("write_note", { never_auto_approve_paths: ["private/"] }, { approvalOverride: "auto" });
+		expect(evaluateToolPolicy("write_note", { path: "private/x.md" }, write("write_note"), never).autoApproved).toBe(false);
+
+		const cmd = makeToolCtx("execute_command", { blocked_command_patterns: ["rm *"] }, { approvalOverride: "auto" });
+		expect(evaluateToolPolicy("execute_command", { command: "rm -rf x" }, write("execute_command"), cmd).autoApproved).toBe(false);
+	});
+
+	it("auto never lifts Plan mode, disabled, or path blocks", () => {
+		const plan = makeToolCtx("write_note", {}, { approvalOverride: "auto", mode: "plan" });
+		expect(evaluateToolPolicy("write_note", { path: "a.md" }, write("write_note"), plan).allowed).toBe(false);
+		const disabled = makeToolCtx("write_note", { enabled: false }, { approvalOverride: "auto" });
+		expect(evaluateToolPolicy("write_note", { path: "a.md" }, write("write_note"), disabled).allowed).toBe(false);
+		const scoped = makeToolCtx("write_note", { allowed_paths: ["ok/"] }, { approvalOverride: "auto" });
+		expect(evaluateToolPolicy("write_note", { path: "secret/x.md" }, write("write_note"), scoped).allowed).toBe(false);
+	});
+
+	it("prompt asks even when auto_approve or an allow path would approve", () => {
+		const configured = makeToolCtx("write_note", { auto_approve: true }, { approvalOverride: "prompt" });
+		expect(evaluateToolPolicy("write_note", { path: "a.md" }, write("write_note"), configured).autoApproved).toBe(false);
+		const allowPath = makeToolCtx("write_note", { auto_approve_paths: ["ai/"] }, { approvalOverride: "prompt" });
+		const r = evaluateToolPolicy("write_note", { path: "ai/x.md" }, write("write_note"), allowPath);
+		expect(r.autoApproved).toBe(false);
+		expect(r.autoApproveReason).toBeUndefined();
+	});
+
+	it("prompt leaves internal tools auto-approved", () => {
+		const internal = { name: "update_tasks", mode: "write", internal: true } as any;
+		const ctx = makeToolCtx("update_tasks", {}, { approvalOverride: "prompt" });
+		expect(evaluateToolPolicy("update_tasks", {}, internal, ctx).autoApproved).toBe(true);
+	});
+});

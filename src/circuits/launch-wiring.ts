@@ -319,6 +319,7 @@ export function makeRuntimeFactory(
 						? [orchestrationContext.parentScratchpadPath]
 						: []),
 				],
+				approvalOverride: policy?.approvalOverride,
 			};
 
 			void step;
@@ -438,6 +439,7 @@ export function makeCodeStepRuntimeFactory(
 						? [orchestrationContext.parentScratchpadPath]
 						: []),
 				],
+				approvalOverride: policy?.approvalOverride,
 			};
 
 			return {

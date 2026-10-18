@@ -11,7 +11,7 @@
 import type { ConversationManager } from "./conversation";
 import type { Persona, WorkflowAssemblyResult } from "../types";
 import type { EffectiveToolConfig, ParsedToolConfig } from "../tool-config/types";
-import type { ToolPolicyContext } from "./tool-policy";
+import type { ApprovalOverride, ToolPolicyContext } from "./tool-policy";
 import type { ApprovalCallback, InteractionCallback } from "./dispatcher";
 import type { InteractionRequest, InteractionResponse } from "../ui/interaction-ui";
 import type { NotorSettings } from "../settings";
@@ -57,6 +57,8 @@ export interface ConversationSessionOptions {
 	workflowAssembly?: WorkflowAssemblyResult | null;
 	approvalCallback: ApprovalCallback;
 	interactionCallback?: InteractionCallback;
+	/** Per-run approval override from a programmatic caller (the external API). */
+	approvalOverride?: ApprovalOverride;
 	initialConfig: EffectiveToolConfig;
 	initialParsedConfigs: ParsedToolConfig[];
 }
@@ -107,6 +109,9 @@ export class ConversationSession {
 	 */
 	autoAcceptWrites = false;
 
+	/** Pinned for the session's response loop; see {@link ApprovalOverride}. */
+	readonly approvalOverride?: ApprovalOverride;
+
 	private _status: SessionStatus = "running";
 	onStatusChange?: (session: ConversationSession) => void;
 
@@ -127,6 +132,7 @@ export class ConversationSession {
 		this.workflowAssembly = opts.workflowAssembly ?? null;
 		this.approvalCallback = opts.approvalCallback;
 		this.interactionCallback = opts.interactionCallback;
+		this.approvalOverride = opts.approvalOverride;
 		this.effectiveConfig = opts.initialConfig;
 		this.parsedConfigs = opts.initialParsedConfigs;
 	}
@@ -201,6 +207,7 @@ export class ConversationSession {
 			vaultRootPath,
 			resolveVaultPath,
 			autoAcceptWrites: this.autoAcceptWrites,
+			approvalOverride: this.approvalOverride,
 		};
 	}
 }

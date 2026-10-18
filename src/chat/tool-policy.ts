@@ -48,7 +48,19 @@ export interface ToolPolicyContext {
 	 * patterns, path "never" rules and path enforcement still apply.
 	 */
 	autoAcceptWrites?: boolean;
+	/** A caller's per-run approval override (see {@link ApprovalOverride}). */
+	approvalOverride?: ApprovalOverride;
 }
+
+/**
+ * A per-run approval override set by a programmatic caller (the external API):
+ * - `"auto"` approves every allowed call, folded in where `autoAcceptWrites` is,
+ *   so blocked command patterns and path "never" rules still prompt;
+ * - `"prompt"` asks for every call, even ones that would auto-approve.
+ *
+ * Neither ever lifts a block (`allowed: false`).
+ */
+export type ApprovalOverride = "auto" | "prompt";
 
 /**
  * Result of a tool policy evaluation.
@@ -214,7 +226,8 @@ export function evaluateToolPolicy(
 		&& tool.mode === "write"
 		&& !isMcpTool(toolName)
 		&& AUTO_ACCEPT_WRITE_TOOLS.has(toolName);
-	const isAutoApproved = (toolEntry?.auto_approve ?? false) || autoAccepted;
+	const overrideAuto = ctx.approvalOverride === "auto";
+	const isAutoApproved = (toolEntry?.auto_approve ?? false) || autoAccepted || overrideAuto;
 
 	// 4b. Command pattern override for execute_command
 	let finalAutoApproved = isAutoApproved;
@@ -236,9 +249,11 @@ export function evaluateToolPolicy(
 		}
 	}
 
-	let autoApproveReason: string | undefined = autoAccepted && !(toolEntry?.auto_approve ?? false)
-		? "plan approved with auto-accept"
-		: undefined;
+	let autoApproveReason: string | undefined = (toolEntry?.auto_approve ?? false)
+		? undefined
+		: autoAccepted
+			? "plan approved with auto-accept"
+			: overrideAuto ? "run auto-approve" : undefined;
 
 	// 4c. Path-based auto-approve override (any tool with registered path params).
 	// Soft gate: flips whether the human sees a prompt, never whether the call is
@@ -258,6 +273,9 @@ export function evaluateToolPolicy(
 			autoApproveReason = `matched ${match.prefix}`;
 		}
 	}
+
+	// 4d. A "prompt" override asks for every call, past any auto-approve above.
+	if (ctx.approvalOverride === "prompt") finalAutoApproved = false;
 
 	// 5. Path enforcement — check allowed_paths/blocked_paths (FR-84)
 	if (toolEntry) {

@@ -9,6 +9,7 @@
  */
 
 import type { ApprovalCallback, ApprovalHookDispatcher } from "../chat/dispatcher";
+import type { ApprovalOverride } from "../chat/tool-policy";
 import type { ConversationMode } from "../types";
 import type { CircuitHost } from "./host";
 
@@ -28,6 +29,8 @@ export interface CircuitRunPolicy {
 	 */
 	approvalCallback?: ApprovalCallback;
 	approvalHook?: ApprovalHookDispatcher;
+	/** Set by programmatic launches (the external API); folded into every step's policy context. */
+	approvalOverride?: ApprovalOverride;
 }
 
 /**
