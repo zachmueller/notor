@@ -348,6 +348,7 @@ export class ChatOrchestrator implements ToolSessionContext {
 			getWorkflowHookOverrideManager: () => this.workflowHookOverrideManager,
 			getVaultRuleManager: () => this.vaultRuleManager,
 			getPanelApprovalCallback: () => this.panelApprovalCallback,
+			getBackgroundApprovalCallback: (runLabel) => this.backgroundApprovalFactory?.(runLabel),
 			getPanelInteractionCallback: () => this.panelInteractionCallback,
 			getConversationManager: () => this.conversationManager,
 			getActiveProviderId: () => this.activeProviderId,
@@ -409,6 +410,18 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 */
 	setApprovalCallback(callback: ApprovalCallback): void {
 		this.panelApprovalCallback = callback;
+	}
+
+	/**
+	 * Builds the approval channel for runs this orchestrator drives with no
+	 * panel to prompt in: background/headless workflows, and every run on a
+	 * headless orchestrator. Without it those calls would auto-approve.
+	 */
+	private backgroundApprovalFactory?: (runLabel: string) => ApprovalCallback;
+
+	/** Set the panel-free approval factory (wired by main.ts). */
+	setBackgroundApprovalFactory(factory: (runLabel: string) => ApprovalCallback): void {
+		this.backgroundApprovalFactory = factory;
 	}
 
 	/**
@@ -1212,8 +1225,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 			await this.configResolver.resolveEffectiveConfig(undefined, workflowAssembly, pinnedPersona);
 
 		// Capture the approval callback from this orchestrator's panel.
-		// This binds approval prompts to the correct panel's view.
+		// This binds approval prompts to the correct panel's view. A headless
+		// orchestrator has no panel, so it prompts through the panel-free channel.
 		const approvalCallback: ApprovalCallback = this.panelApprovalCallback
+			?? this.backgroundApprovalFactory?.(`Conversation '${snapshotConv.title ?? snapshotConv.id}'`)
 			?? (async () => "approved" as const);
 
 		// Capture the interaction callback (follow-up questions) from this panel.

@@ -137,6 +137,12 @@ export interface WorkflowExecutorDeps {
 	getWorkflowHookOverrideManager(): WorkflowHookOverrideManager | undefined;
 	getVaultRuleManager(): VaultRuleManager | undefined;
 	getPanelApprovalCallback(): ApprovalCallback | undefined;
+	/**
+	 * Panel-free approval for runs not shown in a panel (background/headless
+	 * workflows). Optional so narrow test deps keep compiling; absent ⇒ the run
+	 * auto-approves.
+	 */
+	getBackgroundApprovalCallback?(runLabel: string): ApprovalCallback | undefined;
 	getPanelInteractionCallback(): InteractionCallback | undefined;
 	getConversationManager(): ConversationManager;
 	getActiveProviderId(): string;
@@ -457,6 +463,7 @@ export class WorkflowExecutor {
 			await this.deps.configResolver.resolveEffectiveConfig(undefined, assemblyResult, pinnedPersona);
 
 		const approvalCallback: ApprovalCallback = this.deps.getPanelApprovalCallback()
+			?? this.deps.getBackgroundApprovalCallback?.(`Workflow '${workflow.display_name}'`)
 			?? (async () => "approved" as const);
 
 		// A manual workflow runs through the real (UI-bound) response loop, so it
@@ -972,8 +979,10 @@ export class WorkflowExecutor {
 		const { effective: initialConfig, parsedConfigs: initialParsedConfigs } =
 			await this.deps.configResolver.resolveEffectiveConfig(undefined, workflowAssembly, pinnedPersona);
 
-		// Capture approval callback for session-scoped dispatch
-		const approvalCallback = this.deps.getPanelApprovalCallback()
+		// Capture approval callback for session-scoped dispatch. The background
+		// conversation is never rendered in a panel, so the panel's callback (which
+		// looks up a tool-call card there) can't serve it — prompt panel-free.
+		const approvalCallback: ApprovalCallback = this.deps.getBackgroundApprovalCallback?.(`Workflow '${execution.workflow_name}'`)
 			?? (async () => "approved" as const);
 
 		const bgConv = bgConvManager.getActiveConversation()!;

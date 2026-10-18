@@ -1280,6 +1280,19 @@
    Approval UI
    ========================================================================== */
 
+/* Panel-free approval modal (headless circuits / background workflows / API) */
+.notor-tool-approval-params {
+	max-height: 240px;
+	overflow: auto;
+	padding: 8px;
+	font-size: var(--font-ui-smaller);
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	white-space: pre-wrap;
+	word-break: break-word;
+	user-select: text;
+}
+
 .notor-approval-prompt {
 	display: flex;
 	align-items: center;

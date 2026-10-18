@@ -29,6 +29,7 @@ import type { FlowRunEntry } from "../workflows/workflow-activity-tracker";
 import { VaultSessionFs, VaultSessionLogWriter, buildExecutor, listOpenTaskKeys } from "./launch-wiring";
 import { chainToSuccessor, resolveSuccessorInputs } from "./chaining";
 import { circuitDataRootOf } from "./data-root";
+import { resolveRunPolicy, type CircuitRunPolicy } from "./run-policy";
 
 const log = logger("CircuitLaunch");
 
@@ -181,6 +182,12 @@ export async function launchCircuit(
 		 * cancels on a pause (no input channel).
 		 */
 		requestUserInput?: RequestUserInput;
+		/**
+		 * The run's mode + approval channel. Omitted ⇒ inherited from the parent
+		 * session (children / chaining) or built from the host's defaults; an
+		 * explicit `mode` still overrides it.
+		 */
+		policy?: CircuitRunPolicy;
 	},
 ): Promise<CircuitRunResult> {
 	const sessionId = options?.sessionId ?? newSessionId();
@@ -249,7 +256,13 @@ export async function launchCircuit(
 	// wins, else the global `circuits_open_notes_in_editor` setting.
 	const openNotes = flow.openNotesInEditor ?? host.settings.circuits_open_notes_in_editor;
 	// Fresh launch: no prior committed side-effects (INT-010 once() skip set).
-	const executor = buildExecutor(host, sessionLog, new Set<string>(), openNotes);
+	const registry = host.getCircuitRunRegistry();
+	const policy = resolveRunPolicy(host, flow.name, {
+		policy: options?.policy,
+		parentSessionId,
+		mode: options?.mode,
+	});
+	const executor = buildExecutor(host, sessionLog, new Set<string>(), openNotes, policy);
 
 	const abortController = new AbortController();
 	const abortSignal = options?.abortSignal ?? abortController.signal;
@@ -258,7 +271,8 @@ export async function launchCircuit(
 	// guard, and onunload teardown can find and cancel it. A child / chaining run
 	// that inherits a parent abort signal (`options.abortSignal`) is cancelled
 	// transitively via the cascade, so only register the controller we own here.
-	const registry = host.getCircuitRunRegistry();
+	// The policy is recorded for every run so children and successors inherit it.
+	registry.setPolicy(sessionId, policy);
 	if (!options?.abortSignal) {
 		registry.register({
 			sessionId,
@@ -293,7 +307,7 @@ export async function launchCircuit(
 			childEdges: [],
 		}),
 		makeConversationId: () => crypto.randomUUID(),
-		mode: options?.mode ?? host.settings.mode,
+		mode: policy.mode,
 		sessionId,
 		abortSignal,
 		origin,
@@ -337,6 +351,7 @@ export async function launchCircuit(
 			.updateStatus(sessionId, "interrupted")
 			.catch(() => undefined);
 		reflectFlowRunStatus(host, sessionId, flow.name, "interrupted", flowRunStartedAt);
+		registry.clearPolicy(sessionId);
 		throw e;
 	} finally {
 		// F1 Fix 1: release the lifecycle handle once the run settles (success,
@@ -344,6 +359,25 @@ export async function launchCircuit(
 		registry.unregister(sessionId);
 	}
 
+	try {
+		await finalizeAndChain(host, sessionManager, sessionId, flow, result, flowRunStartedAt, requestUserInput);
+	} finally {
+		// Held until the chain settles: a successor inherits this run's policy.
+		registry.clearPolicy(sessionId);
+	}
+	return result;
+}
+
+/** Finalize a settled fresh launch, then hand off to its successor if it chains. */
+async function finalizeAndChain(
+	host: CircuitHost,
+	sessionManager: CircuitSessionManager,
+	sessionId: string,
+	flow: Circuit,
+	result: CircuitRunResult,
+	flowRunStartedAt: string,
+	requestUserInput: RequestUserInput | undefined,
+): Promise<void> {
 	// INT-001 + Part B: reflect the terminal status into session.json (the recovery
 	// entry point) and write the opt-in failure report — the shared finalize
 	// invariant both a fresh launch and a recovery resume apply identically.
@@ -367,8 +401,6 @@ export async function launchCircuit(
 			log.error("Chaining handoff failed", { flow: flow.name, error: String(e) }),
 		);
 	}
-
-	return result;
 }
 
 /**

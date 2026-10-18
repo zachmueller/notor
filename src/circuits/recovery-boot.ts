@@ -23,6 +23,7 @@ import { SessionRecovery, type RecoveryFs, type RecoverableSession } from "./ses
 import { isSessionLogMtimeLive } from "./recovery-liveness";
 import type { Circuit } from "./types";
 import { VaultSessionFs, VaultSessionLogWriter, buildExecutor, listOpenTaskKeys } from "./launch-wiring";
+import { resolveRunPolicy } from "./run-policy";
 import { finalizeRun, reflectFlowRunStatus, type RequestUserInput } from "./run-lifecycle";
 import { circuitDataRootOf } from "./data-root";
 
@@ -284,12 +285,16 @@ export async function resumeRecoveredSession(
 	const openNotes = flow.openNotesInEditor ?? host.settings.circuits_open_notes_in_editor;
 	// Resume: seed the once() skip set from the recovered log so an
 	// already-committed external effect is not re-run (FR-125 / INT-010).
-	const executor = buildExecutor(host, sessionLog, new Set(recovered.committedKeys), openNotes);
+	// A resumed run re-resolves its policy: a child inherits a live parent's, a
+	// root gets the host defaults (a pre-crash API mode/approval is not persisted).
+	const policy = resolveRunPolicy(host, flow.name, { parentSessionId: recovered.meta.parent_session_id });
+	const executor = buildExecutor(host, sessionLog, new Set(recovered.committedKeys), openNotes, policy);
 	// F1 Fix 1: a child resume cascades from the parent's abort signal; a ROOT
 	// resume owns its controller and registers it so the Stop UI / onunload can
 	// cancel it (children are cancelled transitively via the cascade — register
 	// root sessions only, i.e. when no `inheritedContext` was passed).
 	const registry = host.getCircuitRunRegistry();
+	registry.setPolicy(recovered.sessionId, policy);
 	const rootController = inheritedContext?.abort ? null : new AbortController();
 	const abortSignal = inheritedContext?.abort ?? rootController!.signal;
 	if (rootController) {
@@ -316,7 +321,7 @@ export async function resumeRecoveredSession(
 			childEdges: [],
 		}),
 		makeConversationId: () => crypto.randomUUID(),
-		mode: host.settings.mode,
+		mode: policy.mode,
 		sessionId: recovered.sessionId,
 		abortSignal,
 		origin: recovered.meta.origin,
@@ -358,6 +363,7 @@ export async function resumeRecoveredSession(
 		// F1 Fix 1: release the lifecycle handle once the resume settles (a no-op
 		// for a child resume we did not register).
 		if (rootController) registry.unregister(recovered.sessionId);
+		registry.clearPolicy(recovered.sessionId);
 	}
 
 	// INT-001 + Part B: the shared finalize invariant — reflect the terminal status

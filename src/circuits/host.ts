@@ -28,6 +28,7 @@ import type { FlowRunEntry } from "../workflows/workflow-activity-tracker";
 import type { ExtensionUtils } from "../extensions/runtime-context/types";
 import type { CircuitRunRegistry } from "./run-registry";
 import type { CircuitDataRootName } from "./data-root";
+import type { RunApprovalChannel } from "./run-policy";
 
 export interface CircuitHost {
 	readonly app: App;
@@ -56,4 +57,10 @@ export interface CircuitHost {
 	 * which defaults to the legacy `orchestrations` root.
 	 */
 	getCircuitDataRootName?(): CircuitDataRootName;
+	/**
+	 * The approval channel for a run with no chat panel (a modal, raced against
+	 * the `on_approval_required` hook). Optional so narrow test hosts keep
+	 * compiling; without it the dispatcher auto-approves.
+	 */
+	getRunApproval?(runLabel: string): RunApprovalChannel;
 }

@@ -95,6 +95,8 @@ notor-conversation-mode: act
 
 Scheduled (`on-schedule`) workflows always fire immediately and ignore `notor-hook-delay`.
 
+Background workflows follow the normal approval rules. A call that needs approval opens an **Approve tool call** dialog, and the run shows as waiting for approval in the activity indicator until you answer. For unattended workflows, see [Runs with no chat panel](safety.md#runs-with-no-chat-panel).
+
 ## Scheduled workflows
 
 Set `notor-trigger: on-schedule` and provide a `notor-schedule` cron expression to run a workflow on a recurring schedule:

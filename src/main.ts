@@ -94,6 +94,9 @@ import { CircuitCompositionManager } from "./circuits/circuit-composition-manage
 import type { SpawnChildCircuit } from "./circuits/child-circuit";
 import { CircuitRunRegistry } from "./circuits/run-registry";
 import type { CircuitHost } from "./circuits/host";
+import type { RunApprovalChannel } from "./circuits/run-policy";
+import { dispatchOnApprovalRequired, type ToolEventAutomationAccessors } from "./hooks/hook-events";
+import { createModalApprovalCallback } from "./ui/tool-approval-modal";
 import { buildUtils } from "./extensions/runtime-context";
 import type { ExtensionUtils } from "./extensions/runtime-context/types";
 import type { Circuit } from "./circuits/types";
@@ -449,6 +452,34 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 */
 	buildExtensionUtils(): ExtensionUtils {
 		return buildUtils(this);
+	}
+
+	/**
+	 * The approval channel for runs with no chat panel ({@link CircuitHost}):
+	 * a queued modal, raced against the `on_approval_required` hook.
+	 */
+	getRunApproval(runLabel: string): RunApprovalChannel {
+		return {
+			callback: createModalApprovalCallback(this.app, runLabel, this.settings),
+			hook: (toolName, toolParams, mode) => {
+				if (!this.vaultRootPath) return Promise.resolve("pass");
+				return dispatchOnApprovalRequired(
+					{ conversationId: "", timestamp: new Date().toISOString(), toolName, toolParams, mode },
+					this.settings,
+					this.vaultRootPath,
+					this.toolEventAccessors(),
+				);
+			},
+		};
+	}
+
+	/** Extension automation accessors for tool-event hooks. */
+	private toolEventAccessors(): ToolEventAutomationAccessors {
+		const mgr = this.getExtensionManager();
+		return {
+			getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
+			execute: (a, c) => mgr.executeAutomation(a, c),
+		};
 	}
 
 	upsertFlowRun(entry: FlowRunEntry): void {
@@ -2114,11 +2145,13 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				getForTrigger: (t) => mgr.getAutomationsForTrigger(t),
 				execute: (a, c) => mgr.executeAutomation(a, c),
 			},
-			toolEvent: {
-				getForToolEvent: (t, n) => mgr.getAutomationsForToolEvent(t, n),
-				execute: (a, c) => mgr.executeAutomation(a, c),
-			},
+			toolEvent: this.toolEventAccessors(),
 		});
+
+		// Runs this orchestrator drives with no panel to prompt in.
+		orchestrator.setBackgroundApprovalFactory((runLabel) =>
+			createModalApprovalCallback(this.app, runLabel, this.settings),
+		);
 
 		// Set tool definitions callback (Amendment R3 — moved from wireView)
 		const toolRegistry = this.getToolRegistry();

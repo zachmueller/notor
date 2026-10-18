@@ -11,12 +11,17 @@
  *  - {@link abortAll} — `onunload` aborts every live run before teardown;
  *  - {@link touch} — the runner's `onProgress` refreshes the heartbeat.
  *
+ * It also holds each live session's {@link CircuitRunPolicy} so `run_flow`
+ * children and chaining successors inherit the root's mode and approval channel.
+ *
  * Deliberately in-memory only (no persistence): after a crash the recovery
  * liveness guard (Fix 2) is the protection, not this registry. This module is
  * **pure** — no Obsidian imports — so it is trivially unit-testable.
  *
  * @see specs/ZZ-misc/arch-review-july-2026/F1-orchestration-run-lifecycle.md — Fix 1
  */
+
+import type { CircuitRunPolicy } from "./run-policy";
 
 /** A live orchestration run's lifecycle handle. */
 export interface CircuitRunHandle {
@@ -30,6 +35,7 @@ export interface CircuitRunHandle {
 /** In-memory registry of live orchestration runs, keyed by session id. */
 export class CircuitRunRegistry {
 	private runs = new Map<string, CircuitRunHandle>();
+	private policies = new Map<string, CircuitRunPolicy>();
 
 	/** Register a live run's handle (called after the controller is created). */
 	register(handle: CircuitRunHandle): void {
@@ -90,5 +96,23 @@ export class CircuitRunRegistry {
 	touch(sessionId: string): void {
 		const handle = this.runs.get(sessionId);
 		if (handle) handle.lastProgressAt = Date.now();
+	}
+
+	/**
+	 * Record a session's run policy for its lifetime. Unlike {@link register},
+	 * this covers child and chaining runs too, which inherit it by parent id.
+	 */
+	setPolicy(sessionId: string, policy: CircuitRunPolicy): void {
+		this.policies.set(sessionId, policy);
+	}
+
+	/** The run policy of a live session, or `undefined`. */
+	getPolicy(sessionId: string): CircuitRunPolicy | undefined {
+		return this.policies.get(sessionId);
+	}
+
+	/** Drop a session's run policy once it (and any chained successor) settles. */
+	clearPolicy(sessionId: string): void {
+		this.policies.delete(sessionId);
 	}
 }

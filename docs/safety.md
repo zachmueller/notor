@@ -35,6 +35,18 @@ Every proposed write shows a before/after diff before being applied. For edits t
 - [Per-persona auto-approve overrides](personas.md) let you configure different approval behavior per persona.
 - **Malformed calls never reach you.** If the AI omits a parameter a tool requires, the call fails immediately with the missing parameter names reported back to the AI, which re-issues a corrected call. You are not interrupted for a call that could not have succeeded — which matters most with [path-scoped auto-approve](vault-tools.md#path-scoping), where a missing `path` would otherwise leave the path rules unable to classify the call and fall back to prompting you.
 
+### Runs with no chat panel
+
+Circuits, event-triggered and scheduled workflows, and other background runs apply the same approval rules as chat. When a call needs approval and no chat panel is showing that run, Notor opens an **Approve tool call** dialog that names the run, the tool, and its parameters. Dialogs from concurrent runs queue and appear one at a time. Closing the dialog rejects the call.
+
+This covers **never auto-approve** paths and blocked command patterns too. Earlier versions approved those calls silently when no panel was open.
+
+To keep an unattended run from waiting on you:
+
+- Turn on **Auto-approve** for the tools it uses, or add [auto-approve paths](vault-tools.md#path-scoping) that cover its notes.
+- Set **Settings → Notor → Tools → Tool approval timeout (seconds)**. A call that isn't answered in time is skipped, and the AI continues without it.
+- Decide calls in a script with an [`on_approval_required` hook](hooks.md#approval-resolution-via-hooks). A hook's decision closes the dialog.
+
 ## Cancellation
 
 Clicking **Stop** in the chat panel immediately returns control to the user. Any in-flight tool executions complete in the background, but their results are not appended to the conversation. There is no orphaned tool-call state — subsequent messages work normally.

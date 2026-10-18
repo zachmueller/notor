@@ -176,6 +176,8 @@ Open the command palette → **Notor: Run circuit**, pick a circuit, and enter a
 
 A circuit can also be launched unattended by a **hook** with the `run_circuit` action type (Settings → Notor → Hooks), stamped `origin: "hook"`.
 
+Step tool calls follow the normal approval rules. A call that needs approval opens an **Approve tool call** dialog, because a circuit has no chat panel to prompt in. `run_flow` children and `notor-on-complete-flow` successors use the same approval channel and Plan/Act mode as the run that started them. For unattended circuits, see [Runs with no chat panel](safety.md#runs-with-no-chat-panel).
+
 Each step turn creates its own conversation, but step conversations are **hidden from the flat conversation sidebar** (the run-tree is their only surface).
 
 ## The run-tree view

@@ -41,6 +41,7 @@ import { VaultStepConversationStore } from "./step-conversation-store";
 import { showCircuitProgressNotice } from "./notices";
 import { jumpToStepConversation } from "../ui/circuit-modals";
 import { circuitDataRootOf } from "./data-root";
+import type { CircuitRunPolicy } from "./run-policy";
 
 /**
  * Query a session's still-open/running tasks for the runner's `FLOW_COMPLETE`
@@ -81,6 +82,7 @@ export function buildExecutor(
 	sessionLog: SessionLog,
 	committedKeys: Set<string>,
 	openNotesInEditor: boolean,
+	policy?: CircuitRunPolicy,
 ): StepTurnExecutor {
 	// INT-006: persist each step conversation (hidden from the flat list) with its
 	// orchestration_edges header into the chat history directory.
@@ -91,7 +93,7 @@ export function buildExecutor(
 	// INT-010: the deterministic code-step executor (notor-step-mode: code).
 	const codeStepExecutor = new CodeStepExecutor(
 		{
-			runtimeFactory: makeCodeStepRuntimeFactory(host, committedKeys, openNotesInEditor),
+			runtimeFactory: makeCodeStepRuntimeFactory(host, committedKeys, openNotesInEditor, policy),
 			notifyError: (message: string) => new Notice(message),
 		},
 		sessionLog,
@@ -104,7 +106,7 @@ export function buildExecutor(
 			providerRegistry: host.getProviderRegistry(),
 			settings: host.settings,
 			promptBuilder: new StepPromptBuilder(),
-			runtimeFactory: makeRuntimeFactory(host, openNotesInEditor),
+			runtimeFactory: makeRuntimeFactory(host, openNotesInEditor, policy),
 			memoriesPath: memoriesPath(host.settings.notor_dir, circuitDataRootOf(host)),
 			stepConversationStore,
 			codeStepExecutor,
@@ -211,10 +213,14 @@ type StepPersona = Parameters<StepRuntimeFactory["build"]>[0]["persona"];
  * name and resolves the effective config against it; a code step passes `null`
  * (which leaves the dispatcher's default `activePersonaName` of `null` untouched,
  * so passing it is behavior-neutral vs. the old omit).
+ *
+ * The run policy's approval channel is set on the dispatcher instance: step
+ * turns and code-step `callTool` pass no per-call callback, so the dispatcher
+ * falls back to it instead of auto-approving.
  */
 async function assembleStepDispatcher(
 	host: CircuitHost,
-	opts: { persona: StepPersona; openNotesInEditor: boolean },
+	opts: { persona: StepPersona; openNotesInEditor: boolean; policy?: CircuitRunPolicy },
 ): Promise<{ dispatcher: ToolDispatcher; effective: EffectiveToolConfig; toolDefinitions: ToolDefinition[] }> {
 	const settings = host.settings;
 	const registry = host.getToolRegistry();
@@ -231,6 +237,8 @@ async function assembleStepDispatcher(
 	// `open_notes_on_access` setting, for every tool this step dispatches.
 	dispatcher.setOpenNotesOverride(opts.openNotesInEditor);
 	dispatcher.setActivePersonaName(opts.persona?.name ?? null);
+	if (opts.policy?.approvalCallback) dispatcher.setApprovalCallback(opts.policy.approvalCallback);
+	if (opts.policy?.approvalHook) dispatcher.setApprovalHookDispatcher(opts.policy.approvalHook);
 	if (host.vaultRootPath) dispatcher.setVaultRootPath(host.vaultRootPath);
 	dispatcher.setResolveVaultPath((p: string) => {
 		const file = resolveNote(p, host.app.vault, host.app.metadataCache);
@@ -260,7 +268,11 @@ async function assembleStepDispatcher(
  * a per-step dispatcher (with the orchestration session context bound via the
  * dispatcher's session-context seam).
  */
-export function makeRuntimeFactory(host: CircuitHost, openNotesInEditor: boolean): StepRuntimeFactory {
+export function makeRuntimeFactory(
+	host: CircuitHost,
+	openNotesInEditor: boolean,
+	policy?: CircuitRunPolicy,
+): StepRuntimeFactory {
 	return {
 		async build({ step, persona, resolved, mode, orchestrationContext }): Promise<StepRuntime> {
 			const settings = host.settings;
@@ -268,6 +280,7 @@ export function makeRuntimeFactory(host: CircuitHost, openNotesInEditor: boolean
 			const { dispatcher, effective, toolDefinitions } = await assembleStepDispatcher(host, {
 				persona,
 				openNotesInEditor,
+				policy,
 			});
 
 			// Persona-composed system prompt (append/replace per the persona's mode).
@@ -333,6 +346,7 @@ export function makeCodeStepRuntimeFactory(
 	host: CircuitHost,
 	committedKeys: Set<string>,
 	openNotesInEditor: boolean,
+	policy?: CircuitRunPolicy,
 ): CodeStepRuntimeFactory {
 	const adapter = host.app.vault.adapter;
 	const scratchpadFs: ScratchpadFs = {
@@ -386,6 +400,7 @@ export function makeCodeStepRuntimeFactory(
 			const { dispatcher, effective } = await assembleStepDispatcher(host, {
 				persona: null,
 				openNotesInEditor,
+				policy,
 			});
 
 			// utils/libs/obsidian — IDENTICAL to user-defined tools, except the

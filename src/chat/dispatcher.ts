@@ -57,6 +57,12 @@ export function autoApproveReasonOf(state: AutoApprovedState | undefined): strin
 export type ApprovalCallback = (toolCall: ToolCall, abortSignal?: AbortSignal, messageId?: string, autoApproved?: AutoApprovedState) => Promise<"approved" | "rejected">;
 
 /**
+ * An `on_approval_required` hook seam raced against the approval callback.
+ * `"pass"` (or an error) never wins the race.
+ */
+export type ApprovalHookDispatcher = (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">;
+
+/**
  * Callback for requesting a user interaction (e.g. a follow-up question) from
  * inside a tool call. Unlike {@link ApprovalCallback}, this is NOT raced
  * against a timeout or an approval hook — an interaction always awaits explicit
@@ -108,6 +114,9 @@ export class ToolDispatcher {
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Phase 4, Step 4e
 	 */
 	private approvalCallback?: ApprovalCallback;
+
+	/** Instance-level approval hook seam (see {@link setApprovalHookDispatcher}). */
+	private approvalHookDispatcher?: ApprovalHookDispatcher;
 
 	/** Event handlers for UI updates. */
 	private events: DispatcherEvents = {};
@@ -193,6 +202,14 @@ export class ToolDispatcher {
 		this.approvalCallback = callback;
 	}
 
+	/**
+	 * Set the instance-level `on_approval_required` hook seam, used when a
+	 * dispatch call passes none (per-run circuit step dispatchers).
+	 */
+	setApprovalHookDispatcher(hook: ApprovalHookDispatcher): void {
+		this.approvalHookDispatcher = hook;
+	}
+
 	/** Set event handlers for UI updates. */
 	setEvents(events: DispatcherEvents): void {
 		this.events = events;
@@ -269,10 +286,17 @@ export class ToolDispatcher {
 		approvalCb: ApprovalCallback,
 		abortSignal?: AbortSignal,
 		messageId?: string,
-		approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
+		approvalHookDispatcher?: ApprovalHookDispatcher,
 	): Promise<"approved" | "rejected" | "timed_out"> {
+		// The callback gets a signal that also fires once the race settles, so a
+		// prompt that lost to the timeout or a hook (e.g. a modal) can close itself.
+		const settled = new AbortController();
+		const onCallerAbort = () => settled.abort();
+		if (abortSignal?.aborted) settled.abort();
+		else abortSignal?.addEventListener("abort", onCallerAbort, { once: true });
+
 		const racers: Promise<"approved" | "rejected" | "timed_out">[] = [
-			approvalCb(toolCall, abortSignal, messageId),
+			approvalCb(toolCall, settled.signal, messageId),
 		];
 
 		const approvalTimeout = this.settings?.approval_timeout ?? 0;
@@ -300,7 +324,10 @@ export class ToolDispatcher {
 			);
 		}
 
-		return Promise.race(racers);
+		return Promise.race(racers).finally(() => {
+			abortSignal?.removeEventListener("abort", onCallerAbort);
+			settled.abort();
+		});
 	}
 
 	// -----------------------------------------------------------------------
@@ -335,7 +362,7 @@ export class ToolDispatcher {
 		policyCtx: ToolPolicyContext,
 		perCallApprovalCallback?: ApprovalCallback,
 		sessionContext?: ToolSessionContext,
-		approvalHookDispatcher?: (toolName: string, params: Record<string, unknown>, mode: string) => Promise<"approved" | "rejected" | "pass">,
+		approvalHookDispatcher?: ApprovalHookDispatcher,
 		interactionCallback?: InteractionCallback,
 		runContext?: RunContext,
 		orchestrationContext?: OrchestrationToolContext,
@@ -403,7 +430,7 @@ export class ToolDispatcher {
 			} else {
 				const userDecision = await this.raceApprovalSources(
 					toolCall, canonicalName, parameters, mode,
-					approvalCb, abortSignal, messageId, approvalHookDispatcher,
+					approvalCb, abortSignal, messageId, approvalHookDispatcher ?? this.approvalHookDispatcher,
 				);
 
 				if (userDecision === "rejected" || userDecision === "timed_out") {
