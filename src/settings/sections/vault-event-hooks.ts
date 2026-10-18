@@ -17,6 +17,7 @@ import {
 	type VaultEventMeta,
 } from "./vault-event-hook-subsection";
 import { markSubsection } from "../helpers";
+import { renderDailyStartSettings } from "./daily-start-settings";
 
 /**
  * Render the "Vault event hooks" section in **Settings → Notor**.
@@ -35,7 +36,7 @@ export function renderVaultEventHooksSection(
 	containerEl.createEl("p", {
 		text:
 			"Actions that run automatically when vault events occur — note opened, " +
-			"created, saved, tag changed, or on a schedule. Each event type can have " +
+			"created, saved, tag changed, on a schedule, or at the start of each day. Each event type can have " +
 			"multiple hooks that run in order. Desktop only for shell command hooks.",
 		cls: "setting-item-description",
 	});
@@ -136,6 +137,15 @@ export function renderVaultEventHooksSection(
 			title: "On schedule",
 			desc: "Fires on a cron schedule (e.g. daily at midnight). Requires a cron expression.",
 			hasSchedule: true,
+		},
+		{
+			event: "on_daily_start" as VaultEventHookType,
+			title: "On daily start",
+			desc:
+				"Fires once a day, the first time you use Obsidian after the day reset time — " +
+				"including when Obsidian stayed open overnight. Tracked per device.",
+			hasSchedule: false,
+			renderExtra: (body) => renderDailyStartSettings(body, ctx),
 		},
 	];
 

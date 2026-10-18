@@ -33,6 +33,8 @@ export interface VaultEventMeta {
 	desc: string;
 	hasSchedule: boolean;
 	desktopOnlyNote?: string;
+	/** Extra event-level controls rendered above the hook list. */
+	renderExtra?: (body: HTMLElement) => void;
 }
 
 /**
@@ -43,7 +45,7 @@ export function renderVaultEventHookSubsection(
 	meta: VaultEventMeta,
 	ctx: SettingsContext
 ): void {
-	const { event, title, desc, hasSchedule, desktopOnlyNote } = meta;
+	const { event, title, desc, hasSchedule, desktopOnlyNote, renderExtra } = meta;
 	const hooks = ctx.settings.vault_event_hooks[event];
 
 	const details = containerEl.createEl("details", {
@@ -70,6 +72,7 @@ export function renderVaultEventHookSubsection(
 			cls: "setting-item-description notor-vault-hook-desktop-note",
 		});
 	}
+	renderExtra?.(body);
 
 	// Render existing hooks
 	for (let i = 0; i < hooks.length; i++) {

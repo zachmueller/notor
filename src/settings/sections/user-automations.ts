@@ -37,6 +37,7 @@ type TriggerGroup = {
 
 const TRIGGER_GROUP_ORDER: TriggerGroup[] = [
 	{ key: "on-schedule", label: "Scheduled" },
+	{ key: "on-daily-start", label: "Daily start" },
 	{ key: "on-note-open", label: "On note open" },
 	{ key: "on-note-create", label: "On note create" },
 	{ key: "on-save", label: "On save" },
@@ -62,6 +63,7 @@ function normalizeTriggerKey(trigger: string): string {
 		"on_save": "on-save",
 		"on_manual_save": "on-manual-save",
 		"on_tag_change": "on-tag-change",
+		"on_daily_start": "on-daily-start",
 	};
 	return mapping[trigger] ?? trigger;
 }
@@ -125,18 +127,24 @@ function collectAllItems(ctx: SettingsContext): AutomationItem[] {
 		});
 	}
 
-	// 1b. Scheduled orchestration flows (flows with a valid `notor-schedule`).
-	// Only when orchestration is enabled — the cache is empty otherwise.
+	// 1b. Scheduled circuits (valid `notor-schedule`) and daily-start circuits
+	// (`notor-daily-start: true`). Only when circuits are enabled — the cache is
+	// empty otherwise. A circuit with both appears in both groups.
 	if (ctx.settings.circuits_enabled) {
 		for (const flow of ctx.plugin.getDiscoveredCircuits()) {
-			if (!flow.schedule) continue;
-			items.push({
-				kind: "flow",
-				flow,
-				name: flow.name,
-				triggerKey: "on-schedule",
-				isBuiltin: false,
-			});
+			const triggerKeys = [
+				...(flow.schedule ? ["on-schedule"] : []),
+				...(flow.dailyStart ? ["on-daily-start"] : []),
+			];
+			for (const triggerKey of triggerKeys) {
+				items.push({
+					kind: "flow",
+					flow,
+					name: flow.name,
+					triggerKey,
+					isBuiltin: false,
+				});
+			}
 		}
 	}
 
@@ -277,9 +285,10 @@ function renderFlowRow(
 	const enableKey = circuitEnabledKey(flow.flowDir);
 	const isEnabled = ctx.settings.flow_enabled[enableKey] !== false;
 
-	// Description: schedule + next run (flows in this group always have a schedule).
-	let desc = `Schedule: ${flow.schedule}`;
-	const nextRun = flow.schedule ? scheduler?.getNextRun(flow.schedule) ?? null : null;
+	// Description: schedule + next run, or the daily-start note.
+	const isDailyStart = item.triggerKey === "on-daily-start";
+	let desc = isDailyStart ? "Runs once at the start of each day" : `Schedule: ${flow.schedule}`;
+	const nextRun = !isDailyStart && flow.schedule ? scheduler?.getNextRun(flow.schedule) ?? null : null;
 	if (nextRun) {
 		desc += ` · Next: ${nextRun.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
 	}
@@ -294,13 +303,15 @@ function renderFlowRow(
 		text: "circuit",
 	});
 
-	// Status dot
-	const isActive = scheduler?.isJobActive(circuitJobKey(flow.flowDir)) ?? false;
-	const dot = setting.nameEl.createSpan({
-		cls: `notor-schedule-status-dot ${isActive ? "notor-schedule-active" : "notor-schedule-inactive"}`,
-	});
-	dot.setAttribute("aria-label", isActive ? "Active" : "Inactive");
-	setting.nameEl.prepend(dot);
+	// Status dot (cron job state; daily-start circuits have no job)
+	if (!isDailyStart) {
+		const isActive = scheduler?.isJobActive(circuitJobKey(flow.flowDir)) ?? false;
+		const dot = setting.nameEl.createSpan({
+			cls: `notor-schedule-status-dot ${isActive ? "notor-schedule-active" : "notor-schedule-inactive"}`,
+		});
+		dot.setAttribute("aria-label", isActive ? "Active" : "Inactive");
+		setting.nameEl.prepend(dot);
+	}
 
 	// Enabled toggle
 	setting.addToggle((toggle) =>
