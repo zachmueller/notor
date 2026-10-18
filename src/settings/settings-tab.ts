@@ -41,6 +41,7 @@ import { renderCircuitsSection } from "./sections/circuits";
 import { renderSystemPromptSection } from "./sections/system-prompt";
 import { renderUserAutomationsSection } from "./sections/user-automations";
 import { renderModelPresetsSection } from "./sections/model-presets";
+import { renderSetupBanner } from "./sections/setup-banner";
 import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
 import { canonicalSettingsGroup } from "./group-aliases";
 
@@ -167,6 +168,9 @@ export class NotorSettingTab extends PluginSettingTab {
 			ctx.settings.settings_collapsed_sections[title] = open;
 			void ctx.saveSettings();
 		};
+
+		// --- Guided setup banner (only until a provider or preset is configured) ---
+		renderSetupBanner(containerEl, ctx);
 
 		// --- General (expanded by default) ---
 		const generalGroup = createSettingsGroup(containerEl, "General", true, persisted, onToggle);
