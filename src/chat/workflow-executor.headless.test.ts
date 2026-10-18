@@ -43,7 +43,8 @@ vi.mock("../ui/os-notification", () => ({
 import { WorkflowExecutor, type WorkflowExecutorDeps } from "./workflow-executor";
 import { ConversationManager } from "./conversation";
 import type { LLMProvider, StreamChunk } from "../providers/provider";
-import type { Workflow } from "../types";
+import type { ExecutionChain, Persona, Workflow, WorkflowExecution, WorkflowExecutionRequest } from "../types";
+import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -273,5 +274,55 @@ describe("WorkflowExecutor.runWorkflowHeadless (INT-031)", () => {
 		expect(dispatch).toHaveBeenCalledTimes(1);
 		expect(provider.sendMessage).toHaveBeenCalledTimes(1);
 		expect(result.text).toBe("");
+	});
+});
+
+describe("WorkflowExecutor.executeBackgroundWorkflow — persona", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	const workflowPersona = { name: "wf-persona", prompt_content: "" } as unknown as Persona;
+	const panelPersona = { name: "panel-persona", prompt_content: "" } as unknown as Persona;
+
+	async function runBackground(previousPersona: string | null) {
+		const { deps } = makeDeps(mockProvider(TEXT("Done.")), vi.fn());
+		const setActivePersona = vi.fn();
+		Object.assign(deps, {
+			// The vault-event dispatcher switched the global persona to the workflow's.
+			getPersonaManager: () => ({ getActivePersona: () => workflowPersona }),
+			// The panel hosting this orchestrator has its own persona picked.
+			getActivePersona: () => panelPersona,
+			setActivePersona,
+		});
+		const executor = new WorkflowExecutor(deps);
+		const execution = { id: "e1", workflow_name: "summarize" } as unknown as WorkflowExecution;
+
+		await executor.executeBackgroundWorkflow(
+			{ workflow: makeWorkflow() } as unknown as WorkflowExecutionRequest,
+			execution,
+			{} as unknown as ExecutionChain,
+			{ onComplete: vi.fn() } as unknown as WorkflowConcurrencyManager,
+			{ switched: true, previousPersona },
+		);
+		return { deps, setActivePersona };
+	}
+
+	it("resolves tool config with the workflow's persona, not the panel's", async () => {
+		const { deps } = await runBackground(null);
+		const resolve = deps.configResolver.resolveEffectiveConfig as ReturnType<typeof vi.fn>;
+		expect(resolve).toHaveBeenCalled();
+		for (const call of resolve.mock.calls) expect(call[2]).toBe(workflowPersona);
+
+		const created = (deps.historyManager.createConversationFile as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+		expect(created).toMatchObject({ persona_name: "wf-persona" });
+	});
+
+	it("reverts the global persona without touching the panel's", async () => {
+		const { setActivePersona } = await runBackground("before");
+		const wfMod = await import("../workflows/workflow-executor");
+		const revert = wfMod.revertWorkflowPersona as ReturnType<typeof vi.fn>;
+		expect(revert).toHaveBeenCalledTimes(1);
+		expect(revert.mock.calls[0]).toHaveLength(2);
+		expect(revert.mock.calls[0]![0]).toBe("before");
+		expect(setActivePersona).not.toHaveBeenCalled();
 	});
 });

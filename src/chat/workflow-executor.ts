@@ -837,7 +837,7 @@ export class WorkflowExecutor {
 			new Notice(`Workflow '${workflow.display_name}' failed: ${errMsg}`);
 			// Revert persona if we switched it
 			if (personaSwitchResult.switched && personaManager) {
-				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager, (p) => this.deps.setActivePersona(p));
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager);
 			}
 			return;
 		}
@@ -849,7 +849,7 @@ export class WorkflowExecutor {
 			});
 			concurrencyManager.onComplete(execution.id, "errored", "Workflow has no prompt content");
 			if (personaSwitchResult.switched && personaManager) {
-				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager, (p) => this.deps.setActivePersona(p));
+				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager);
 			}
 			return;
 		}
@@ -876,8 +876,12 @@ export class WorkflowExecutor {
 			fallback.thinkingLevel,
 		);
 
-		// Determine the active persona name after any switch
-		const activePersonaName = personaManager?.getActivePersona()?.name ?? null;
+		// Background runs aren't tied to a panel. Run with the persona the header
+		// records — the workflow's (switched globally by the vault-event
+		// dispatcher) or else the global one — never whatever persona the panel
+		// hosting this orchestrator happens to have picked.
+		const pinnedPersona = personaManager ? personaManager.getActivePersona() : this.deps.getActivePersona();
+		const activePersonaName = pinnedPersona?.name ?? null;
 
 		// Create a dedicated ConversationManager for this background execution
 		// so it runs fully isolated from the main chat panel's state.
@@ -939,7 +943,6 @@ export class WorkflowExecutor {
 
 		// Step 5: Run the response loop (no view — background execution)
 		// We build a self-contained response loop using the background conversation manager.
-		const pinnedPersona = this.deps.getActivePersona();
 		let finalStatus: "completed" | "errored" | "stopped" = "completed";
 		let errorMessage: string | undefined;
 
@@ -1002,11 +1005,7 @@ export class WorkflowExecutor {
 			// Revert persona if we switched it — scoped to this background execution
 			if (personaSwitchResult.switched && personaManager) {
 				try {
-					await revertWorkflowPersona(
-						personaSwitchResult.previousPersona,
-						personaManager,
-						(p) => this.deps.setActivePersona(p),
-					);
+					await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager);
 				} catch (e) {
 					log.error("Failed to revert workflow persona after background execution", {
 						error: String(e),

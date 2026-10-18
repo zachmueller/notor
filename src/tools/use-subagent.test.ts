@@ -40,6 +40,7 @@ import type { NotorSettings } from "../settings/types";
 import type { EffectiveToolConfig } from "../tool-config/types";
 import type { LLMProvider } from "../providers/provider";
 import type { SubAgentResult } from "../chat/sub-agent-runner";
+import type { ApprovalCallback } from "../chat/dispatcher";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -642,7 +643,7 @@ describe("UseSubagentTool — parent session approval", () => {
 			sessionContext: {
 				getEffectiveToolConfig: () => sessionConfig,
 				getActiveConversation: () => null,
-				getApprovalCallback: () => approval,
+				getApprovalCallback: () => approval as unknown as ApprovalCallback,
 			},
 		});
 
