@@ -17,6 +17,7 @@
 import { Notice } from "obsidian";
 import type { ExecutionChain, VaultEventHook, Workflow, WorkflowTrigger } from "../types";
 import type { VaultEventHookContext } from "./vault-event-hook-engine";
+import type { DispatchRunObserver, HookCircuitLaunchOptions } from "./vault-event-dispatcher";
 import type { NotorSettings } from "../settings/types";
 import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
 import type { Circuit } from "../circuits/types";
@@ -57,18 +58,22 @@ export interface TriggerSourceSpec {
 	requireSchedule: boolean;
 }
 
-/** Dispatch callback — matches what the plugin injects into the scheduler. */
+/**
+ * Dispatch callback — matches what the plugin injects into the scheduler.
+ * `observer` (optional) watches the background runs the dispatch starts.
+ */
 export type TriggerDispatchFn = (
 	hooks: Array<VaultEventHook | Workflow>,
 	context: VaultEventHookContext,
 	chain: ExecutionChain | null,
+	observer?: DispatchRunObserver,
 ) => void;
 
 /** Executors for each target kind. */
 export interface TriggerExecutors {
 	dispatchFn: TriggerDispatchFn | null;
 	executeAutomation: ((automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>) | null;
-	launchCircuit: ((circuit: Circuit) => Promise<void>) | null;
+	launchCircuit: ((circuit: Circuit, options?: HookCircuitLaunchOptions) => Promise<void>) | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,12 +170,14 @@ export function collectTriggerTargets(
  * @param hookEvent   - Trigger event stamped on the run context.
  * @param noticeLabel - Prefix for failure Notices (e.g. "Scheduled").
  * @param executors   - Per-kind executors.
+ * @param observer    - Optional observer for the run(s) this target starts.
  */
 export function fireTriggerTarget(
 	target: TriggerTarget,
 	hookEvent: TimerHookEvent,
 	noticeLabel: string,
 	executors: TriggerExecutors,
+	observer?: DispatchRunObserver,
 ): void {
 	const { key, label } = target;
 	const timestamp = new Date().toISOString();
@@ -184,7 +191,7 @@ export function fireTriggerTarget(
 			}
 			void (async () => {
 				try {
-					await launch(target.circuit);
+					await (observer?.circuit ? launch(target.circuit, observer.circuit) : launch(target.circuit));
 				} catch (e) {
 					const msg = e instanceof Error ? e.message : String(e);
 					log.error(`${noticeLabel} circuit launch failed`, { key, error: msg });
@@ -229,7 +236,7 @@ export function fireTriggerTarget(
 				tagsRemoved: null,
 			};
 			// Fire-and-forget
-			executors.dispatchFn([target.kind === "hook" ? target.hook : target.workflow], context, null);
+			executors.dispatchFn([target.kind === "hook" ? target.hook : target.workflow], context, null, observer);
 			return;
 		}
 	}

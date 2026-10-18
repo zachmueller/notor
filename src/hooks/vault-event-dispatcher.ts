@@ -37,6 +37,8 @@ import { logger } from "../utils/logger";
 import type { TemplateVariableRegistry } from "../template-vars";
 import type { HookDelayManager } from "./hook-delay-manager";
 import { hookCircuitRef, isRunCircuitAction } from "./hook-action-type";
+import type { CircuitOrigin } from "../circuits/types";
+import type { CircuitRunObserver } from "../circuits/run-observer";
 
 const log = logger("VaultEventDispatcher");
 
@@ -82,9 +84,37 @@ export interface DispatcherDeps {
 	 * Launch an orchestration flow by name/dir with an objective (FR-119b /
 	 * FEAT-012). Wired in `main.ts` to the orchestration launch module; absent
 	 * when `circuits_enabled` is off (the dispatcher then skips the action
-	 * with a diagnostic Notice). Stamps the session `origin: "hook"`.
+	 * with a diagnostic Notice). Stamps the session `origin: "hook"` unless
+	 * `options.origin` overrides it.
 	 */
-	launchCircuit?: (flowNameOrDir: string, objective: string) => Promise<void>;
+	launchCircuit?: (flowNameOrDir: string, objective: string, options?: HookCircuitLaunchOptions) => Promise<void>;
+	/** Observes the background runs this dispatch starts (daily-start delivery). */
+	runObserver?: DispatchRunObserver;
+}
+
+/** Options that shape or observe a hook-triggered circuit launch. */
+export interface HookCircuitLaunchOptions {
+	/** Session origin (defaults to `"hook"`). */
+	origin?: CircuitOrigin;
+	/** Pre-allocated session id, so the caller can find the run later. */
+	sessionId?: string;
+	/** Live observer (e.g. to learn the entry step's conversation id). */
+	observer?: CircuitRunObserver;
+}
+
+/**
+ * Observes the background runs a single dispatch starts. Additive: callers
+ * that don't pass one see no change.
+ */
+export interface DispatchRunObserver {
+	/**
+	 * A background workflow was submitted. `execution.conversation_id` is
+	 * filled in once the run creates its conversation and `execution.status`
+	 * tracks the run; `done` settles when the run function settles.
+	 */
+	onWorkflowSubmitted?: (execution: WorkflowExecution, done: Promise<void>) => void;
+	/** Applied to `run_circuit` hook launches. */
+	circuit?: HookCircuitLaunchOptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -559,7 +589,7 @@ export async function executeRunOrchestrationAction(
 	void extendedChain; // chain is carried by the launch path; recorded for parity with run_workflow
 
 	try {
-		await deps.launchCircuit(flowRef, objective);
+		await deps.launchCircuit(flowRef, objective, deps.runObserver?.circuit);
 	} catch (e) {
 		const msg = e instanceof Error ? e.message : String(e);
 		log.error("run_circuit launch failed", { flowRef, error: msg });
@@ -694,6 +724,10 @@ async function _executeWorkflowSubmission(
 		});
 	}
 
+	let settleRun: () => void = () => {};
+	const runDone = new Promise<void>((resolve) => { settleRun = resolve; });
+	deps.runObserver?.onWorkflowSubmitted?.(execution, runDone);
+
 	// Submit to the concurrency manager — run function is the background pipeline
 	deps.concurrencyManager.submit(execution, async () => {
 		try {
@@ -723,6 +757,7 @@ async function _executeWorkflowSubmission(
 			if (isHeadless) {
 				await orchestrator.destroy();
 			}
+			settleRun();
 		}
 	});
 }

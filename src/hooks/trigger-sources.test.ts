@@ -146,4 +146,18 @@ describe("fireTriggerTarget", () => {
 		});
 		await vi.waitFor(() => expect(launchCircuit).toHaveBeenCalledWith(c));
 	});
+
+	it("passes the run observer to circuit launches and dispatches", async () => {
+		const launchCircuit = vi.fn().mockResolvedValue(undefined);
+		const dispatchFn = vi.fn();
+		const observer = { circuit: { sessionId: "s1", origin: "daily_start" as const }, onWorkflowSubmitted: vi.fn() };
+		const c = circuit("c/daily", { dailyStart: true });
+		const executors = { dispatchFn, executeAutomation: null, launchCircuit };
+		fireTriggerTarget({ kind: "circuit", key: "k", label: c.name, circuit: c }, "on_daily_start", "Daily start", executors, observer);
+		const w = workflow("wf.md", "on-daily-start");
+		fireTriggerTarget({ kind: "workflow", key: "workflow:wf.md", label: "wf", workflow: w }, "on_daily_start", "Daily start", executors, observer);
+
+		await vi.waitFor(() => expect(launchCircuit).toHaveBeenCalledWith(c, observer.circuit));
+		expect(dispatchFn.mock.calls[0]![3]).toBe(observer);
+	});
 });

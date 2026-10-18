@@ -49,7 +49,7 @@ import {
 } from "./hooks/vault-event-handlers";
 import type { VaultEventHandlerDeps } from "./hooks/vault-event-handlers";
 import { dispatchVaultEventHooks } from "./hooks/vault-event-dispatcher";
-import type { DispatcherDeps } from "./hooks/vault-event-dispatcher";
+import type { DispatcherDeps, HookCircuitLaunchOptions } from "./hooks/vault-event-dispatcher";
 
 // Providers
 import { ProviderRegistry } from "./providers/index";
@@ -1196,7 +1196,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				// only when circuits_enabled — otherwise the dispatcher skips
 				// the action with a diagnostic Notice.
 				launchCircuit: this.settings.circuits_enabled
-					? async (flowNameOrDir: string, objective: string) => {
+					? async (flowNameOrDir: string, objective: string, options?: HookCircuitLaunchOptions) => {
 							const { CircuitDefinitionParser } = await import("./circuits/circuit-parser");
 							const { launchCircuit } = await import("./circuits/launch");
 							const { requestCircuitInput } = await import("./ui/circuit-modals");
@@ -1214,7 +1214,9 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 								return;
 							}
 							await launchCircuit(this, match, objective, {
-								origin: "hook",
+								origin: options?.origin ?? "hook",
+								sessionId: options?.sessionId,
+								observer: options?.observer,
 								requestUserInput: (flowName, question) =>
 									requestCircuitInput(this.app, flowName, question),
 							});
@@ -1280,8 +1282,8 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 		// Wire the dispatch function and workflow discovery accessor into the scheduler
 		vaultEventScheduler.setDispatch(
-			(hooks, context, chain) => {
-				dispatchVaultEventHooks(hooks, context, chain, getDispatcherDeps());
+			(hooks, context, chain, runObserver) => {
+				dispatchVaultEventHooks(hooks, context, chain, { ...getDispatcherDeps(), runObserver });
 			},
 			() => this._discoveredWorkflows
 		);
