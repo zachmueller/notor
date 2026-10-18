@@ -66,6 +66,12 @@ export interface Circuit {
 	 * "Scheduled", mirroring scheduled workflows.
 	 */
 	schedule: string | null;
+	/**
+	 * `notor-daily-start` (default `false`). When true, the flow is launched once
+	 * per logical day by the `DailyStartDetector` (the `on_daily_start` trigger)
+	 * and surfaced in the Automation settings section under "Daily start".
+	 */
+	dailyStart: boolean;
 
 	// --- Composition (design Phase 7; inert unless the feature group is enabled) ---
 	/** `notor-flow-invocable` (default `false`). */
@@ -144,7 +150,7 @@ export interface StepDefinition {
  * What launched a session. `api` is the external `plugin.api` (Templater and
  * other plugins); `run_flow` / `chaining` are composition children.
  */
-export type CircuitOrigin = "user" | "hook" | "schedule" | "run_flow" | "chaining" | "api";
+export type CircuitOrigin = "user" | "hook" | "schedule" | "daily_start" | "run_flow" | "chaining" | "api";
 
 /**
  * The per-session metadata note (`sessions/{id}/session.json`), owned by the
@@ -156,8 +162,8 @@ export type CircuitOrigin = "user" | "hook" | "schedule" | "run_flow" | "chainin
  * load-bearing recovery discriminator (Issue-4b): a command / `Run Orchestration`
  * launch stamps `"user"`, a hook-triggered launch (FR-119b) stamps `"hook"`, a
  * scheduled launch (`notor-schedule` on the flow definition) stamps `"schedule"`,
- * and Phase-7 composition stamps `"run_flow"` / `"chaining"`. `parent_session_id`
- * is `null` for a root (`user` / `hook` / `schedule`) and set for a composition child.
+ * a daily-start launch (`notor-daily-start`) stamps `"daily_start"`, and Phase-7 composition stamps `"run_flow"` / `"chaining"`. `parent_session_id`
+ * is `null` for a root (`user` / `hook` / `schedule` / `daily_start`) and set for a composition child.
  *
  * @see specs/ZZ-misc/orchestration/data-model.md — CircuitSessionMeta
  * @see specs/ZZ-misc/orchestration/contracts/vault-schema.md — session.json

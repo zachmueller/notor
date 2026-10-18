@@ -42,6 +42,7 @@ function flow(over: Partial<Circuit> = {}): Circuit {
 		steps: [],
 		guardrails: [],
 		schedule: null,
+		dailyStart: false,
 		invocable: true,
 		flowInputs: null,
 		flowReturns: null,

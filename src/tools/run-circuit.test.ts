@@ -32,6 +32,7 @@ function flow(name: string, over: Partial<Circuit> = {}): Circuit {
 		steps: [],
 		guardrails: [],
 		schedule: null,
+		dailyStart: false,
 		invocable: true,
 		flowInputs: "a question",
 		flowReturns: "a report",

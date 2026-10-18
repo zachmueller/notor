@@ -398,6 +398,19 @@ describe("CircuitDefinitionParser", () => {
 		expect(flow.name).toBe("Demo");
 		expect(flow.steps).toHaveLength(2);
 	});
+
+	// notor-daily-start (on_daily_start trigger opt-in) ----------------------
+
+	it("defaults dailyStart to false when notor-daily-start is absent", async () => {
+		const { flow } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
+		expect(flow.dailyStart).toBe(false);
+	});
+
+	it("sets dailyStart when notor-daily-start is true", async () => {
+		const files = validFlowFiles({ "notor-daily-start": true });
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.dailyStart).toBe(true);
+	});
 });
 
 // ---------------------------------------------------------------------------

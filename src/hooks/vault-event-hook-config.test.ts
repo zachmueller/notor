@@ -15,6 +15,7 @@ function emptyConfig(): VaultEventHookConfig {
 		on_manual_save: [],
 		on_tag_change: [],
 		on_schedule: [],
+		on_daily_start: [],
 	};
 }
 

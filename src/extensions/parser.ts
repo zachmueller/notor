@@ -36,6 +36,7 @@ const VALID_TRIGGERS = new Set<string>([
 	"on_manual_save",
 	"on_tag_change",
 	"on_schedule",
+	"on_daily_start",
 ]);
 
 // ---------------------------------------------------------------------------

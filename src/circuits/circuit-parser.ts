@@ -444,6 +444,7 @@ export class CircuitDefinitionParser {
 			steps,
 			guardrails: parseStringArray(fm["notor-guardrails"]),
 			schedule: parseSchedule(fm["notor-schedule"], name),
+			dailyStart: parseBool(fm["notor-daily-start"], false),
 			// Composition (Phase 7; inert).
 			invocable: parseBool(readAliasedKey(fm, "invocable"), false),
 			flowInputs: parseStringOrNull(readAliasedKey(fm, "inputs")),

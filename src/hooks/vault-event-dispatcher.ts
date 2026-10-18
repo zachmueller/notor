@@ -92,6 +92,15 @@ export interface DispatcherDeps {
 // ---------------------------------------------------------------------------
 
 /**
+ * True for events that fire without a note-level user action to debounce
+ * (`on_schedule`, `on_daily_start`). Hooks for these events skip the
+ * per-hook / per-workflow delay.
+ */
+export function isUnattendedHookEvent(hookEvent: string): boolean {
+	return hookEvent === "on_schedule" || hookEvent === "on_daily_start";
+}
+
+/**
  * Dispatch collected vault event hooks sequentially.
  *
  * This is the central dispatcher called by all vault event listeners
@@ -239,7 +248,7 @@ async function _executeOneHook(
 		const workflow = hook;
 
 		// Single-instance guard (skipped if delay > 0; re-checked at execution time)
-		const effectiveDelay = (context.hookEvent === "on_schedule")
+		const effectiveDelay = isUnattendedHookEvent(context.hookEvent)
 			? 0
 			: (workflow.hook_delay ?? 0);
 		if (effectiveDelay === 0 && deps.concurrencyManager.isWorkflowRunning(workflow.file_path)) {
@@ -442,8 +451,8 @@ export async function executeRunWorkflowAction(
 		body_content: "",
 	};
 
-	// Phase 5: Compute effective delay — on_schedule events always skip delay
-	const effectiveDelay = (context.hookEvent === "on_schedule")
+	// Phase 5: Compute effective delay — on_schedule / on_daily_start events always skip delay
+	const effectiveDelay = isUnattendedHookEvent(context.hookEvent)
 		? 0
 		: (hookDelayMs ?? workflow.hook_delay ?? 0);
 

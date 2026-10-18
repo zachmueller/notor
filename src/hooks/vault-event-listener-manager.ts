@@ -45,6 +45,7 @@ export type TagChangeHandler = (
 /**
  * Discriminated union of all handler types, keyed by vault event type.
  * `on_schedule` has no Obsidian event — it is managed by `VaultEventScheduler`.
+ * `on_daily_start` likewise — it is managed by `DailyStartDetector`.
  */
 export type VaultEventHandler =
 	| { type: "on_note_open"; handler: NoteOpenHandler }
@@ -52,7 +53,8 @@ export type VaultEventHandler =
 	| { type: "on_save"; handler: ModifyHandler }
 	| { type: "on_manual_save"; handler: ModifyHandler }
 	| { type: "on_tag_change"; handler: TagChangeHandler }
-	| { type: "on_schedule"; handler: null }; // managed by scheduler
+	| { type: "on_schedule"; handler: null } // managed by scheduler
+	| { type: "on_daily_start"; handler: null }; // managed by daily-start detector
 
 // ---------------------------------------------------------------------------
 // VaultEventListenerManager
@@ -417,6 +419,9 @@ export function vaultEventTypeToWorkflowTrigger(
 		case "on_schedule":
 			// Managed by VaultEventScheduler, not this manager.
 			return null;
+		case "on_daily_start":
+			// Managed by DailyStartDetector; no Obsidian listener needed.
+			return "on-daily-start";
 		default:
 			return null;
 	}

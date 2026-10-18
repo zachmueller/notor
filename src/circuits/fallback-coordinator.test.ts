@@ -26,6 +26,7 @@ function fakeFlow(): Circuit {
 		steps: [],
 		guardrails: [],
 		schedule: null,
+		dailyStart: false,
 		invocable: false,
 		flowInputs: null,
 		flowReturns: null,

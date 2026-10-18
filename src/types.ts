@@ -658,6 +658,8 @@ export interface Persona {
  * - `"on-manual-save"` — fired on explicit Cmd/Ctrl+S save only.
  * - `"on-tag-change"` — fired when frontmatter tags change.
  * - `"on-schedule"` — fired on a cron schedule.
+ * - `"on-daily-start"` — fired once per logical day on the first user activity
+ *   after the configured reset time (`daily_start_reset_time`).
  *
  * @see specs/03-workflows-personas/data-model.md — Workflow entity
  */
@@ -668,7 +670,8 @@ export type WorkflowTrigger =
 	| "on-save"
 	| "on-manual-save"
 	| "on-tag-change"
-	| "on-schedule";
+	| "on-schedule"
+	| "on-daily-start";
 
 /**
  * Constant array of all valid `WorkflowTrigger` values, used for
@@ -682,6 +685,7 @@ export const VALID_WORKFLOW_TRIGGERS: readonly WorkflowTrigger[] = [
 	"on-manual-save",
 	"on-tag-change",
 	"on-schedule",
+	"on-daily-start",
 ] as const;
 
 /**
@@ -869,7 +873,8 @@ export type VaultEventHookType =
 	| "on_save"
 	| "on_manual_save"
 	| "on_tag_change"
-	| "on_schedule";
+	| "on_schedule"
+	| "on_daily_start";
 
 /**
  * A single vault event hook — an action tied to a vault event type.
@@ -921,6 +926,7 @@ export interface VaultEventHookConfig {
 	on_manual_save: VaultEventHook[];
 	on_tag_change: VaultEventHook[];
 	on_schedule: VaultEventHook[];
+	on_daily_start: VaultEventHook[];
 }
 
 /**

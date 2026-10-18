@@ -314,6 +314,26 @@ export interface NotorSettings {
 	 */
 	workflow_activity_indicator_count: number;
 
+	/**
+	 * Local time ("HH:MM", 24-hour) at which the logical day resets for the
+	 * `on_daily_start` trigger. The first user activity after this time fires
+	 * daily-start hooks once for that day (activity before it still counts as
+	 * the previous day).
+	 */
+	daily_start_reset_time: string;
+
+	/**
+	 * How many times a daily-start run retries after its provider pre-flight
+	 * fails (expired credentials, offline, …). `0` disables retries.
+	 */
+	daily_start_retry_max_attempts: number;
+
+	/** First daily-start retry delay in minutes; doubles each attempt. */
+	daily_start_retry_base_minutes: number;
+
+	/** Upper bound for a single daily-start retry delay, in minutes. */
+	daily_start_retry_max_minutes: number;
+
 	// -------------------------------------------------------------------
 	// Phase 4.1: MCP server settings
 	// -------------------------------------------------------------------

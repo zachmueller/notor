@@ -26,6 +26,7 @@ function makeFlow(over: Partial<Circuit> = {}): Circuit {
 		steps: [],
 		guardrails: [],
 		schedule: "0 9 * * *",
+		dailyStart: false,
 		invocable: false,
 		flowInputs: null,
 		flowReturns: null,

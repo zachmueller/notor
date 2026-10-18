@@ -9,7 +9,7 @@
  */
 
 import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TFolder, TAbstractFile, debounce, normalizePath, parseYaml } from "obsidian";
-import { createDefaultSettings, NotorSettingTab } from "./settings";
+import { createDefaultSettings, mergeSavedSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
 import { notifyFileLeafActivated } from "./context/auto-context";
@@ -1031,12 +1031,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	async loadSettings() {
 		const defaults = createDefaultSettings(this.app.vault.configDir);
 		const saved = await this.loadData() as Partial<NotorSettings> | null;
-		const loaded: NotorSettings = Object.assign({}, defaults, saved);
-
-		// Deep-merge keyed records so new default entries survive
-		// when the saved object replaces defaults via Object.assign.
-		loaded.auto_approve = { ...defaults.auto_approve, ...loaded.auto_approve };
-		loaded.hooks = { ...defaults.hooks, ...loaded.hooks };
+		const loaded = mergeSavedSettings(defaults, saved);
 
 		if (this.settings) {
 			// Mutate the existing object so all components that captured a reference
@@ -1276,6 +1271,10 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		});
 		listenerManager.setEventHandler("on_schedule", {
 			type: "on_schedule",
+			handler: null,
+		});
+		listenerManager.setEventHandler("on_daily_start", {
+			type: "on_daily_start",
 			handler: null,
 		});
 

@@ -140,7 +140,7 @@ export interface RecoveryScanOptions {
 }
 
 /** Origins the top-level scan recognizes (the discriminator domain). */
-const KNOWN_ORIGINS = new Set(["user", "hook", "schedule", "run_flow", "chaining", "api"]);
+const KNOWN_ORIGINS = new Set(["user", "hook", "schedule", "daily_start", "run_flow", "chaining", "api"]);
 /** Statuses the scan considers recoverable. */
 const RECOVERABLE_STATUSES = new Set(["active", "interrupted"]);
 /** Terminal statuses (a chaining predecessor must be one of these to root its successor). */
@@ -401,9 +401,11 @@ export class SessionRecovery {
 			// scheduled run surfaced as a loud recovery error instead of resuming.
 			// `api` launches are roots too; a resume runs under default settings (the
 			// caller's mode/approval options and awaiting promise don't survive a crash).
+			// `daily_start` launches are detector-driven roots, like `schedule`.
 			case "user":
 			case "hook":
 			case "schedule":
+			case "daily_start":
 			case "api":
 				return true;
 			case "chaining": {

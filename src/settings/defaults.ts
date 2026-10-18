@@ -117,6 +117,7 @@ export const DEFAULT_VAULT_EVENT_HOOKS: VaultEventHookConfig = {
 	on_manual_save: [],
 	on_tag_change: [],
 	on_schedule: [],
+	on_daily_start: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -202,6 +203,10 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	vault_event_debounce_seconds: 5,
 	workflow_concurrency_limit: 3,
 	workflow_activity_indicator_count: 5,
+	daily_start_reset_time: "04:00",
+	daily_start_retry_max_attempts: 5,
+	daily_start_retry_base_minutes: 3,
+	daily_start_retry_max_minutes: 30,
 
 	// Phase 4.1: MCP servers
 	mcp_servers: {},
@@ -277,4 +282,25 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	write_docx_default_output_dir: "",
 	write_docx_default_template_path: "",
 	};
+}
+
+/**
+ * Merge saved `data.json` contents over defaults. Keyed records are
+ * deep-merged so new default entries (e.g. a new vault event type) survive
+ * when the saved object replaces the default via `Object.assign`.
+ */
+export function mergeSavedSettings(
+	defaults: NotorSettings,
+	saved: Partial<NotorSettings> | null,
+): NotorSettings {
+	const loaded: NotorSettings = Object.assign({}, defaults, saved);
+	loaded.auto_approve = { ...defaults.auto_approve, ...loaded.auto_approve };
+	loaded.hooks = { ...defaults.hooks, ...loaded.hooks };
+	// Clone the default arrays: they are shared module-level references and
+	// hook edits push into them in place.
+	loaded.vault_event_hooks = {
+		...structuredClone(defaults.vault_event_hooks),
+		...saved?.vault_event_hooks,
+	};
+	return loaded;
 }
