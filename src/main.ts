@@ -50,6 +50,7 @@ import {
 import type { VaultEventHandlerDeps } from "./hooks/vault-event-handlers";
 import { dispatchVaultEventHooks } from "./hooks/vault-event-dispatcher";
 import type { DispatcherDeps, HookCircuitLaunchOptions } from "./hooks/vault-event-dispatcher";
+import { DailyStart } from "./hooks/daily-start/daily-start-wiring";
 
 // Providers
 import { ProviderRegistry } from "./providers/index";
@@ -413,6 +414,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 	/** Cron-based scheduler for on_schedule hooks (F-013). */
 	private _vaultEventScheduler?: VaultEventScheduler;
+	private _dailyStart?: DailyStart;
 
 	/** Lazy listener manager — registers/unregisters Obsidian event listeners (F-007). */
 	private _vaultEventListenerManager?: VaultEventListenerManager;
@@ -875,7 +877,11 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			// event hooks' own layout-ready callback, which has run by then).
 			void Promise.allSettled([extensionsLoaded, workflowsScanned])
 				.then(() => this._initialCircuitScan)
-				.finally(() => this._resolveApiReady());
+				.finally(() => {
+					this._resolveApiReady();
+					// on_daily_start needs the full target set before its first check.
+					this._dailyStart?.detector.start();
+				});
 
 			// Enforce chat history retention policy (age + size limits).
 			// Fire-and-forget — non-blocking, runs once per startup.
@@ -930,6 +936,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 		// Group F: Tear down vault event hook components in reverse order (F-023)
 		this._vaultEventListenerManager?.destroy();
+		this._dailyStart?.destroy();
 		this._vaultEventScheduler?.destroy();
 		this._manualSaveDetector?.destroy();
 		this._hookDelayManager?.destroy();
@@ -1327,6 +1334,17 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				});
 			},
 		);
+
+		// on_daily_start: fires once per logical day on the first activity after
+		// the reset time. Started once initial discovery finishes (see onload).
+		this._dailyStart = new DailyStart(this, {
+			dispatchFn: (hooks, context, chain, runObserver) => {
+				dispatchVaultEventHooks(hooks, context, chain, { ...getDispatcherDeps(), runObserver });
+			},
+			sleepWakeDetector,
+			getDiscoveredWorkflows: () => this._discoveredWorkflows,
+			getDiscoveredCircuits: () => this._discoveredCircuits,
+		});
 
 		// Register vault.on('delete') and vault.on('rename') for tag shadow cache maintenance (F-014)
 		this.registerEvent(
@@ -2057,6 +2075,11 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	/** Vault event scheduler — provides cron job status for the settings UI. */
 	getVaultEventScheduler(): VaultEventScheduler | undefined {
 		return this._vaultEventScheduler;
+	}
+
+	/** on_daily_start detector — for its commands and the settings UI. */
+	getDailyStart(): DailyStart | undefined {
+		return this._dailyStart;
 	}
 
 	/** Template variable registry — resolves {notor_dir}, {vault_name} etc. in scaffold content. */

@@ -2,6 +2,7 @@ import { FuzzySuggestModal, MarkdownView, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type NotorPlugin from "../main";
 import type { CircuitRunHandle } from "../circuits/run-registry";
+import type { DailyRunRecord } from "../hooks/daily-start/daily-start-state";
 import { NotorChatView } from "../ui/chat-view";
 import {
 	showWorkflowPicker,
@@ -38,6 +39,30 @@ class CircuitRunStopModal extends FuzzySuggestModal<CircuitRunHandle> {
 
 	onChooseItem(run: CircuitRunHandle): void {
 		this.onChoose(run.sessionId, run.flowName);
+	}
+}
+
+/** Fuzzy picker over the most recent day's daily-start runs. */
+class DailyRunPickerModal extends FuzzySuggestModal<DailyRunRecord> {
+	constructor(
+		app: App,
+		private readonly runs: DailyRunRecord[],
+		private readonly onChoose: (record: DailyRunRecord) => void,
+	) {
+		super(app);
+		this.setPlaceholder("Select a daily start run to open…");
+	}
+
+	getItems(): DailyRunRecord[] {
+		return this.runs;
+	}
+
+	getItemText(record: DailyRunRecord): string {
+		return `${record.label} (${record.status.replace("_", " ")})`;
+	}
+
+	onChooseItem(record: DailyRunRecord): void {
+		this.onChoose(record);
 	}
 }
 
@@ -408,6 +433,38 @@ export function registerCommands(plugin: NotorPlugin): void {
 				registry.abort(sessionId);
 				new Notice(`Stopping circuit '${flowName}'…`);
 			}).open();
+			return true;
+		},
+	});
+
+	// on_daily_start: both commands show only when a daily-start target exists.
+	plugin.addCommand({
+		id: "open-latest-daily-start-run",
+		name: "Open most recent daily start run",
+		checkCallback: (checking: boolean) => {
+			const dailyStart = plugin.getDailyStart();
+			if (!dailyStart?.detector.hasTargets()) return false;
+			if (checking) return true;
+			const runs = dailyStart.detector.recentRuns();
+			if (runs.length === 0) {
+				new Notice("No daily start run on this device yet.");
+			} else if (runs.length === 1) {
+				dailyStart.openRecord(runs[0]!);
+			} else {
+				new DailyRunPickerModal(plugin.app, runs, (record) => dailyStart.openRecord(record)).open();
+			}
+			return true;
+		},
+	});
+
+	plugin.addCommand({
+		id: "run-daily-start-now",
+		name: "Run daily start now",
+		checkCallback: (checking: boolean) => {
+			const dailyStart = plugin.getDailyStart();
+			if (!dailyStart?.detector.hasTargets()) return false;
+			if (checking) return true;
+			void dailyStart.detector.runNow();
 			return true;
 		},
 	});

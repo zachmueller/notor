@@ -81,6 +81,8 @@ export class DailyStartDetector {
 	private retryTimer: ReturnType<typeof setTimeout> | null = null;
 	/** True while a check / attempt is in flight (serializes firing). */
 	private busy = false;
+	/** Set by `start()`; activity before then is ignored (discovery may be incomplete). */
+	private started = false;
 
 	constructor(private readonly deps: DailyStartDetectorDeps) {
 		this.runs = new DailyRunTracker({
@@ -90,8 +92,13 @@ export class DailyStartDetector {
 		});
 	}
 
-	/** Plugin layout is ready: resume a persisted retry, then count the load as activity. */
+	/**
+	 * Initial workflow / circuit / extension discovery has finished: resume a
+	 * persisted retry, then count the plugin load as activity.
+	 */
 	start(): void {
+		if (this.started) return;
+		this.started = true;
 		const state = this.load();
 		if (state.pendingRetry && state.lastFiredDay === this.today()) {
 			this.scheduleRetry(state.pendingRetry.nextAt);
@@ -101,6 +108,7 @@ export class DailyStartDetector {
 
 	/** Report user activity. Throttled; fires when a new logical day has begun. */
 	noteActivity(): void {
+		if (!this.started) return;
 		const t = this.now().getTime();
 		if (t - this.lastCheckAt < ACTIVITY_THROTTLE_MS) return;
 		this.lastCheckAt = t;
@@ -147,6 +155,7 @@ export class DailyStartDetector {
 	}
 
 	destroy(): void {
+		this.started = false;
 		this.clearRetryTimer();
 		this.runs.destroy();
 	}

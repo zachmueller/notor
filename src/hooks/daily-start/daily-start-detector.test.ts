@@ -144,6 +144,13 @@ describe("DailyStartDetector", () => {
 		expect(dispatchFn).toHaveBeenCalledTimes(2);
 	});
 
+	it("ignores activity reported before start()", async () => {
+		detector.noteActivity();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(dispatchFn).not.toHaveBeenCalled();
+		expect(state.data.lastFiredDay).toBeNull();
+	});
+
 	it("does not consume the day when nothing is configured", async () => {
 		settings = makeSettings({ vault_event_hooks: { on_daily_start: [] } as unknown as NotorSettings["vault_event_hooks"] });
 		detector.start();
