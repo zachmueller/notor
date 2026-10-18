@@ -14,14 +14,18 @@
  */
 
 import { Cron } from "croner";
-import { Notice } from "obsidian";
 import type { VaultEventHook, Workflow } from "../types";
-import type { VaultEventHookContext } from "./vault-event-hook-engine";
-import type { ExecutionChain } from "../types";
 import type { NotorSettings } from "../settings/types";
 import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
 import type { Circuit } from "../circuits/types";
-import { circuitEnabledKey, circuitJobKey } from "../circuits/circuit-enabled";
+import {
+	collectTriggerTargets,
+	fireTriggerTarget,
+	type TriggerDispatchFn,
+	type TriggerSourceAccessors,
+	type TriggerSourceSpec,
+	type TriggerTarget,
+} from "./trigger-sources";
 import { logger } from "../utils/logger";
 
 const log = logger("VaultEventScheduler");
@@ -34,11 +38,7 @@ const log = logger("VaultEventScheduler");
  * Dispatch callback signature — matches what F-023 injects via `setDispatch()`.
  * Must be set before `syncJobs()` is called.
  */
-export type SchedulerDispatchFn = (
-	hooks: Array<VaultEventHook | Workflow>,
-	context: VaultEventHookContext,
-	chain: ExecutionChain | null
-) => void;
+export type SchedulerDispatchFn = TriggerDispatchFn;
 
 // ---------------------------------------------------------------------------
 // VaultEventScheduler
@@ -184,81 +184,10 @@ export class VaultEventScheduler {
 	 * @param hooks - Current list of enabled `on_schedule` hooks from settings.
 	 */
 	syncJobs(hooks: VaultEventHook[]): void {
-		// Build the desired job set: settings hooks + scheduled workflow triggers + extension automations + scheduled flows
-		const desiredJobs = new Map<string, { schedule: string; label: string; isWorkflow: boolean; hook?: VaultEventHook; workflow?: Workflow; automation?: UserAutomationDefinition; flow?: Circuit }>();
-
-		// Settings-configured hooks
-		for (const hook of hooks) {
-			if (hook.event !== "on_schedule" || !hook.enabled) continue;
-			if (!hook.schedule?.trim()) {
-				log.warn("on_schedule hook has no schedule expression, skipping", {
-					hookId: hook.id,
-					label: hook.label,
-				});
-				continue;
-			}
-			desiredJobs.set(hook.id, {
-				schedule: hook.schedule.trim(),
-				label: hook.label || hook.id,
-				isWorkflow: false,
-				hook,
-			});
-		}
-
-		// Discovered workflow triggers with "on-schedule" trigger
-		if (this.getDiscoveredWorkflows) {
-			const workflowEnabled = this.getSettings?.()?.workflow_enabled;
-			const scheduledWorkflows = this.getDiscoveredWorkflows().filter(
-				(w) => w.trigger === "on-schedule" && w.schedule && workflowEnabled?.[w.file_path] !== false
-			);
-			for (const workflow of scheduledWorkflows) {
-				// Key: file path (unique per workflow)
-				const key = `workflow:${workflow.file_path}`;
-				desiredJobs.set(key, {
-					schedule: workflow.schedule!,
-					label: workflow.display_name,
-					isWorkflow: true,
-					workflow,
-				});
-			}
-		}
-
-		// EXT-014: Extension automations with on_schedule trigger
-		if (this.extensionAutomationsAccessor) {
-			const scheduledAutomations = this.extensionAutomationsAccessor("on_schedule");
-			for (const automation of scheduledAutomations) {
-				if (!automation.schedule?.trim()) {
-					log.warn("on_schedule automation has no schedule expression, skipping", {
-						filePath: automation.filePath,
-					});
-					continue;
-				}
-				const key = `ext-auto:${automation.filePath}`;
-				desiredJobs.set(key, {
-					schedule: automation.schedule.trim(),
-					label: automation.displayName ?? automation.filePath,
-					isWorkflow: false,
-					automation,
-				});
-			}
-		}
-
-		// Scheduled orchestration flows (flows whose definition.md declares a valid
-		// `notor-schedule`). Each flow gets its own cron job keyed by `orch:{flowDir}`.
-		if (this.getDiscoveredCircuits) {
-			const flowEnabled = this.getSettings?.()?.flow_enabled;
-			const scheduledFlows = this.getDiscoveredCircuits().filter(
-				(f) => f.schedule && flowEnabled?.[circuitEnabledKey(f.flowDir)] !== false,
-			);
-			for (const flow of scheduledFlows) {
-				const key = circuitJobKey(flow.flowDir);
-				desiredJobs.set(key, {
-					schedule: flow.schedule!,
-					label: flow.name,
-					isWorkflow: false,
-					flow,
-				});
-			}
+		// Desired job set: settings hooks + scheduled workflow triggers + extension automations + scheduled circuits
+		const desiredJobs = new Map<string, TriggerTarget>();
+		for (const target of collectTriggerTargets(SCHEDULE_TRIGGER_SPEC, hooks, this.sourceAccessors())) {
+			desiredJobs.set(target.key, target);
 		}
 
 		// Stop jobs that are no longer desired
@@ -269,9 +198,9 @@ export class VaultEventScheduler {
 		}
 
 		// Start jobs that are new
-		for (const [id, desired] of desiredJobs) {
+		for (const [id, target] of desiredJobs) {
 			if (!this.jobs.has(id)) {
-				this.startJob(id, desired.schedule, desired.label, desired.hook, desired.workflow, desired.automation, desired.flow);
+				this.startJob(target);
 			}
 		}
 
@@ -370,32 +299,21 @@ export class VaultEventScheduler {
 	// ---------------------------------------------------------------------------
 
 	/**
-	 * Create and start a new cron job for the given hook or workflow.
+	 * Create and start a new cron job for the given target.
 	 *
-	 * Each job fires the vault event dispatch pipeline with the `on_schedule`
-	 * event context. No note path is provided (scheduled events are not
-	 * note-specific).
+	 * Each job fires the target with the `on_schedule` event context. No note
+	 * path is provided (scheduled events are not note-specific).
 	 *
-	 * @param id       - Unique job key (hook ID, `workflow:{filePath}`, or `orch:{flowDir}`).
-	 * @param schedule - Cron expression.
-	 * @param label    - Human-readable label for logging.
-	 * @param hook     - Settings hook (if this is a settings-configured hook).
-	 * @param workflow - Discovered workflow (if this is a workflow trigger).
-	 * @param automation - Extension automation (if this is an automation trigger).
-	 * @param flow     - Orchestration flow (if this is a scheduled-flow trigger).
+	 * @param target - Hook, workflow, automation, or circuit to schedule. Its
+	 *                 key (hook ID, `workflow:{filePath}`, `ext-auto:{filePath}`,
+	 *                 or `orch:{flowDir}`) identifies the job.
 	 */
-	private startJob(
-		id: string,
-		schedule: string,
-		label: string,
-		hook?: VaultEventHook,
-		workflow?: Workflow,
-		automation?: UserAutomationDefinition,
-		flow?: Circuit,
-	): void {
+	private startJob(target: TriggerTarget): void {
+		const { key: id, label } = target;
+		const schedule = scheduleOf(target);
 		try {
 			const job = new Cron(schedule, () => {
-				this.onJobFire(id, label, hook, workflow, automation, flow);
+				this.onJobFire(target);
 			});
 
 			this.jobs.set(id, job);
@@ -430,99 +348,46 @@ export class VaultEventScheduler {
 	}
 
 	/**
-	 * Called by a cron job when it fires.
-	 *
-	 * Assembles the event context and dispatches to the hook pipeline.
-	 *
-	 * @param id       - Job key (for logging).
-	 * @param label    - Human-readable label (for logging).
-	 * @param hook     - Settings hook, if applicable.
-	 * @param workflow - Workflow trigger, if applicable.
-	 * @param automation - Extension automation, if applicable.
-	 * @param flow     - Scheduled orchestration flow, if applicable.
+	 * Called by a cron job when it fires: routes the target to its executor.
 	 */
-	private onJobFire(
-		id: string,
-		label: string,
-		hook?: VaultEventHook,
-		workflow?: Workflow,
-		automation?: UserAutomationDefinition,
-		flow?: Circuit,
-	): void {
-		log.debug("on_schedule job fired", { id, label });
+	private onJobFire(target: TriggerTarget): void {
+		log.debug("on_schedule job fired", { id: target.key, label: target.label });
+		fireTriggerTarget(target, "on_schedule", "Scheduled", {
+			dispatchFn: this.dispatchFn,
+			executeAutomation: this.extensionAutomationExecutor,
+			launchCircuit: this.flowLaunchExecutor,
+		});
+	}
 
-		// Scheduled orchestration flow — launch directly via the flow executor.
-		if (flow) {
-			if (!this.flowLaunchExecutor) {
-				log.warn("on_schedule flow job fired but no flow launcher set — skipping", { id });
-				return;
-			}
-
-			void (async () => {
-				try {
-					await this.flowLaunchExecutor!(flow);
-				} catch (e) {
-					const msg = e instanceof Error ? e.message : String(e);
-					log.error("Scheduled circuit launch failed", { id, error: msg });
-					new Notice(`Scheduled circuit '${label}' failed to launch: ${msg}`);
-				}
-			})();
-			return;
-		}
-
-		// EXT-014: Extension automation — execute directly via the executor callback
-		if (automation) {
-			if (!this.extensionAutomationExecutor) {
-				log.warn("on_schedule automation job fired but no executor set — skipping", { id });
-				return;
-			}
-
-			const context: Record<string, unknown> = {
-				hookEvent: "on_schedule",
-				timestamp: new Date().toISOString(),
-				schedule: automation.schedule,
-			};
-
-			void (async () => {
-				try {
-					await this.extensionAutomationExecutor!(automation, context);
-				} catch (e) {
-					const msg = e instanceof Error ? e.message : String(e);
-					log.error("Extension automation on_schedule execution failed", { id, error: msg });
-					new Notice(`Automation error in ${label}: ${msg}`);
-				}
-			})();
-			return;
-		}
-
-		if (!this.dispatchFn) {
-			log.warn("on_schedule job fired but no dispatch function set — skipping", { id });
-			return;
-		}
-
-		const context: VaultEventHookContext = {
-			hookEvent: "on_schedule",
-			timestamp: new Date().toISOString(),
-			notePath: null,
-			tagsAdded: null,
-			tagsRemoved: null,
+	/** Data sources for `collectTriggerTargets()`. */
+	private sourceAccessors(): TriggerSourceAccessors {
+		return {
+			getSettings: this.getSettings,
+			getDiscoveredWorkflows: this.getDiscoveredWorkflows,
+			getAutomations: this.extensionAutomationsAccessor,
+			getDiscoveredCircuits: this.getDiscoveredCircuits,
 		};
+	}
+}
 
-		// Collect hooks to dispatch: either the settings hook or the workflow trigger
-		const hooksToDispatch: Array<VaultEventHook | Workflow> = [];
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-		if (hook) {
-			hooksToDispatch.push(hook);
-		} else if (workflow) {
-			hooksToDispatch.push(workflow);
-		}
+/** `on_schedule` sources: every target needs a cron expression. */
+const SCHEDULE_TRIGGER_SPEC: TriggerSourceSpec = {
+	hookEvent: "on_schedule",
+	workflowTrigger: "on-schedule",
+	circuitMatches: (circuit) => !!circuit.schedule,
+	requireSchedule: true,
+};
 
-		if (hooksToDispatch.length === 0) {
-			log.warn("on_schedule job fired but no hooks to dispatch", { id });
-			return;
-		}
-
-		// Fire-and-forget
-		this.dispatchFn(hooksToDispatch, context, null);
+/** The cron expression for a collected `on_schedule` target. */
+function scheduleOf(target: TriggerTarget): string {
+	switch (target.kind) {
+		case "hook": return target.hook.schedule?.trim() ?? "";
+		case "workflow": return target.workflow.schedule ?? "";
+		case "automation": return target.automation.schedule?.trim() ?? "";
+		case "circuit": return target.circuit.schedule ?? "";
 	}
 }
