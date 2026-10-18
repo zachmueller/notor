@@ -95,6 +95,9 @@ import type { SpawnChildCircuit } from "./circuits/child-circuit";
 import { CircuitRunRegistry } from "./circuits/run-registry";
 import type { CircuitHost } from "./circuits/host";
 import type { RunApprovalChannel } from "./circuits/run-policy";
+import { matchCircuits } from "./api/resolve";
+import { createNotorApi, type NotorApiHandle } from "./api/notor-api";
+import type { NotorApi } from "./api/types";
 import { dispatchOnApprovalRequired, type ToolEventAutomationAccessors } from "./hooks/hook-events";
 import { createModalApprovalCallback } from "./ui/tool-approval-modal";
 import { buildUtils } from "./extensions/runtime-context";
@@ -242,6 +245,15 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.9
 	 */
 	private _lastFocusedChatLeafId?: string;
+
+	/**
+	 * Public, versioned API for other plugins and scripts:
+	 * `app.plugins.plugins.notor.api`. See docs/api.md.
+	 */
+	api!: NotorApi;
+	private _apiHandle?: NotorApiHandle;
+	private _resolveApiReady: () => void = () => {};
+	private _initialCircuitScan?: Promise<void>;
 
 	/** Conversation-scoped webview leaf cache (maps conversation UUID → WorkspaceLeaf). */
 	private _webviewLeafCache = new Map<string, WorkspaceLeaf>();
@@ -518,6 +530,12 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		setLogLevel(this.settings.log_level);
 		log.debug("Settings loaded", { settings: this.settings });
 
+		// External API: assigned early so scripts can find it and await `ready`.
+		this._apiHandle = createNotorApi(this, new Promise<void>((resolve) => {
+			this._resolveApiReady = resolve;
+		}));
+		this.api = this._apiHandle.api;
+
 		// Runtime model-limits registry (API-reported, learned and overridden
 		// context windows). Persists through a lightweight saveData — NOT
 		// saveSettings(), which rebuilds providers and drops model caches.
@@ -774,7 +792,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			// run initial discovery. processFrontMatter atomically updates the
 			// metadata cache, so rescanWorkflows() sees injected frontmatter
 			// immediately after the promise resolves.
-			autoInjectUnidentifiedWorkflows(
+			const workflowsScanned = autoInjectUnidentifiedWorkflows(
 				this.app,
 				this.app.vault,
 				this.app.metadataCache,
@@ -806,7 +824,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			// However, if the dispatcher was already created (e.g., by workspace
 			// restore triggering wireView() → createOrchestrator() → getToolDispatcher()
 			// before this async reload completes), we must sync it afterwards.
-			this.getExtensionManager().reload(true).then(() => {
+			const extensionsLoaded = this.getExtensionManager().reload(true).then(() => {
 				// Sync dispatcher if it was already lazily created before reload finished.
 				// The dispatcher populates from registry.getAll() at creation time, but
 				// if created before reload, it only had use_subagent. Re-register all
@@ -852,6 +870,13 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				log.warn("Initial extension discovery failed", { error: String(e) });
 			});
 
+			// The external API is usable once tools are registered and the first
+			// workflow/circuit scans finish (the circuit scan starts in the vault
+			// event hooks' own layout-ready callback, which has run by then).
+			void Promise.allSettled([extensionsLoaded, workflowsScanned])
+				.then(() => this._initialCircuitScan)
+				.finally(() => this._resolveApiReady());
+
 			// Enforce chat history retention policy (age + size limits).
 			// Fire-and-forget — non-blocking, runs once per startup.
 			this.getHistoryManager().enforceRetention().catch((e) => {
@@ -880,6 +905,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 	onunload() {
 		log.info("Plugin unloading");
+		this._apiHandle?.dispose();
 		setPlanReviewController(null);
 
 		// Abort all active sessions so their response loops can flush JSONL
@@ -1184,17 +1210,15 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 								this.app.metadataCache,
 								this.settings.notor_dir,
 							);
-							// Resolve by directory if it looks like a path, else by flow name.
+							// Resolve by flow name, else by directory path.
 							const flows = await parser.discoverCircuits();
 							const ref = flowNameOrDir.trim();
-							const match = flows.find(
-								(f) => f.flow.name === ref || f.flow.flowDir === ref || f.flow.flowDir.endsWith(`/${ref}`),
-							);
+							const match = matchCircuits(flows.map((f) => f.flow), ref)[0];
 							if (!match) {
 								new Notice(`Circuit '${ref}' not found; hook skipped.`);
 								return;
 							}
-							await launchCircuit(this, match.flow, objective, {
+							await launchCircuit(this, match, objective, {
 								origin: "hook",
 								requestUserInput: (flowName, question) =>
 									requestCircuitInput(this.app, flowName, question),
@@ -1326,8 +1350,9 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 			// Discover scheduled orchestration flows and register their cron jobs
 			// (no-op + empty cache when circuits_enabled is off). Fire-and-forget.
-			void this.rescanCircuits().catch((e) =>
-				log.warn("Initial orchestration flow scan failed", { error: String(e) }),
+			this._initialCircuitScan = this.rescanCircuits().then(
+				() => undefined,
+				(e) => log.warn("Initial orchestration flow scan failed", { error: String(e) }),
 			);
 
 			log.info("Vault event hook listeners evaluated and scheduler synced");

@@ -267,16 +267,23 @@ export async function launchCircuit(
 	});
 	const executor = buildExecutor(host, sessionLog, new Set<string>(), openNotes, policy, options?.observer);
 
-	const abortController = new AbortController();
-	const abortSignal = options?.abortSignal ?? abortController.signal;
-
 	// F1 Fix 1: give this run a lifecycle handle so the Stop UI, the single-instance
-	// guard, and onunload teardown can find and cancel it. A child / chaining run
-	// that inherits a parent abort signal (`options.abortSignal`) is cancelled
-	// transitively via the cascade, so only register the controller we own here.
+	// guard, and onunload teardown can find and cancel it. A `run_flow` child that
+	// inherits its parent's abort signal is cancelled transitively via the cascade,
+	// so it isn't registered. Any other caller's `abortSignal` (the external API)
+	// is linked to the registered controller instead.
+	const cascades = !!options?.abortSignal && !!options?.inheritedContext;
+	const abortController = new AbortController();
+	const abortSignal = cascades && options?.abortSignal ? options.abortSignal : abortController.signal;
+	if (!cascades && options?.abortSignal) {
+		const callerSignal = options.abortSignal;
+		if (callerSignal.aborted) abortController.abort();
+		else callerSignal.addEventListener("abort", () => abortController.abort(), { once: true });
+	}
+
 	// The policy is recorded for every run so children and successors inherit it.
 	registry.setPolicy(sessionId, policy);
-	if (!options?.abortSignal) {
+	if (!cascades) {
 		registry.register({
 			sessionId,
 			flowName: flow.name,

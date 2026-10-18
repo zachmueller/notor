@@ -612,4 +612,9 @@ export class ToolDispatcher {
 		return this.tools.has(canonicalToolName(toolName));
 	}
 
+	/** The registered tool for a name (legacy aliases resolve to their canonical tool). */
+	getTool(toolName: string): DispatchableTool | undefined {
+		return this.tools.get(canonicalToolName(toolName));
+	}
+
 }

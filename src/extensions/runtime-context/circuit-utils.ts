@@ -2,6 +2,7 @@ import type { BuilderContext, ExtensionUtils } from "./types";
 import { normalizePath } from "obsidian";
 import { TaskRegistry, type TaskFs, type TaskNote, type TaskStatus } from "../../circuits/task-registry";
 import { discoverWorkflows } from "../../workflows/workflow-discovery";
+import { matchWorkflows } from "../../api/resolve";
 import { logger } from "../../utils/logger";
 
 const log = logger("OrchestrationUtils");
@@ -92,9 +93,7 @@ export function buildCircuitUtils(
 				plugin.app.metadataCache,
 				plugin.settings.notor_dir,
 			);
-			const workflow = workflows.find(
-				(w) => w.display_name === workflowName || w.file_name === workflowName,
-			);
+			const workflow = matchWorkflows(workflows, workflowName)[0];
 			if (!workflow) {
 				throw new Error(
 					`Workflow '${workflowName}' not found under ${plugin.settings.notor_dir.replace(/\/$/, "")}/workflows/.`,
