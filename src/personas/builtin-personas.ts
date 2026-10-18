@@ -84,7 +84,7 @@ Available subsections:
 - Providers → Network retry
 - Tools → Shared settings, User tools, MCP tools
 - Rules and workflows → Rules, Workflows
-- Automation → Hooks, Vault event hooks
+- Automation → Hooks, Vault event hooks, External API
 - Reference → Model context limits
 
 ## Behavior

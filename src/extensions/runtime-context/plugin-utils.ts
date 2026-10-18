@@ -293,6 +293,8 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				/^providers\.\d+\.model_cache/,
 				/^providers\.\d+\.model_cache_timestamp/,
 				/^model_limits_cache(\.|$)/,
+				// The external API's safety gates are user-only.
+				/^external_api_/,
 			];
 
 			return async (keyPath: string, value: unknown): Promise<{

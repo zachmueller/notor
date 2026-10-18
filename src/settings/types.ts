@@ -558,6 +558,20 @@ export interface NotorSettings {
 	circuits_write_failure_notes: boolean;
 
 	/**
+	 * Expose `app.plugins.plugins.notor.api` to other plugins and scripts
+	 * (Templater, QuickAdd, …). When false, every API call throws `api_disabled`.
+	 * Runs still follow Plan/Act mode and the normal approval rules.
+	 */
+	external_api_enabled: boolean;
+
+	/**
+	 * Allow API callers to pass `approval: "auto"`, which approves every allowed
+	 * tool call in that run (never-auto-approve paths and blocked command
+	 * patterns still prompt). Off by default; the AI can't change it.
+	 */
+	external_api_allow_auto_approve: boolean;
+
+	/**
 	 * When true, notes an orchestration step reads or writes are opened in the
 	 * Obsidian editor (so the user can follow along). Defaults to false so a flow
 	 * that touches many notes does not spray tabs across the workspace. A flow can

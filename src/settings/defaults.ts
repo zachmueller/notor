@@ -245,6 +245,10 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	circuits_write_failure_notes: false,
 	circuits_open_notes_in_editor: false,
 
+	// External API (plugin.api)
+	external_api_enabled: true,
+	external_api_allow_auto_approve: false,
+
 	// Phase 12: Extension block rate limiting
 	extension_block_max_emits_per_window: 10,
 	extension_block_rate_window_seconds: 60,

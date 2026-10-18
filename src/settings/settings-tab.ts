@@ -40,6 +40,7 @@ import { renderTemplatesSection } from "./sections/templates";
 import { renderCircuitsSection } from "./sections/circuits";
 import { renderSystemPromptSection } from "./sections/system-prompt";
 import { renderUserAutomationsSection } from "./sections/user-automations";
+import { renderExternalApiSection } from "./sections/external-api";
 import { renderModelPresetsSection } from "./sections/model-presets";
 import { renderSetupBanner } from "./sections/setup-banner";
 import { createSettingsGroup, snapshotDetailsState, restoreDetailsState } from "./helpers";
@@ -237,6 +238,7 @@ export class NotorSettingTab extends PluginSettingTab {
 		renderHooksSection(automationGroup, ctx);
 		renderVaultEventHooksSection(automationGroup, ctx);
 		renderUserAutomationsSection(automationGroup, ctx);
+		renderExternalApiSection(automationGroup, ctx);
 
 		// --- Storage (collapsed by default) ---
 		const storageGroup = createSettingsGroup(containerEl, "Storage", false, persisted, onToggle);
