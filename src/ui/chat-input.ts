@@ -17,6 +17,7 @@ import {
 	readExternalFile,
 	isDuplicate,
 } from "../context/attachment";
+import { parseWikilinkSegments } from "../context/wikilink-attachments";
 import type { ConversationMode, Workflow } from "../types";
 import type { NotorSettings } from "../settings/types";
 import {
@@ -784,82 +785,31 @@ export class ChatInput {
 	}
 
 	/**
-	 * Scan pasted text for `[[Note]]` / `[[Note#Section]]` wikilinks and splice
-	 * each resolvable Markdown note in as an inline attachment token, keeping the
-	 * surrounding prose as plain text. Resolution uses Obsidian's own linkpath
-	 * resolver so behaviour matches the main editor; unresolvable links and
-	 * non-Markdown targets (images/PDFs) are left inert as plain text.
+	 * Scan pasted text for `[[Note]]` / `[[Note#Section]]` / `[[Note|alias]]`
+	 * wikilinks and splice each resolvable Markdown note in as an inline
+	 * attachment token, keeping the surrounding prose as plain text. Parsing is
+	 * shared with the external API via {@link parseWikilinkSegments}, so
+	 * unresolvable links and non-Markdown targets stay inert in both.
 	 *
 	 * Returns true if the paste was handled (so the caller skips the plain-text
 	 * fallback), false if no wikilink was present.
 	 */
 	private tryInsertPastedWikilinkTokens(text: string): boolean {
-		// Fast bail-out: no wikilink syntax at all.
-		if (!text.includes("[[")) return false;
+		const segments = parseWikilinkSegments(this.deps.app, text, this.deps.getPendingAttachments());
+		if (!segments.some((s) => s.kind === "link")) return false;
 
-		const pattern = /\[\[([^\]]+)\]\]/g;
-		let match: RegExpExecArray | null;
-		let lastIndex = 0;
-		let insertedAny = false;
-		// Track whether the paste ends on a token (no trailing text) so we can add
-		// a caret spacer only then — surrounding text otherwise supplies spacing.
-		let endedOnToken = false;
-
-		while ((match = pattern.exec(text)) !== null) {
-			const inner = match[1] ?? "";
-			const hashIdx = inner.indexOf("#");
-			const linkpath = (hashIdx === -1 ? inner : inner.slice(0, hashIdx)).trim();
-			const section = hashIdx === -1 ? null : inner.slice(hashIdx + 1).trim();
-
-			// Resolve via Obsidian's built-in linkpath resolver (matches main-editor
-			// link behaviour). Markdown notes only — leave media/unresolved inert.
-			const dest = linkpath
-				? this.deps.app.metadataCache.getFirstLinkpathDest(linkpath, "")
-				: null;
-			if (!dest || dest.extension !== "md") {
-				continue;
-			}
-
-			const attachment =
-				section && section.length > 0
-					? createVaultNoteSectionAttachment(dest.path, section)
-					: createVaultNoteAttachment(dest.path);
-
-			// Skip notes already attached (e.g. same link pasted twice, or already
-			// present from a prior action).
-			if (
-				isDuplicate(this.deps.getPendingAttachments(), {
-					path: attachment.path,
-					section: attachment.section,
-				})
-			) {
-				continue;
-			}
-
-			// Emit the plain text preceding this match verbatim, then the token. The
-			// token no longer forces its own spacer, so the source's spacing (a
-			// space in "[[A]] for me", none in "[[A]], ok") is preserved exactly.
-			const before = text.slice(lastIndex, match.index);
-			if (before) this.insertTextAtCursor(before);
-			this.insertWikilinkTokenAtCursor(attachment);
-			lastIndex = match.index + match[0].length;
-			insertedAny = true;
-			endedOnToken = true;
-		}
-
-		if (!insertedAny) return false;
-
-		// Emit any trailing text after the final matched link verbatim.
-		const after = text.slice(lastIndex);
-		if (after) {
-			this.insertTextAtCursor(after);
-			endedOnToken = false;
+		// Emit plain text verbatim around each token. Tokens force no spacer of
+		// their own, so the source's spacing (a space in "[[A]] for me", none in
+		// "[[A]], ok") is preserved exactly.
+		for (const seg of segments) {
+			if (seg.kind === "text") this.insertTextAtCursor(seg.text);
+			else this.insertWikilinkTokenAtCursor(seg.attachment);
 		}
 
 		// If the paste ends on an atomic token span with no following text, append
 		// a single trailing spacer so the caret can rest after it (a bare trailing
 		// contenteditable=false span is hard to type past).
-		if (endedOnToken) this.insertTextAtCursor(" ");
+		if (segments[segments.length - 1]?.kind === "link") this.insertTextAtCursor(" ");
 
 		return true;
 	}
