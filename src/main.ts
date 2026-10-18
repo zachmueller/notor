@@ -2301,7 +2301,17 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 *
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.5
 	 */
-	async loadConversation(
+	loadConversation(
+		view: NotorChatView,
+		orchestrator: ChatOrchestrator,
+		savedState?: Record<string, unknown> | null,
+	): Promise<void> {
+		const load = this._loadConversation(view, orchestrator, savedState);
+		view.conversationLoad = load;
+		return load;
+	}
+
+	private async _loadConversation(
 		view: NotorChatView,
 		orchestrator: ChatOrchestrator,
 		savedState?: Record<string, unknown> | null,
@@ -3139,6 +3149,34 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 * If conversationFilename is provided, that conversation is loaded via setState.
 	 * Optionally accepts conversationId to load by ID instead of filename.
 	 */
+	/**
+	 * Open (or reveal) the main chat panel — the one {@link openChatPanel}
+	 * targets — and resolve its orchestrator once its conversation has loaded.
+	 */
+	async openMainChatOrchestrator(): Promise<ChatOrchestrator | null> {
+		await this.openChatPanel();
+		const leaf = this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0];
+		return leaf ? this.loadedOrchestratorFor(leaf) : null;
+	}
+
+	/** Open a chat panel in a new tab on a fresh conversation and resolve its orchestrator. */
+	async openChatTabOrchestrator(): Promise<ChatOrchestrator | null> {
+		const leaf = this.app.workspace.getLeaf("tab");
+		await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true, state: { createNew: true } });
+		return this.loadedOrchestratorFor(leaf);
+	}
+
+	private async loadedOrchestratorFor(leaf: WorkspaceLeaf): Promise<ChatOrchestrator | null> {
+		await leaf.loadIfDeferred();
+		const view = leaf.view;
+		if (!(view instanceof NotorChatView)) return null;
+		// The view's initial load runs after setState returns (or on a timeout
+		// fallback); let it settle so it can't replace a conversation we start.
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		await view.conversationLoad?.catch(() => undefined);
+		return this.getOrchestratorForView(view);
+	}
+
 	openChatInNewTab(conversationFilename?: string, createNew = false, initialText?: string, conversationId?: string): void {
 		const leaf = this.app.workspace.getLeaf("tab");
 		const state: Record<string, unknown> = {};

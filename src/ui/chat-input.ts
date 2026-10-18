@@ -56,7 +56,7 @@ export interface ChatInputDeps {
 
 	onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
 	onStopResponse?: () => void;
-	onSendWorkflow?: (workflow: Workflow, supplementaryText: string) => Promise<void>;
+	onSendWorkflow?: (workflow: Workflow, supplementaryText: string, attachments: Attachment[]) => Promise<void>;
 	onModeToggle?: (mode: ConversationMode) => void;
 	onForkToNewPanel?: (messageId: string | undefined, initialText?: string) => Promise<void>;
 	/**
@@ -652,7 +652,7 @@ export class ChatInput {
 
 		try {
 			if (pendingWorkflow && this.deps.onSendWorkflow) {
-				await this.deps.onSendWorkflow(pendingWorkflow, content);
+				await this.deps.onSendWorkflow(pendingWorkflow, content, attachments);
 			} else {
 				await this.deps.onSendMessage?.(content, attachments);
 			}

@@ -141,6 +141,12 @@ export interface StepDefinition {
 // ---------------------------------------------------------------------------
 
 /**
+ * What launched a session. `api` is the external `plugin.api` (Templater and
+ * other plugins); `run_flow` / `chaining` are composition children.
+ */
+export type CircuitOrigin = "user" | "hook" | "schedule" | "run_flow" | "chaining" | "api";
+
+/**
  * The per-session metadata note (`sessions/{id}/session.json`), owned by the
  * `CircuitSessionManager` (INT-001). `status` is the recovery entry point
  * (the scan filters on `active`/`interrupted`); the authoritative replay source
@@ -174,7 +180,7 @@ export interface CircuitSessionMeta {
 	/** Composition linkage (`null` for a root). */
 	parent_session_id: string | null;
 	/** Always set at creation — the recovery discriminator. */
-	origin: "user" | "hook" | "schedule" | "run_flow" | "chaining";
+	origin: CircuitOrigin;
 	/** Format version — stamped at creation, default-on-read for legacy files. */
 	schema_version?: number;
 }

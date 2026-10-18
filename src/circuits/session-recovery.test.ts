@@ -294,6 +294,10 @@ describe("SessionRecovery — root selection", () => {
 		expect(recovery.isRecoverableRoot(meta({ origin: "schedule" }), metas)).toBe(true);
 	});
 
+	it("recovers an api origin as a root", () => {
+		expect(recovery.isRecoverableRoot(meta({ origin: "api" }), metas)).toBe(true);
+	});
+
 	it("does NOT recover a run_flow child by the top-level scan", () => {
 		expect(recovery.isRecoverableRoot(meta({ origin: "run_flow", parent_session_id: "parent" }), metas)).toBe(false);
 	});

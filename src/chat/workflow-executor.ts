@@ -56,6 +56,8 @@ import { resolveNote } from "../utils/resolve-note";
 import { retryPolicyFromSettings, withStreamRetry } from "../providers/stream-retry";
 import { errorFromChunk, retryableCodeOfError } from "../providers/network-errors";
 import { canonicalToolName } from "../tools/tool-aliases";
+import { buildAttachmentSnapshot, resolveAttachment, type Attachment } from "../context/attachment";
+import type { ApprovalOverride } from "./tool-policy";
 
 const log = logger("WorkflowExecutor");
 
@@ -103,6 +105,30 @@ function resolveWorkflowProviderConfig(
 		thinkingLevel: fallbackThinkingLevel,
 		presetName: fallbackPresetName,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Programmatic run options
+// ---------------------------------------------------------------------------
+
+/** Per-run options for programmatic workflow launches (the external API). */
+export interface WorkflowRunOptions {
+	/**
+	 * Attached to the workflow's first message (foreground runs only), and
+	 * rebuilt at dispatch time from snapshots like chat attachments.
+	 */
+	attachments?: Attachment[];
+	/** Overrides the workflow's `notor-conversation-mode` and the global mode. */
+	mode?: ConversationMode;
+	approvalOverride?: ApprovalOverride;
+	/** Headless only: the approver for this run (defaults to the panel-free modal). */
+	approvalCallback?: ApprovalCallback;
+	/** Headless only: stops the run between turns and closes pending approvals. */
+	abortSignal?: AbortSignal;
+	/** Headless only: conversation title (defaults to `Step→workflow: <name>`). */
+	title?: string;
+	/** Fired once the run's conversation exists, before the first LLM call. */
+	onConversationCreated?: (conversationId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,8 +233,12 @@ export class WorkflowExecutor {
 	 *
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-013
 	 */
-	async executeWorkflow(workflow: Workflow, supplementaryText = ""): Promise<void> {
-		return this._runWorkflowIntoConversation(workflow, supplementaryText, null);
+	async executeWorkflow(
+		workflow: Workflow,
+		supplementaryText = "",
+		opts?: WorkflowRunOptions,
+	): Promise<string | null> {
+		return this._runWorkflowIntoConversation(workflow, supplementaryText, null, opts);
 	}
 
 	/**
@@ -236,7 +266,7 @@ export class WorkflowExecutor {
 			new Notice(guardError);
 			return;
 		}
-		return this._runWorkflowIntoConversation(workflow, supplementaryText, active.id);
+		await this._runWorkflowIntoConversation(workflow, supplementaryText, active.id);
 	}
 
 	/**
@@ -248,12 +278,16 @@ export class WorkflowExecutor {
 	 * behavior. The `isExisting` branches diverge only where they must: reuse
 	 * vs. create the conversation, append vs. clear messages, persona-revert
 	 * bookkeeping, and clearing a prior workflow's hooks.
+	 *
+	 * Resolves with the conversation id once the run settles, or `null` when it
+	 * never started (assembly failed, empty prompt, or a session guard).
 	 */
 	private async _runWorkflowIntoConversation(
 		workflow: Workflow,
 		supplementaryText: string,
 		targetConversationId: string | null,
-	): Promise<void> {
+		opts?: WorkflowRunOptions,
+	): Promise<string | null> {
 		const isExisting = targetConversationId !== null;
 		log.info("Executing workflow", {
 			display_name: workflow.display_name,
@@ -307,7 +341,7 @@ export class WorkflowExecutor {
 			if (personaSwitchResult.switched && personaManager) {
 				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager, (p) => this.deps.setActivePersona(p));
 			}
-			return;
+			return null;
 		}
 
 		// Step 4: Empty guard — assembleWorkflowPrompt returns null and surfaces Notice itself
@@ -316,7 +350,7 @@ export class WorkflowExecutor {
 			if (personaSwitchResult.switched && personaManager) {
 				await revertWorkflowPersona(personaSwitchResult.previousPersona, personaManager, (p) => this.deps.setActivePersona(p));
 			}
-			return;
+			return null;
 		}
 
 		// Step 5: Create a new conversation with workflow metadata
@@ -335,7 +369,8 @@ export class WorkflowExecutor {
 			this.deps.getActivePresetName(),
 		);
 		const { providerId, modelId, useExtendedContext, thinkingLevel } = selection;
-		const currentMode = workflow.mode
+		const currentMode = opts?.mode
+			?? workflow.mode
 			?? (conversationManager.hasActiveConversation()
 				? conversationManager.getMode()
 				: this.deps.getSettings().mode);
@@ -416,10 +451,14 @@ export class WorkflowExecutor {
 		}
 
 		// Step 8: Add the assembled message as the first user message
+		const attachmentSnapshots = opts?.attachments?.length
+			? await this.snapshotAttachments(opts.attachments, providerId)
+			: undefined;
 		const userMessage = conversationManager.addMessage({
 			role: "user",
 			content: assemblyResult.assembledMessage,
 			is_workflow_message: true,
+			...(attachmentSnapshots?.length ? { attachments: attachmentSnapshots } : {}),
 		});
 
 		view?.renderUserMessage(userMessage);
@@ -436,8 +475,9 @@ export class WorkflowExecutor {
 		const guardError = this.deps.sessionManager.checkSessionGuards(conversation.id);
 		if (guardError) {
 			new Notice(guardError);
-			return;
+			return null;
 		}
+		opts?.onConversationCreated?.(conversation.id);
 
 		const snapshotConv = conversationManager.getActiveConversation()!;
 		const snapshotMessages = conversationManager.getMessages();
@@ -485,6 +525,7 @@ export class WorkflowExecutor {
 			workflowAssembly: assemblyResult,
 			approvalCallback,
 			interactionCallback,
+			approvalOverride: opts?.approvalOverride,
 			initialConfig,
 			initialParsedConfigs,
 		});
@@ -518,6 +559,30 @@ export class WorkflowExecutor {
 				}
 			},
 		});
+		return conversation.id;
+	}
+
+	/**
+	 * Resolve attachments and snapshot the ones that resolved, for dispatch-time
+	 * reconstruction (mirrors ChatOrchestrator.handleUserMessage). Failed ones
+	 * are logged and dropped so a broken attachment never reaches the LLM.
+	 */
+	private async snapshotAttachments(attachments: Attachment[], providerId: string) {
+		const settings = this.deps.getSettings();
+		const providerType = this.deps.providerRegistry.getConfig(providerId)?.type ?? "local";
+		const resolved = await Promise.all(attachments.map((att) => resolveAttachment(this.deps.app, att, {
+			maxDimension: settings.image_max_dimension,
+			compressionQuality: settings.image_compression_quality,
+		}, providerType)));
+		const vaultRuleManager = this.deps.getVaultRuleManager();
+		for (const att of resolved) {
+			if (att.status === "resolved") {
+				if (att.type.startsWith("vault_")) vaultRuleManager?.recordNoteAccess(att.path);
+			} else {
+				log.warn("Workflow attachment resolution failed", { path: att.path, error: att.error_message });
+			}
+		}
+		return resolved.filter((a) => a.status === "resolved").map((a) => buildAttachmentSnapshot(a));
 	}
 
 	// -------------------------------------------------------------------
@@ -556,7 +621,8 @@ export class WorkflowExecutor {
 	async runWorkflowHeadless(
 		workflow: Workflow,
 		supplementaryText: string,
-	): Promise<{ text: string; costUsd: number; iterations: number }> {
+		opts?: Omit<WorkflowRunOptions, "attachments">,
+	): Promise<{ text: string; costUsd: number; iterations: number; conversationId: string }> {
 		const personaManager = this.deps.getPersonaManager();
 
 		// Assemble the workflow prompt via the SHARED assembly path (no duplicate
@@ -576,7 +642,7 @@ export class WorkflowExecutor {
 		}
 
 		// Resolve provider/model exactly as the background path (preset → fallback).
-		const mode = workflow.mode ?? this.deps.getSettings().mode;
+		const mode = opts?.mode ?? workflow.mode ?? this.deps.getSettings().mode;
 		// No panel here: fall back to the active persona's model (pure
 		// resolution — personas never mutate the global registry), else the
 		// settings-tab default provider/model.
@@ -616,10 +682,11 @@ export class WorkflowExecutor {
 			workflow_tool_configs: assemblyResult.toolConfigs,
 			persona_name: activePersonaName,
 			is_background: true,
-			title: `Step→workflow: ${workflow.display_name}`,
+			title: opts?.title ?? `Step→workflow: ${workflow.display_name}`,
 			use_extended_context: useExtendedContext,
 		});
 		await this.deps.historyManager.createConversationFile(bgConversation);
+		opts?.onConversationCreated?.(bgConversation.id);
 
 		bgConversationManager.addMessage({
 			role: "user",
@@ -668,6 +735,7 @@ export class WorkflowExecutor {
 				useExtendedContext,
 				thinkingLevel,
 				pinnedPersona,
+				opts,
 			);
 		} finally {
 			if (whOverrideManager) {
@@ -695,7 +763,7 @@ export class WorkflowExecutor {
 			)
 			?? 0;
 
-		return { text: finalText ?? "", costUsd, iterations };
+		return { text: finalText ?? "", costUsd, iterations, conversationId: bgConversation.id };
 	}
 
 	// -------------------------------------------------------------------
@@ -970,9 +1038,11 @@ export class WorkflowExecutor {
 		modelId: string,
 		useExtendedContext: boolean,
 		thinkingLevel: string | null,
-		pinnedPersona: Persona | null
+		pinnedPersona: Persona | null,
+		runOpts?: Pick<WorkflowRunOptions, "approvalOverride" | "approvalCallback" | "abortSignal">,
 	): Promise<void> {
 		let continueLoop = true;
+		const runAbort = runOpts?.abortSignal;
 		const vaultRootPath = this.deps.getVaultRootPath();
 
 		// Resolve initial effective config
@@ -982,7 +1052,8 @@ export class WorkflowExecutor {
 		// Capture approval callback for session-scoped dispatch. The background
 		// conversation is never rendered in a panel, so the panel's callback (which
 		// looks up a tool-call card there) can't serve it — prompt panel-free.
-		const approvalCallback: ApprovalCallback = this.deps.getBackgroundApprovalCallback?.(`Workflow '${execution.workflow_name}'`)
+		const approvalCallback: ApprovalCallback = runOpts?.approvalCallback
+			?? this.deps.getBackgroundApprovalCallback?.(`Workflow '${execution.workflow_name}'`)
 			?? (async () => "approved" as const);
 
 		const bgConv = bgConvManager.getActiveConversation()!;
@@ -998,12 +1069,13 @@ export class WorkflowExecutor {
 			thinkingLevel,
 			workflowAssembly,
 			approvalCallback,
+			approvalOverride: runOpts?.approvalOverride,
 			initialConfig,
 			initialParsedConfigs,
 		});
 
 		try {
-		while (continueLoop) {
+		while (continueLoop && !runAbort?.aborted) {
 			continueLoop = false;
 
 			// 1. Evaluate vault rules + resolve effective tool config
@@ -1054,6 +1126,9 @@ export class WorkflowExecutor {
 			// throttling, overloaded). Unattended runs have no one to click
 			// Retry, so this is where automatic retry pays off most.
 			const abortController = new AbortController();
+			// A run-level abort (API cancel) ends this stream like any other abort.
+			const onRunAbort = () => abortController.abort();
+			runAbort?.addEventListener("abort", onRunAbort, { once: true });
 			// Register liveness for this stream iteration so the sleep/wake
 			// reconciler can tell a frozen socket apart from a busy tool call.
 			concurrencyManager.markStreaming(execution.id, abortController);
@@ -1127,6 +1202,7 @@ export class WorkflowExecutor {
 					}),
 				},
 			);
+			runAbort?.removeEventListener("abort", onRunAbort);
 			const { textContent, inputTokens, outputTokens, toolCallId, toolName, parameters, hasToolCall } = streamed;
 
 			if (hasToolCall) {
@@ -1178,7 +1254,7 @@ export class WorkflowExecutor {
 					parameters,
 					mode,
 					toolCallMessage.id,
-					undefined, // abortSignal
+					runAbort, // closes a pending approval prompt on cancel
 					undefined, // onProgress
 					policyCtx,
 					session.approvalCallback,

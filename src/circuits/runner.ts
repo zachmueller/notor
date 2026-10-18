@@ -53,6 +53,7 @@ import {
 	USER_INPUT_REQUIRED,
 	type CircuitEvent,
 	type Circuit,
+	type CircuitOrigin,
 	type StepDefinition,
 } from "./types";
 
@@ -122,7 +123,7 @@ export interface CircuitRunnerDeps {
 	/** Root abort signal (cascades into every turn). */
 	abortSignal: AbortSignal;
 	/** Session origin for the session.start log entry. */
-	origin: "user" | "hook" | "schedule" | "run_flow" | "chaining";
+	origin: CircuitOrigin;
 	parentSessionId?: string | null;
 	/**
 	 * Inherited cascade context for a **child** run (INT-043/045/046). When set,

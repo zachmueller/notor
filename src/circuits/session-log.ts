@@ -22,6 +22,7 @@
  */
 
 import { logger } from "../utils/logger";
+import type { CircuitOrigin } from "./types";
 
 const log = logger("SessionLog");
 
@@ -39,7 +40,7 @@ export interface SessionStartEntry extends BaseEntry {
 	session_id: string;
 	flow: string;
 	prompt: string;
-	origin: "user" | "hook" | "schedule" | "run_flow" | "chaining";
+	origin: CircuitOrigin;
 	parent_session_id: string | null;
 	/** Format version of this session-log stream — read by the reader, default 1 for legacy. */
 	schema_version?: number;

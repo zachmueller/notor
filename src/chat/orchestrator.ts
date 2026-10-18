@@ -34,7 +34,7 @@ import { recoverFromContextOverflow } from "./context-overflow-recovery";
 import { ViewRouter } from "./view-router";
 import { SessionManager } from "./session-manager";
 import { ConversationLifecycleManager } from "./conversation-lifecycle";
-import { WorkflowExecutor } from "./workflow-executor";
+import { WorkflowExecutor, type WorkflowRunOptions } from "./workflow-executor";
 import type { HistoryManager } from "./history";
 import type { NotorChatView } from "../ui/chat-view";
 import { showOsNotification, revealChatPanel } from "../ui/os-notification";
@@ -877,8 +877,12 @@ export class ChatOrchestrator implements ToolSessionContext {
 	// -----------------------------------------------------------------------
 
 	/** @see WorkflowExecutor.executeWorkflow */
-	async executeWorkflow(workflow: Workflow, supplementaryText = ""): Promise<void> {
-		return this.workflowExecutor.executeWorkflow(workflow, supplementaryText);
+	async executeWorkflow(
+		workflow: Workflow,
+		supplementaryText = "",
+		opts?: WorkflowRunOptions,
+	): Promise<string | null> {
+		return this.workflowExecutor.executeWorkflow(workflow, supplementaryText, opts);
 	}
 
 	/** @see WorkflowExecutor.switchWorkflow */
@@ -908,8 +912,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 	async runWorkflowHeadless(
 		workflow: Workflow,
 		supplementaryText = "",
-	): Promise<{ text: string; costUsd: number; iterations: number }> {
-		return this.workflowExecutor.runWorkflowHeadless(workflow, supplementaryText);
+		opts?: Omit<WorkflowRunOptions, "attachments">,
+	): Promise<{ text: string; costUsd: number; iterations: number; conversationId: string }> {
+		return this.workflowExecutor.runWorkflowHeadless(workflow, supplementaryText, opts);
 	}
 
 	/**

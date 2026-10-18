@@ -153,8 +153,8 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 
 
 	// E-012 / E-015: Wire workflow send callback
-	view.setOnSendWorkflow(async (workflow, supplementaryText) => {
-		await orchestrator.executeWorkflow(workflow, supplementaryText);
+	view.setOnSendWorkflow(async (workflow, supplementaryText, attachments) => {
+		await orchestrator.executeWorkflow(workflow, supplementaryText, { attachments });
 	});
 
 	// Workflow chip — deactivate: drop the workflow's tool-config overrides for

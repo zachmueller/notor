@@ -24,12 +24,13 @@ import { writeFailureReport, shouldWriteFailureReport } from "./failure-report";
 import { CircuitRunner, type CircuitRunResult } from "./runner";
 import { newRootBudget } from "../run-loop/budget";
 import { FLOW_CANCELLED } from "./types";
-import type { Circuit } from "./types";
+import type { Circuit, CircuitOrigin } from "./types";
 import type { FlowRunEntry } from "../workflows/workflow-activity-tracker";
 import { VaultSessionFs, VaultSessionLogWriter, buildExecutor, listOpenTaskKeys } from "./launch-wiring";
 import { chainToSuccessor, resolveSuccessorInputs } from "./chaining";
 import { circuitDataRootOf } from "./data-root";
 import { resolveRunPolicy, type CircuitRunPolicy } from "./run-policy";
+import type { CircuitRunObserver } from "./run-observer";
 
 const log = logger("CircuitLaunch");
 
@@ -149,7 +150,7 @@ export async function launchCircuit(
 	flow: Circuit,
 	promptText: string,
 	options?: {
-		origin?: "user" | "hook" | "schedule" | "run_flow" | "chaining";
+		origin?: CircuitOrigin;
 		parentSessionId?: string | null;
 		mode?: ConversationMode;
 		abortSignal?: AbortSignal;
@@ -188,6 +189,8 @@ export async function launchCircuit(
 		 * explicit `mode` still overrides it.
 		 */
 		policy?: CircuitRunPolicy;
+		/** Observes this run's step turns (follow mode); not passed to children. */
+		observer?: CircuitRunObserver;
 	},
 ): Promise<CircuitRunResult> {
 	const sessionId = options?.sessionId ?? newSessionId();
@@ -262,7 +265,7 @@ export async function launchCircuit(
 		parentSessionId,
 		mode: options?.mode,
 	});
-	const executor = buildExecutor(host, sessionLog, new Set<string>(), openNotes, policy);
+	const executor = buildExecutor(host, sessionLog, new Set<string>(), openNotes, policy, options?.observer);
 
 	const abortController = new AbortController();
 	const abortSignal = options?.abortSignal ?? abortController.signal;

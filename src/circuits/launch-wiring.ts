@@ -41,7 +41,11 @@ import { VaultStepConversationStore } from "./step-conversation-store";
 import { showCircuitProgressNotice } from "./notices";
 import { jumpToStepConversation } from "../ui/circuit-modals";
 import { circuitDataRootOf } from "./data-root";
+import { logger } from "../utils/logger";
 import type { CircuitRunPolicy } from "./run-policy";
+import type { CircuitRunObserver } from "./run-observer";
+
+const log = logger("CircuitLaunch");
 
 /**
  * Query a session's still-open/running tasks for the runner's `FLOW_COMPLETE`
@@ -83,6 +87,7 @@ export function buildExecutor(
 	committedKeys: Set<string>,
 	openNotesInEditor: boolean,
 	policy?: CircuitRunPolicy,
+	observer?: CircuitRunObserver,
 ): StepTurnExecutor {
 	// INT-006: persist each step conversation (hidden from the flat list) with its
 	// orchestration_edges header into the chat history directory.
@@ -116,15 +121,17 @@ export function buildExecutor(
 			// handler uses) — no new navigation is introduced. The closure resolves the
 			// active orchestrator lazily at right-click time (a panel may not be open
 			// when the flow is launched from a hook).
-			showProgressNotice: ({ flowName, stepName, iteration, emittedTopic, conversationId }) =>
+			showProgressNotice: (turn) => {
 				showCircuitProgressNotice({
-					flowName,
-					stepName,
-					iteration,
-					emittedTopic,
-					conversationId,
-					onJumpToConversation: () => jumpToStepConversation(host, conversationId),
-				}),
+					...turn,
+					onJumpToConversation: () => jumpToStepConversation(host, turn.conversationId),
+				});
+				try {
+					observer?.onStepTurnSaved?.(turn);
+				} catch (e) {
+					log.warn("Circuit run observer threw", { error: String(e) });
+				}
+			},
 			resolveIncludes: async (body, notePath) => {
 				const result = await resolveIncludeNotes(
 					body,

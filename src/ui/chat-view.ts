@@ -86,7 +86,7 @@ export class NotorChatView extends ItemView {
 	private getWorkflowsCallback?: () => Workflow[];
 
 	// Workflow send callback (E-012)
-	private onSendWorkflow?: (workflow: Workflow, supplementaryText: string) => Promise<void>;
+	private onSendWorkflow?: (workflow: Workflow, supplementaryText: string, attachments: Attachment[]) => Promise<void>;
 
 	// Active-workflow chip state — shows the workflow that owns the current
 	// conversation, with a context menu to deactivate or switch it.
@@ -160,6 +160,13 @@ export class NotorChatView extends ItemView {
 	 * @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Amendment R2
 	 */
 	_loadConversationAbort?: AbortController;
+
+	/**
+	 * The latest `loadConversation()` run for this view. Awaited by callers that
+	 * drive the panel programmatically (the external API) so they don't race the
+	 * initial load.
+	 */
+	conversationLoad?: Promise<void>;
 
 	/**
 	 * Timeout ID for the `setTimeout(0)` fallback conversation load.
@@ -567,7 +574,7 @@ export class NotorChatView extends ItemView {
 	 *
 	 * @see specs/03-workflows-personas/tasks/group-e-tasks.md — E-012, E-013
 	 */
-	setOnSendWorkflow(callback: (workflow: Workflow, supplementaryText: string) => Promise<void>): void {
+	setOnSendWorkflow(callback: (workflow: Workflow, supplementaryText: string, attachments: Attachment[]) => Promise<void>): void {
 		this.onSendWorkflow = callback;
 		if (this.chatInput) this.chatInput.deps.onSendWorkflow = callback;
 	}

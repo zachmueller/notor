@@ -231,4 +231,47 @@ describe("WorkflowExecutor.runWorkflowHeadless (INT-031)", () => {
 			/no prompt content/i,
 		);
 	});
+
+	it("reports the conversation id, honors mode and title, and routes approval through the run's callback", async () => {
+		const provider = mockProvider(TOOL("t1", "write_note"), TEXT("Done."));
+		const dispatch = vi.fn(async () => ({ tool_name: "write_note", success: true, result: "ok" }));
+		const { deps } = makeDeps(provider, dispatch);
+		const executor = new WorkflowExecutor(deps);
+		const approvalCallback = vi.fn(async () => "approved" as const);
+		const onConversationCreated = vi.fn();
+
+		const result = await executor.runWorkflowHeadless(makeWorkflow(), "go", {
+			mode: "plan",
+			title: "Workflow: wf (API)",
+			approvalCallback,
+			approvalOverride: "prompt",
+			onConversationCreated,
+		});
+
+		expect(onConversationCreated).toHaveBeenCalledWith(result.conversationId);
+		const created = (deps.historyManager.createConversationFile as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+		expect(created).toMatchObject({ id: result.conversationId, title: "Workflow: wf (API)", mode: "plan" });
+		// mode, policy ctx (with the override), and the run's approval callback reach dispatch.
+		const call = dispatch.mock.calls[0] as unknown[];
+		expect(call[2]).toBe("plan");
+		expect(call[6]).toMatchObject({ approvalOverride: "prompt" });
+		expect(call[7]).toBe(approvalCallback);
+	});
+
+	it("stops between turns once the run's abort signal fires", async () => {
+		const controller = new AbortController();
+		const provider = mockProvider(TOOL("t1", "read_note"), TEXT("never reached"));
+		const dispatch = vi.fn(async () => {
+			controller.abort();
+			return { tool_name: "read_note", success: true, result: "ok" };
+		});
+		const { deps } = makeDeps(provider, dispatch);
+		const executor = new WorkflowExecutor(deps);
+
+		const result = await executor.runWorkflowHeadless(makeWorkflow(), "go", { abortSignal: controller.signal });
+
+		expect(dispatch).toHaveBeenCalledTimes(1);
+		expect(provider.sendMessage).toHaveBeenCalledTimes(1);
+		expect(result.text).toBe("");
+	});
 });

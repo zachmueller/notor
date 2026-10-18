@@ -140,7 +140,7 @@ export interface RecoveryScanOptions {
 }
 
 /** Origins the top-level scan recognizes (the discriminator domain). */
-const KNOWN_ORIGINS = new Set(["user", "hook", "schedule", "run_flow", "chaining"]);
+const KNOWN_ORIGINS = new Set(["user", "hook", "schedule", "run_flow", "chaining", "api"]);
 /** Statuses the scan considers recoverable. */
 const RECOVERABLE_STATUSES = new Set(["active", "interrupted"]);
 /** Terminal statuses (a chaining predecessor must be one of these to root its successor). */
@@ -399,9 +399,12 @@ export class SessionRecovery {
 			// `user` / `hook` / `schedule` are all launcher-less roots with no live
 			// parent to reconcile them. Bug A: `schedule` was omitted, so a crashed
 			// scheduled run surfaced as a loud recovery error instead of resuming.
+			// `api` launches are roots too; a resume runs under default settings (the
+			// caller's mode/approval options and awaiting promise don't survive a crash).
 			case "user":
 			case "hook":
 			case "schedule":
+			case "api":
 				return true;
 			case "chaining": {
 				const parentId = meta.parent_session_id;
