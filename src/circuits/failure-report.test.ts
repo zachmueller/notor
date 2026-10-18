@@ -138,7 +138,7 @@ describe("writeFailureReport", () => {
 		expect(out).toBeTruthy();
 
 		// Frontmatter — NOT a flow/step discriminator (so discovery ignores it).
-		expect(out).toContain("notor-type: orchestration-failure-report");
+		expect(out).toContain("notor-type: circuit-failure-report");
 		expect(out).not.toMatch(/notor-type: orchestration-(flow|step)\b/);
 		expect(out).toContain('notor-session-id: "sess-abc123"');
 
@@ -172,7 +172,7 @@ describe("writeFailureReport", () => {
 			sessionDir: SESSION_DIR,
 		});
 		const out = fs.files.get(path)!;
-		expect(out).toContain("notor-type: orchestration-failure-report");
+		expect(out).toContain("notor-type: circuit-failure-report");
 		// Still records the terminal reason even with no log.
 		expect(out).toContain("had no handler");
 		expect(out).toMatch(/no turns recorded/i);

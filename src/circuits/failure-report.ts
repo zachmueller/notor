@@ -10,9 +10,10 @@
  * instead of spelunking the raw per-session JSON/JSONL machine state.
  *
  * This module **only composes & formats** — it adds no new capture. The note's
- * frontmatter uses a dedicated `notor-type: orchestration-failure-report`
- * discriminator (deliberately NOT `orchestration-flow` / `orchestration-step`) so
- * flow discovery and the flow parser ignore it.
+ * frontmatter uses a dedicated `notor-type: circuit-failure-report`
+ * discriminator (deliberately NOT `circuit` / `circuit-step` or their legacy
+ * spellings) so circuit discovery and the parser ignore it. Reports written
+ * before the circuits rename say `orchestration-failure-report`.
  *
  * Mirrors {@link ./memories} — a tiny path helper + a writer over {@link SessionFs}.
  */
@@ -130,7 +131,7 @@ function buildReportMarkdown({ meta, result, entries, sessionDir }: BuildArgs): 
 	sections.push(
 		[
 			"---",
-			"notor-type: orchestration-failure-report",
+			"notor-type: circuit-failure-report",
 			`notor-flow: ${yamlString(meta.flow_name)}`,
 			`notor-session-id: ${yamlString(meta.session_id)}`,
 			`notor-status: ${yamlString(result.status)}`,

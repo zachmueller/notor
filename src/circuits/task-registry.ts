@@ -6,8 +6,10 @@
  * implementation.
  *
  * Task notes live at `sessions/{id}/tasks/{key}.md` with `notor-type:
- * orchestration-task` frontmatter (the **single authority** of
- * [contracts/vault-schema.md]). The body is the free-form description.
+ * circuit-task` frontmatter (the **single authority** of
+ * [contracts/vault-schema.md]; notes written before the circuits rename say
+ * `orchestration-task`, and nothing reads the value back). The body is the
+ * free-form description.
  *
  * Frontmatter is read/written **deterministically** here (a tiny purpose-built
  * block, not the metadata-cache pipeline) because task notes live under the
@@ -214,7 +216,7 @@ export class TaskRegistry {
 export function serializeTaskNote(note: TaskNote): string {
 	const fm = [
 		"---",
-		"notor-type: orchestration-task",
+		"notor-type: circuit-task",
 		`notor-task-status: ${note.status}`,
 		`notor-task-key: ${note.key}`,
 		`notor-task-created: ${note.created}`,

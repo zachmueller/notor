@@ -166,7 +166,7 @@ A persistent cross-session note, `{notor_dir}/{data root}/memories.md`, is seede
 
 ### Debugging failed runs
 
-The per-session `session.json` / `session-log.jsonl` are raw machine state — useful but not browsable. Enable **Write failed-run debug notes** ([Settings → Notor → Circuits](notor-settings://Circuits)) and any run that ends in `error` also writes a human-readable Markdown report to `{notor_dir}/{data root}/failures/{circuit-slug}-{session-id}.md`. The note distils data already captured — the objective, the failure reason (the terminal `CIRCUIT_ERROR` payload), the failing step + stack (from the `{step}.code_error` event), and a compact turn-by-turn timeline — plus pointers to the raw session files. Open it, or `@`-reference it in a Notor chat, to debug the run. The setting is **off by default** and read at finalize time (no extension reload needed); the note carries `notor-type: orchestration-failure-report` so circuit discovery ignores it.
+The per-session `session.json` / `session-log.jsonl` are raw machine state — useful but not browsable. Enable **Write failed-run debug notes** ([Settings → Notor → Circuits](notor-settings://Circuits)) and any run that ends in `error` also writes a human-readable Markdown report to `{notor_dir}/{data root}/failures/{circuit-slug}-{session-id}.md`. The note distils data already captured — the objective, the failure reason (the terminal `CIRCUIT_ERROR` payload), the failing step + stack (from the `{step}.code_error` event), and a compact turn-by-turn timeline — plus pointers to the raw session files. Open it, or `@`-reference it in a Notor chat, to debug the run. The setting is **off by default** and read at finalize time (no extension reload needed); the note carries `notor-type: circuit-failure-report` so circuit discovery ignores it.
 
 ## Running a circuit
 
@@ -258,6 +258,7 @@ Everything below keeps working indefinitely, with no warnings. Write new circuit
 | Setting `circuits_enabled`, `circuits_write_failure_notes`, `circuits_open_notes_in_editor` | `orchestration_*` | Migrated automatically on load. |
 | Hook action `run_circuit` with `circuit` | `run_orchestration` with `orchestration_flow` | Migrated on load; legacy values are still read. |
 | Persona `circuit-creator` | `orchestration-creator` | |
+| Task notes `notor-type: circuit-task`, failure reports `notor-type: circuit-failure-report` | `orchestration-task`, `orchestration-failure-report` | Written by Notor, never read back. Notes created before the rename keep the old value; update any Dataview or Bases queries to match both. |
 | Settings link `notor-settings://Circuits` | `notor-settings://Orchestration` | |
 
 The command IDs (`notor:run-orchestration`, `notor:stop-orchestration`) are unchanged, so existing hotkeys keep working; the commands are now named **Run circuit** and **Stop circuit**.

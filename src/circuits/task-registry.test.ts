@@ -139,7 +139,7 @@ describe("TaskRegistry — frontmatter (de)serialization", () => {
 			completed: null,
 			description: "Implement the --verbose flag.",
 		});
-		expect(md).toContain("notor-type: orchestration-task");
+		expect(md).toContain("notor-type: circuit-task");
 		expect(md).toContain("notor-task-status: running");
 		expect(md).toContain("notor-task-completed: null");
 		const parsed = parseTaskNote(md, "step-01-impl");
