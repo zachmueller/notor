@@ -1211,15 +1211,22 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 							const match = matchCircuits(flows.map((f) => f.flow), ref)[0];
 							if (!match) {
 								new Notice(`Circuit '${ref}' not found; hook skipped.`);
+								options?.onSettled?.("error", `Circuit '${ref}' not found`);
 								return;
 							}
-							await launchCircuit(this, match, objective, {
-								origin: options?.origin ?? "hook",
-								sessionId: options?.sessionId,
-								observer: options?.observer,
-								requestUserInput: (flowName, question) =>
-									requestCircuitInput(this.app, flowName, question),
-							});
+							try {
+								const result = await launchCircuit(this, match, objective, {
+									origin: options?.origin ?? "hook",
+									sessionId: options?.sessionId,
+									observer: options?.observer,
+									requestUserInput: (flowName, question) =>
+										requestCircuitInput(this.app, flowName, question),
+								});
+								options?.onSettled?.(result.status, result.status === "error" ? result.text : undefined);
+							} catch (e) {
+								options?.onSettled?.("error", e instanceof Error ? e.message : String(e));
+								throw e;
+							}
 						}
 					: undefined,
 			};

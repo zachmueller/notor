@@ -100,6 +100,8 @@ export interface HookCircuitLaunchOptions {
 	sessionId?: string;
 	/** Live observer (e.g. to learn the entry step's conversation id). */
 	observer?: CircuitRunObserver;
+	/** Called once the run ends (or fails to launch, with `"error"`). */
+	onSettled?: (status: "completed" | "cancelled" | "error", error?: string) => void;
 }
 
 /**
