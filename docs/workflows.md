@@ -44,7 +44,9 @@ This means you can simply drop a Markdown file with instructions into the workfl
 
 **From the command palette:** The **Notor: Run workflow** command opens a quick-pick list of all discovered workflows. Selecting one assembles the workflow prompt, resolves any [`<include_note>`](include-note.md) tags, and sends it to the LLM as a new conversation in the chat panel with full transparency: streaming responses, inline tool calls, diff previews, and approval prompts all work as normal.
 
-**Via slash-command attachment:** Type `/` at the start of the Notor chat input to open a fuzzy-search autocomplete list of workflows. Selecting one inserts a chip in the input area (like a note attachment). You can type additional context alongside the chip. At most one workflow can be attached per message.
+**Via slash-command attachment:** Type `/` at the start of the Notor chat input to open a fuzzy-search autocomplete list of workflows. Selecting one inserts a chip in the input area (like a note attachment). You can type additional context alongside the chip. At most one workflow can be attached per message. Notes you attach alongside the chip are sent with the workflow.
+
+**From a script:** Templater scripts and other plugins can run a workflow headless or in a chat panel with [`runWorkflow`](api.md#running-a-workflow).
 
 ## Workflow aliases
 

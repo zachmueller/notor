@@ -174,7 +174,7 @@ Open the command palette → **Notor: Run circuit**, pick a circuit, and enter a
 
 > **Iteration counter.** The `iteration N` shown in Notices (and `session.json`'s `iteration`) is the **step-turn / hop counter, which includes code steps** — it is **not** the same unit as `notor-max-iterations`, which counts **LLM turns only**. A code-step-heavy circuit's hop counter can climb well past `notor-max-iterations` without tripping it (such circuits are bounded by `notor-max-runtime-minutes` + stale-loop detection instead).
 
-A circuit can also be launched unattended by a **hook** with the `run_circuit` action type (Settings → Notor → Hooks), stamped `origin: "hook"`.
+A circuit can also be launched unattended by a **hook** with the `run_circuit` action type (Settings → Notor → Hooks), stamped `origin: "hook"`. Scripts and other plugins can start one with [`runCircuit`](api.md#running-a-circuit), stamped `origin: "api"`.
 
 Step tool calls follow the normal approval rules. A call that needs approval opens an **Approve tool call** dialog, because a circuit has no chat panel to prompt in. `run_flow` children and `notor-on-complete-flow` successors use the same approval channel and Plan/Act mode as the run that started them. For unattended circuits, see [Runs with no chat panel](safety.md#runs-with-no-chat-panel).
 
@@ -240,6 +240,7 @@ Enabling the feature group materializes three first-party reference circuits und
 - [Sub-agents](sub-agents.md) — the run-tree unifies circuit steps and sub-agents; `run_circuit` generalizes the sub-agent pattern from one conversation to a whole circuit.
 - [Extensions](extensions.md) — code steps reuse the same `utils` / `libs` runtime as user-defined tools.
 - [Workflows](workflows.md) — step→workflow invocation delegates a bounded sub-task to a workflow; a workflow is a single-step interactive circuit.
+- [Scripting API](api.md) — start circuits from Templater scripts and other plugins with `runCircuit`.
 
 ## Legacy names
 

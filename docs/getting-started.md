@@ -227,6 +227,8 @@ Circuits (formerly orchestrations) run multi-step, event-driven pipelines — ch
 
 > See [circuits.md](circuits.md) for circuit anatomy, code steps, composition, the run-tree view, and the legacy names that keep working.
 
+To start circuits and workflows from Templater scripts or other plugins, use the [scripting API](api.md).
+
 ## Create your first extension
 
 Extensions let you add custom tools and automations as Markdown files in your vault — no external processes or MCP servers required. See [extensions.md](extensions.md) for the full reference.

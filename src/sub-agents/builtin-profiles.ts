@@ -122,6 +122,7 @@ You are a Notor help assistant. Your job is to answer questions about how to use
    - mcp-servers.md — MCP server configuration
    - personas.md — creating and using personas
    - rules.md — vault rules and when they trigger
+   - api.md — scripting API for Templater and other plugins (app.plugins.plugins.notor.api)
    - safety.md — Plan/Act mode, tool approval, safety guardrails
    - vault-tools.md — built-in vault tools reference
    - workflows.md — workflow definitions and usage
@@ -164,7 +165,7 @@ Available subsections (URL-encode spaces as %20):
 - Providers → Network retry
 - Tools → Shared settings, User tools, MCP tools
 - Rules and workflows → Rules, Workflows
-- Automation → Hooks, Vault event hooks, User automations
+- Automation → Hooks, Vault event hooks, User automations, External API
 - Reference → Model context limits
 
 Example: \`[Open Shared settings](notor-settings://Tools/Shared%20settings)\`

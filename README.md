@@ -39,6 +39,7 @@ Notor gives you a full AI chat panel inside Obsidian with the ability to read, s
 
 - **[MCP tool servers](docs/mcp-servers.md)** — connect local (stdio) or remote (SSE, Streamable HTTP) MCP servers to extend the AI's tool set with uniform Plan/Act enforcement and approval UI
 - **[User-defined extensions](docs/extensions.md)** — create custom tools and automations as Markdown files in your vault with TypeScript/JavaScript code fences, per-extension settings with auto-generated UI, and full access to Obsidian APIs
+- **[Scripting API](docs/api.md)** — run circuits, workflows, and tools from Templater scripts and other plugins through `app.plugins.plugins.notor.api`, with the same Plan/Act and approval rules as chat
 
 ---
 
