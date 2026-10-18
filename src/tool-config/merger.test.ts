@@ -174,6 +174,17 @@ describe("mergeToolConfigs", () => {
 			expect(result.tools.read_note!.auto_approve).toBe(false);
 		});
 
+		it("persona auto_approve: true overrides a global false for a write tool", () => {
+			const configs: ParsedToolConfig[] = [
+				makeConfig("persona", "p.md", {
+					write_note: { auto_approve: true },
+				}),
+			];
+
+			const result = mergeToolConfigs(configs, { write_note: false }, ALL_TOOLS);
+			expect(result.tools.write_note!.auto_approve).toBe(true);
+		});
+
 		it("handles MCP server-level autoApprove in namespaced format", () => {
 			const mcpTools = [...ALL_TOOLS, "myserver__list", "myserver__search"];
 			const globalAutoApprove = {
