@@ -58,7 +58,8 @@ import { planSidecarPath } from "../plans/plan-store";
 import { normalizePath, type Vault } from "obsidian";
 import type { Conversation, Message } from "../types";
 import type { CompactionRecord } from "../context/compaction";
-import { isSubAgentFilename, isHiddenFromConversationList } from "./sub-agent-history";
+import { chatMessagesToMessages, isSubAgentFilename, isHiddenFromConversationList } from "./sub-agent-history";
+import type { ChatMessage } from "../providers/provider";
 import { logger } from "../utils/logger";
 import type { ContentBlock } from "../media/types";
 import { getTextContent } from "../media/types";
@@ -114,6 +115,13 @@ export class HistoryManager {
 	 * between concurrent appendMessage / updateConversationHeader calls.
 	 */
 	private readonly writeQueues = new Map<string, Promise<void>>();
+
+	/**
+	 * Conversations loaded from a file whose name doesn't follow
+	 * {@link conversationFilename} (circuit step conversations), keyed by id, so
+	 * later writes land in that same file.
+	 */
+	private readonly filenameOverrides = new Map<string, string>();
 
 	constructor(
 		private readonly vault: Vault,
@@ -334,9 +342,11 @@ export class HistoryManager {
 					} catch {
 						// Corrupt header — overwrite cleanly.
 					}
+					// Keep a hidden header type (circuit step conversations) hidden.
+					const headerType = typeof existingFields._type === "string" ? existingFields._type : "conversation";
 					lines[0] = JSON.stringify({
 						...existingFields,
-						_type: "conversation",
+						_type: headerType,
 						...conversation,
 					});
 					return lines.join("\n");
@@ -556,13 +566,17 @@ export class HistoryManager {
 
 		// Parse header (first line)
 		const headerObj = JSON.parse(firstLine) as JsonlLine;
-		if (headerObj._type !== "conversation") {
+		const isStep = headerObj._type === "orchestration_step_conversation";
+		if (headerObj._type !== "conversation" && !isStep) {
 			throw new Error(`Invalid conversation header in: ${path}`);
 		}
 
 		const { _type: _headerType, ...conversationData } = headerObj;
 		const conversation = conversationData as unknown as Conversation;
 		conversation.schema_version ??= 1;
+		if (filename !== conversationFilename(conversation)) {
+			this.filenameOverrides.set(conversation.id, filename);
+		}
 
 		// Parse messages (remaining lines — skip non-message line types like stale_state)
 		const messages: Message[] = [];
@@ -573,7 +587,13 @@ export class HistoryManager {
 				const obj = JSON.parse(line) as JsonlLine;
 				if (obj._type && obj._type !== "message") continue;
 				const { _type: _msgType, ...messageData } = obj;
-				messages.push(messageData as unknown as Message);
+				// Circuit step conversations store provider-format turns (no id);
+				// expand them into chat messages for display.
+				if (isStep && !("id" in messageData)) {
+					messages.push(...chatMessagesToMessages([messageData as unknown as ChatMessage], conversation.id));
+				} else {
+					messages.push(messageData as unknown as Message);
+				}
 			} catch (e) {
 				log.warn("Failed to parse message line", {
 					file: filename,
@@ -938,7 +958,16 @@ export class HistoryManager {
 
 	/** Generate the filename for a conversation JSONL file. */
 	private getFilename(conversation: Conversation): string {
-		return conversationFilename(conversation);
+		return this.filenameOverrides.get(conversation.id) ?? conversationFilename(conversation);
+	}
+
+	/**
+	 * The file of a conversation hidden from {@link listConversations} that can
+	 * still be opened in a chat panel (a circuit step conversation), or null.
+	 */
+	async findHiddenConversationFilename(conversationId: string): Promise<string | null> {
+		const filename = `orchestration_step_${conversationId}.jsonl`;
+		return (await this.vault.adapter.exists(this.getFilePath(filename))) ? filename : null;
 	}
 
 	/** Get the full vault-relative path for a history file. */

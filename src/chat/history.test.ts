@@ -354,3 +354,78 @@ describe("HistoryManager.deleteConversationFile — plan sidecar cleanup", () =>
 		expect(removed).toEqual([`${HISTORY}20261011_120000_${id}.jsonl`]);
 	});
 });
+
+describe("HistoryManager — opening circuit step conversations", () => {
+	const STEP_ID = "step-9";
+	const STEP_FILE = `${HISTORY}orchestration_step_${STEP_ID}.jsonl`;
+	const header = {
+		_type: "orchestration_step_conversation",
+		schema_version: 1,
+		id: STEP_ID,
+		title: "[Flow] Only step — iteration 2",
+		created_at: "2026-10-18T00:00:00.000Z",
+		updated_at: "2026-10-18T00:00:00.000Z",
+		provider_id: "local",
+		model_id: "m",
+		mode: "act",
+		orchestration_session_id: "sess-1",
+		orchestration_edges: [],
+	};
+	const stepLines = [
+		{ _type: "message", role: "user", content: "objective" },
+		{ _type: "message", role: "tool_call", content: "", tool_calls: [{ id: "c1", tool_name: "read_note", parameters: { path: "a.md" } }] },
+		{ _type: "message", role: "tool_result", content: "", tool_results: [{ tool_call_id: "c1", tool_name: "read_note", result: "ok", is_error: false }] },
+		{ _type: "message", role: "assistant", content: "done" },
+	];
+
+	function memoryVault(files: Map<string, string>): Vault {
+		const adapter = {
+			exists: async (p: string) => p === HISTORY || p === HISTORY.replace(/\/$/, "") || files.has(p),
+			mkdir: async () => undefined,
+			list: async () => ({ files: [...files.keys()], folders: [] }),
+			read: async (p: string) => files.get(p) ?? "",
+			write: async (p: string, data: string) => void files.set(p, data),
+			append: async (p: string, data: string) => void files.set(p, (files.get(p) ?? "") + data),
+			process: async (p: string, fn: (s: string) => string) => {
+				const next = fn(files.get(p) ?? "");
+				files.set(p, next);
+				return next;
+			},
+		};
+		return { adapter } as unknown as Vault;
+	}
+
+	it("finds the hidden file by id and expands provider-format turns into chat messages", async () => {
+		const files = new Map([[STEP_FILE, [header, ...stepLines].map((l) => JSON.stringify(l)).join("\n") + "\n"]]);
+		const manager = new HistoryManager(memoryVault(files), HISTORY, 500, 90);
+
+		const filename = await manager.findHiddenConversationFilename(STEP_ID);
+		expect(filename).toBe(`orchestration_step_${STEP_ID}.jsonl`);
+		expect(await manager.findHiddenConversationFilename("missing")).toBeNull();
+
+		const { conversation, messages } = await manager.loadConversation(filename!);
+		expect(conversation.id).toBe(STEP_ID);
+		expect(messages.map((m) => m.role)).toEqual(["user", "tool_call", "tool_result", "assistant"]);
+		expect(messages[1]!.tool_call).toMatchObject({ id: "c1", tool_name: "read_note" });
+		expect(messages[2]!.tool_result).toMatchObject({ tool_call_id: "c1", success: true });
+	});
+
+	it("writes back to the step file and keeps it hidden from the list", async () => {
+		const files = new Map([[STEP_FILE, [header, ...stepLines].map((l) => JSON.stringify(l)).join("\n") + "\n"]]);
+		const manager = new HistoryManager(memoryVault(files), HISTORY, 500, 90);
+		const { conversation } = await manager.loadConversation(`orchestration_step_${STEP_ID}.jsonl`);
+
+		await manager.updateConversationHeader({ ...conversation, title: "renamed" });
+		await manager.appendMessage(conversation, {
+			id: "m1", conversation_id: STEP_ID, role: "user", content: "follow-up", timestamp: "t",
+		} as Message);
+
+		expect([...files.keys()]).toEqual([STEP_FILE]);
+		const firstLine = JSON.parse(files.get(STEP_FILE)!.split("\n")[0]!) as Record<string, unknown>;
+		expect(firstLine).toMatchObject({ _type: "orchestration_step_conversation", title: "renamed" });
+		expect(await manager.listConversations()).toEqual([]);
+
+		const reloaded = await manager.loadConversation(`orchestration_step_${STEP_ID}.jsonl`);
+		expect(reloaded.messages.at(-1)).toMatchObject({ id: "m1", content: "follow-up" });
+	});
+});

@@ -512,12 +512,16 @@ export class ConversationLifecycleManager {
 		try {
 			const entries = await this.historyManager.listConversations();
 			if (signal?.aborted) return false;
-			const match = entries.find((e) => e.id === conversationId);
-			if (!match) {
+			// Circuit step conversations are hidden from the list but can still be
+			// opened (run-tree navigation, follow mode, the progress-Notice jump).
+			const filename = entries.find((e) => e.id === conversationId)?.filename
+				?? await this.historyManager.findHiddenConversationFilename(conversationId);
+			if (signal?.aborted) return false;
+			if (!filename) {
 				log.warn("Conversation not found by ID", { conversationId });
 				return false;
 			}
-			await this.switchConversation(match.filename, { signal });
+			await this.switchConversation(filename, { signal });
 			return true;
 		} catch (e) {
 			log.error("Failed to switch to conversation by ID", {
