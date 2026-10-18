@@ -42,6 +42,12 @@ export class PersonaManager {
 	 */
 	private personaChangedCallbacks = new Set<(persona: Persona | null) => void>();
 
+	/** Callbacks fired with the fresh persona list whenever persona files are re-read. */
+	private personasRefreshedCallbacks = new Set<(personas: Persona[]) => void>();
+
+	/** Callbacks fired once the startup restore has activated a persona. */
+	private personaRestoredCallbacks = new Set<(persona: Persona) => void>();
+
 	constructor(
 		private readonly vault: Vault,
 		private readonly metadataCache: MetadataCache,
@@ -73,6 +79,27 @@ export class PersonaManager {
 	setOnPersonaChanged(callback: (persona: Persona | null) => void): () => void {
 		this.personaChangedCallbacks.add(callback);
 		return () => { this.personaChangedCallbacks.delete(callback); };
+	}
+
+	/**
+	 * Register a callback that fires with the freshly discovered personas each
+	 * time persona files change on disk. Panels use it to swap in the new copy
+	 * of *their* persona — which is not necessarily the manager's active one.
+	 * Returns an unregister function.
+	 */
+	setOnPersonasRefreshed(callback: (personas: Persona[]) => void): () => void {
+		this.personasRefreshedCallbacks.add(callback);
+		return () => { this.personasRefreshedCallbacks.delete(callback); };
+	}
+
+	/**
+	 * Register a callback that fires when {@link restoreFromSettings} activates
+	 * the saved persona. Panels created before the restore finished started
+	 * with no persona and use this to adopt it. Returns an unregister function.
+	 */
+	setOnPersonaRestored(callback: (persona: Persona) => void): () => void {
+		this.personaRestoredCallbacks.add(callback);
+		return () => { this.personaRestoredCallbacks.delete(callback); };
 	}
 
 
@@ -189,6 +216,12 @@ export class PersonaManager {
 			log.warn("Could not restore active persona from settings, clearing", { name });
 			this.settings.active_persona = "";
 			await this.saveData();
+			return;
+		}
+
+		const restored = this.activePersona;
+		if (restored) {
+			for (const cb of this.personaRestoredCallbacks) cb(restored);
 		}
 	}
 
@@ -196,8 +229,9 @@ export class PersonaManager {
 	 * Refresh the active persona from disk without switching provider/model.
 	 *
 	 * Re-discovers personas and updates the in-memory cache. If the active
-	 * persona was deleted, deactivates it. Fires `personaChangedCallbacks`
-	 * so UI labels update automatically.
+	 * persona was deleted, deactivates it. Fires `personasRefreshedCallbacks`
+	 * with every discovered persona (even with no active one, so panels can
+	 * refresh their own), then `personaChangedCallbacks` so UI labels update.
 	 *
 	 * If the active persona's file fails to parse, the old state is preserved
 	 * and an error result is returned so the caller can surface a Notice.
@@ -210,15 +244,17 @@ export class PersonaManager {
 		| { status: "no-active-persona" }
 		| { status: "error"; filePath: string; message: string }
 	> {
+		const errors: Array<{ filePath: string; message: string }> = [];
+		const personas = await discoverPersonas(
+			this.vault, this.metadataCache, this.settings.notor_dir, this.templateRegistry, errors,
+		);
+		for (const cb of this.personasRefreshedCallbacks) cb(personas);
+
 		if (!this.activePersona) {
 			return { status: "no-active-persona" };
 		}
 
 		const currentName = this.activePersona.name;
-		const errors: Array<{ filePath: string; message: string }> = [];
-		const personas = await discoverPersonas(
-			this.vault, this.metadataCache, this.settings.notor_dir, this.templateRegistry, errors,
-		);
 		const updated = personas.find((p) => p.name === currentName);
 
 		if (updated) {

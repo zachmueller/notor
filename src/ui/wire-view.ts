@@ -2,6 +2,7 @@ import { Notice } from "obsidian";
 import type NotorPlugin from "../main";
 import type { NotorChatView } from "./chat-view";
 import type { ChatOrchestrator } from "../chat/orchestrator";
+import type { Persona } from "../types";
 import { autoApproveReasonOf } from "../chat/dispatcher";
 import { conversationFilename } from "../chat/history";
 import { parseOptionValue, buildOptionValue } from "../providers/model-grouping";
@@ -98,41 +99,71 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 	const personaManager = plugin.getPersonaManager();
 	view.setPersonaManager(personaManager);
 
-	// Wire persona-changed callback
-	view._unregisterPersonaChanged?.();
-	view._unregisterPersonaChanged = personaManager.setOnPersonaChanged((persona) => {
-		const panelPersonaName = orchestrator.getActivePersona()?.name ?? null;
-		if (persona && persona.name === panelPersonaName) {
-			view.updatePersonaLabel(persona);
-			orchestrator.setActivePersona(persona);
-			void orchestrator.refreshDisplayConfig();
-		} else if (persona === null && panelPersonaName !== null) {
-			view.updatePersonaLabel(null);
-			orchestrator.setActivePersona(null);
-			void orchestrator.refreshDisplayConfig();
+	/** Apply a persona's preferred preset/provider/model to this panel. */
+	const applyPersonaModelOverrides = (persona: Persona) => {
+		const resolution = resolvePersonaOverrides(
+			persona,
+			providerRegistry,
+			plugin.settings.model_presets ?? [],
+			orchestrator.getActiveProviderId(),
+		);
+		if (resolution) {
+			orchestrator.setActiveProvider(resolution.providerId);
+			orchestrator.setActiveModel(resolution.modelId, resolution.useExtendedContext, resolution.thinkingLevel);
+			// A legacy provider/model override is not a preset → "Custom".
+			orchestrator.setActivePresetName(resolution.presetName);
+			view.clearDisplayOverrides();
 		}
-	});
+	};
+
+	/** Swap in a persona for this panel's next turn and refresh the chip + inspector. */
+	const setPanelPersona = (persona: Persona | null) => {
+		view.updatePersonaLabel(persona);
+		orchestrator.setActivePersona(persona);
+		void orchestrator.refreshDisplayConfig();
+	};
+
+	// Wire persona-changed callbacks. The panel persona is per-panel, so each
+	// of these updates only what *this* panel is using.
+	view._unregisterPersonaChanged?.();
+	const unregisterPersonaListeners = [
+		personaManager.setOnPersonaChanged((persona) => {
+			const panelPersonaName = orchestrator.getActivePersona()?.name ?? null;
+			if (persona && persona.name === panelPersonaName) {
+				setPanelPersona(persona);
+			} else if (persona === null && panelPersonaName !== null) {
+				setPanelPersona(null);
+			}
+		}),
+		// A persona file changed on disk: re-pin this panel's persona to the
+		// fresh copy, so a tool-config edit applies from the next turn even when
+		// the panel's persona isn't the manager's active one (picked in-panel).
+		personaManager.setOnPersonasRefreshed((personas) => {
+			const current = orchestrator.getActivePersona();
+			if (!current) return;
+			const fresh = personas.find((p) => p.name === current.name);
+			if (fresh && fresh !== current) setPanelPersona(fresh);
+		}),
+		// The startup restore finished after this panel was created: adopt the
+		// restored persona unless the conversation already has one of its own.
+		personaManager.setOnPersonaRestored((persona) => {
+			if (orchestrator.getActivePersona()) return;
+			const convManager = orchestrator.getConversationManager();
+			if (convManager.getActiveConversation()?.persona_name || convManager.getMessages().length > 0) return;
+			applyPersonaModelOverrides(persona);
+			setPanelPersona(persona);
+		}),
+	];
+	view._unregisterPersonaChanged = () => {
+		for (const unregister of unregisterPersonaListeners) unregister();
+	};
 
 
 	view.setOnPersonaChange((persona) => {
 		orchestrator.setActivePersona(persona);
 		const before = describeSelection(orchestrator.getActiveSelection(), providerRegistry);
 
-		if (persona) {
-			const resolution = resolvePersonaOverrides(
-				persona,
-				providerRegistry,
-				plugin.settings.model_presets ?? [],
-				orchestrator.getActiveProviderId(),
-			);
-			if (resolution) {
-				orchestrator.setActiveProvider(resolution.providerId);
-				orchestrator.setActiveModel(resolution.modelId, resolution.useExtendedContext, resolution.thinkingLevel);
-				// A legacy provider/model override is not a preset → "Custom".
-				orchestrator.setActivePresetName(resolution.presetName);
-				view.clearDisplayOverrides();
-			}
-		}
+		if (persona) applyPersonaModelOverrides(persona);
 
 		// A persona override may have changed provider/model/preset/thinking, so
 		// commit the full selection alongside persona_name (single write path).

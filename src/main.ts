@@ -685,9 +685,14 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		// 6b. One-time global persona restore from settings (Amendment R5 / A1.7).
 		// Ensures the persona label and provider/model state are restored when
 		// the plugin loads. Previously called per-wireView for non-secondary
-		// panels; now a single global call.
-		this.getPersonaManager().restoreFromSettings().catch((e) => {
-			log.warn("Failed to restore active persona from settings", { error: String(e) });
+		// panels; now a single global call. Deferred until layout is ready: the
+		// vault file index isn't populated during onload, so discovery would
+		// miss vault personas and the failed restore would clear the setting.
+		// Panels created earlier adopt the persona via setOnPersonaRestored.
+		this.app.workspace.onLayoutReady(() => {
+			this.getPersonaManager().restoreFromSettings().catch((e) => {
+				log.warn("Failed to restore active persona from settings", { error: String(e) });
+			});
 		});
 
 		// 6c. Register obsidian://notor protocol handler for deep-links.
@@ -2509,7 +2514,9 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 					view.updatePersonaLabel(null);
 				});
 			} else {
-				view.updatePersonaLabel(this.getPersonaManager().getActivePersona() ?? null);
+				// The panel's persona, not the global one — the chip must show
+				// what this panel's next turn will actually use.
+				view.updatePersonaLabel(orchestrator.getActivePersona());
 			}
 
 			// Ensure the active-workflow chip is set after the DOM is built,
