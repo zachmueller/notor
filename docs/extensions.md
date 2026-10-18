@@ -179,6 +179,7 @@ return { success: true, result: content };
 | `on_manual_save` | Vault event | A note is saved by explicit user action (Cmd+S / Ctrl+S). |
 | `on_tag_change` | Vault event | Tags are added to or removed from a note's frontmatter. |
 | `on_schedule` | Scheduled | A cron schedule fires (while Obsidian is running). |
+| `on_daily_start` | Scheduled | The first time you use Obsidian each day, after the day reset time ([details](hooks.md#daily-start)). Runs right away, with no provider check. |
 | `on_conversation_start` | LLM lifecycle | After the first user message in a new conversation, before the LLM call. **Non-blocking.** Fires once per conversation. Not available as a shell hook — automation-only. |
 
 ### Context object

@@ -54,6 +54,7 @@ Steps communicate **only by publishing events**. A step is triggered by a topic,
 | `notor-steps` | wikilink[] | yes | — | Ordered step references (`"[[planner]]"`), resolved under `steps/`. |
 | `notor-guardrails` | string[] | no | `[]` | Constraints injected into **every** step prompt. |
 | `notor-schedule` | string (cron) | no | `null` | Standard 5-field cron expression; launches the circuit on a schedule (see below). Invalid expressions are ignored with a warning. |
+| `notor-daily-start` | boolean | no | `false` | Launch the circuit once a day, the first time you use Obsidian after the day reset time (see below). |
 | `notor-circuit-invocable` | boolean | no | `false` | The circuit appears in the `run_circuit` registry (callable by other circuits). |
 | `notor-circuit-inputs` | string | no | `null` | Freeform NL description of what the circuit expects to begin. |
 | `notor-circuit-returns` | string | no | `null` | Freeform NL description of what the circuit hands back. |
@@ -66,6 +67,8 @@ Steps communicate **only by publishing events**. A step is triggered by a topic,
 > **Every circuit is bounded by construction.** `notor-max-iterations`, `notor-max-runtime-minutes`, and `notor-max-cost-usd` are optional in frontmatter but **never absent at runtime** — the parser injects finite defaults (`100` / `60` / `5.00`, never `Infinity`). So even a hand-authored circuit that sets nothing auto-terminates.
 
 > **Scheduling a circuit.** A circuit with a valid `notor-schedule` cron expression launches itself on that schedule (each run stamped `origin: schedule`) and appears in **Settings → Automations** under "Scheduled" — with a next-run time, an active/inactive status dot, and a per-circuit enable toggle — exactly like a scheduled workflow. Direct scheduling requires circuits to be enabled. For **event-driven** triggers (on-save, on-tag-change, …) wire a "Run a circuit" action under **Settings → Vault Event Hooks** instead.
+
+> **Running a circuit at the start of each day.** Set `notor-daily-start: true` and the circuit launches once a day on your first activity after the day reset time (each run is stamped `origin: daily_start`). It appears in **Settings → Automations** under "Daily start". Before launching, Notor checks that every conversation step's provider is reachable. If one isn't (for example, expired credentials), Notor retries with a long backoff and shows a Notice with the reason. Each device gets its own daily run, so a circuit that writes to a shared note should be safe to run twice. See [Daily start](hooks.md#daily-start).
 
 ### Step note frontmatter
 

@@ -54,17 +54,36 @@ Configure hooks that fire automatically in response to vault lifecycle events:
 | `on-manual-save` | A note is saved by an explicit user action (Cmd+S / Ctrl+S) — not auto-save |
 | `on-tag-change` | Tags are added to or removed from a note's frontmatter |
 | `on-schedule` | A configured cron schedule fires (while Obsidian is running) |
+| `on-daily-start` | The first time you use Obsidian each day, after the day reset time |
 
 **Behavior:**
 
 - For shell commands, event context is available as environment variables (`NOTOR_NOTE_PATH`, `NOTOR_TAGS_ADDED`, `NOTOR_TAGS_REMOVED`).
 - **Debounce** — `on-note-open`, `on-save`, and `on-manual-save` hooks include a configurable cooldown (default: 5 seconds) to prevent rapid-fire execution from auto-save or tab switching.
 - **Cron scheduling** — `on-schedule` hooks use cron expressions (e.g., `0 9 * * 1` for 9 AM every Monday). Scheduling is in-process — no OS-level cron daemon is required. Missed executions while Obsidian is closed are skipped; no catch-up occurs.
+- **Daily start** — `on-daily-start` hooks run once per day, the first time you use Obsidian after the **Day reset time** (default 04:00). Opening Obsidian counts, and so does coming back to an Obsidian that stayed open overnight: waking the computer, focusing the window, typing, or switching notes. See [Daily start](#daily-start) below.
 - **Lazy listener activation** — Obsidian event listeners are only registered for event types that have at least one configured hook or workflow trigger. Removing the last hook for an event type dynamically unregisters its listener, adding zero overhead for unused event types.
 - **Loop prevention** — tag changes and note creations caused by hook-triggered workflow executions do not re-trigger their corresponding hooks, preventing infinite loops.
 - **Non-blocking** — hook failures surface a non-blocking notice without interrupting the triggering vault operation or preventing subsequent hooks from executing.
 
 **Configuration:** **Settings → Notor** under a dedicated section grouped by event type, using the same collapsible UI pattern as LLM interaction hooks.
+
+### Daily start
+
+Use `on-daily-start` for a start-of-day routine that runs without you having to remember to start it. You can attach any kind of target:
+
+- a hook in **Settings → Notor → Vault event hooks → On daily start** (shell command, workflow, or circuit)
+- a workflow with `notor-trigger: on-daily-start`
+- an automation with `notor-trigger: on_daily_start`
+- a circuit with `notor-daily-start: true`
+
+**When it runs.** The day starts at the **Day reset time** (local, 24-hour). With the default of 04:00, using Obsidian at 02:00 still counts as the previous day. The first activity after the reset time runs every daily start target once. Workflows and circuits run in the background, like other event-triggered runs.
+
+**Per device.** Whether today's run has happened is stored on each device and isn't synced. Each computer gets its own morning run. If a daily circuit writes to a shared note, two devices may both write to it on the same day, so make the circuit safe to run twice. **Last run on this device** shows the day of the last run. Select **Reset** to run it again on your next activity.
+
+**When the model can't be reached.** Before starting a workflow or circuit, Notor checks that its provider is reachable. Expired credentials (for example an AWS SSO session) and having no network are the common causes. If the check fails, a Notice says what went wrong and when it will try again. Select **Retry now** after you fix the problem. Retries use exponential backoff: by default 5 retries starting at 3 minutes and capped at 30 minutes, about 75 minutes in total. Coming back online also triggers a retry. You can change these limits under **On daily start**. Set the retry count to 0 to turn retries off. Shell command hooks and automations run right away and skip this check. Once a run has started, a failure partway through is not retried.
+
+**Getting back to the run.** Each started run shows a Notice with an **Open** button that opens its conversation. For a circuit, it opens the entry step's conversation, or the run tree if the conversation isn't available yet. The command **Open most recent daily start run** opens the latest day's run, or a picker if there were several. **Run daily start now** runs every daily start target immediately. Both commands only appear when at least one daily start target is configured.
 
 ---
 

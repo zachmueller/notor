@@ -15,7 +15,7 @@ Workflow notes are stored under `notor/workflows/` and identified by `notor-type
 | Property | Values | Description |
 |---|---|---|
 | `notor-type` | `workflow` (required) | Marks this note as a workflow. |
-| `notor-trigger` | `manual`, `on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`, or `on-schedule` | How the workflow is triggered. |
+| `notor-trigger` | `manual`, `on-note-open`, `on-note-create`, `on-save`, `on-manual-save`, `on-tag-change`, `on-schedule`, or `on-daily-start` | How the workflow is triggered. `on-daily-start` runs once a day on your first activity after the day reset time ([details](hooks.md#daily-start)). |
 | `notor-schedule` | cron expression string | Required when `notor-trigger` is `on-schedule`. Standard 5-field cron expression or shorthand (`@daily`, `@hourly`, `@weekly`, `@monthly`, `@yearly`). |
 | `notor-conversation-mode` | `plan` or `act` | Overrides the global Plan/Act toggle for this workflow's execution. Event-triggered workflows typically use `act` so they can perform writes without manual approval. |
 | `notor-model-preset` | preset name string | Overrides the active model preset for this workflow. Useful for complex workflows that need a more capable model, or simple workflows that can use a lighter one. |
@@ -95,7 +95,7 @@ notor-conversation-mode: act
 ---
 ```
 
-Scheduled (`on-schedule`) workflows always fire immediately and ignore `notor-hook-delay`.
+Scheduled (`on-schedule`) and daily start (`on-daily-start`) workflows always fire immediately and ignore `notor-hook-delay`.
 
 Background workflows follow the normal approval rules. A call that needs approval opens an **Approve tool call** dialog, and the run shows as waiting for approval in the activity indicator until you answer. For unattended workflows, see [Runs with no chat panel](safety.md#runs-with-no-chat-panel).
 
@@ -115,6 +115,20 @@ notor-conversation-mode: act
 Supported cron formats: standard 5-field expressions (`minute hour day-of-month month day-of-week`) and shorthands (`@daily`, `@weekly`, `@monthly`, `@yearly`, `@hourly`). Scheduling is in-process — missed executions while Obsidian is closed are skipped; no catch-up occurs.
 
 Scheduled workflows appear in **Settings → Notor → Automation** under the "Scheduled" group with a status indicator showing whether the cron job is active.
+
+## Daily start workflows
+
+Set `notor-trigger: on-daily-start` to run a workflow once a day, the first time you use Obsidian after the day reset time. This also works when Obsidian stayed open overnight:
+
+```yaml
+---
+notor-type: workflow
+notor-trigger: on-daily-start
+notor-conversation-mode: act
+---
+```
+
+Before the run starts, Notor checks that the workflow's model is reachable. If it isn't, Notor retries with a long backoff and shows a Notice with the reason. The workflow appears in **Settings → Notor → Automation** under "Daily start". See [Daily start](hooks.md#daily-start) for the reset time, per-device tracking, retries, and the **Open most recent daily start run** command.
 
 ## Workflow activity indicator
 

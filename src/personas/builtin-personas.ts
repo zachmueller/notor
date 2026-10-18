@@ -388,6 +388,7 @@ notor-steps:                                     # required; ordered step wikili
 notor-guardrails:                                # injected into EVERY step prompt
   - "Verification is mandatory — tests must pass."
 notor-schedule: "0 9 * * 1-5"                    # optional 5-field cron; launches the circuit on a schedule
+notor-daily-start: false                         # true = launch once a day on the user's first activity after the day reset time
 # --- Composition (inert unless circuits are enabled) ---
 notor-circuit-invocable: true                    # appears in the run_circuit registry (default false)
 notor-circuit-inputs: "A feature description + the target repo path."   # freeform NL input contract
@@ -403,6 +404,8 @@ notor-open-notes-in-editor: false                # open notes this circuit reads
 **All three runaway ceilings default to finite values** (\`max-iterations\` 100 / \`max-runtime-minutes\` 60 / \`max-cost-usd\` 5.00) — never \`Infinity\` — so a circuit is always bounded even if the author sets nothing. \`notor-max-depth\` may be \`null\` (unlimited nesting depth, still bounded by the other three).
 
 **Scheduling a circuit directly.** Add \`notor-schedule\` (a standard 5-field cron expression) to the circuit definition and the circuit launches itself on that schedule — no wrapper workflow or hook needed. It then appears in **Settings → Automations** under "Scheduled" (with a next-run time, an active/inactive dot, and an enable toggle), exactly like a scheduled workflow, and each run is stamped \`origin: schedule\`. Direct scheduling requires circuits to be enabled. (You can also wire a circuit to a vault event hook — including a scheduled one — via the "Run a circuit" hook action in Settings → Vault Event Hooks; use that for event-driven triggers like on-tag-change.)
+
+**Running a circuit at the start of each day.** Set \`notor-daily-start: true\` and the circuit launches once a day, the first time the user is active in Obsidian after the **Day reset time** (Settings → Vault event hooks → On daily start, default 04:00). This also works when Obsidian stayed open overnight. Runs are stamped \`origin: daily_start\`, appear under "Daily start" in Settings → Automations, and are tracked per device. Before launching, Notor checks that each conversation step's provider is reachable and retries with a long backoff if it isn't. Recommend this over a guessed cron time for "morning briefing"-style circuits, and make circuits that write to shared notes safe to run twice (two devices can each run once a day).
 
 ## Step note frontmatter
 
