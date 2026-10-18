@@ -111,12 +111,16 @@ export function renderProvidersStep(
 			});
 	}
 
-	if (configured.length === 0) {
-		containerEl.createEl("p", {
-			text: "No provider is configured yet. You can continue, but chat won't work until one is.",
-			cls: "setting-item-description mod-warning",
-		});
-	}
+	// Field edits don't redisplay the step, so re-check the warning whenever a
+	// field commits its value (a full re-render here would steal focus).
+	const warningEl = containerEl.createEl("p", {
+		text: "No provider is configured yet. You can continue, but chat won't work until one is.",
+		cls: "setting-item-description mod-warning notor-setup-wizard-provider-warning",
+	});
+	const updateWarning = () => warningEl.toggle(configuredProviders(ctx).length === 0);
+	updateWarning();
+	containerEl.addEventListener("change", updateWarning);
+	ctx.addCleanup?.(() => containerEl.removeEventListener("change", updateWarning));
 }
 
 export function renderModelStep(
