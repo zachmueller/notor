@@ -45,23 +45,28 @@ Notor ships with two built-in personas that appear in the persona picker with a 
 | `notor-help` | ⚙️ | Notor configuration assistant. Reads and edits plugin settings via `read_notor_settings` / `edit_notor_settings` with your approval, and delegates documentation lookups to the `notor-help` sub-agent. Use this persona when you want conversational help configuring the plugin. |
 | `tool-creator` | 🔧 | Guides creation of custom tools and automations. Specialized for writing extension Markdown files with correct frontmatter, parameter schemas, and TypeScript logic. |
 
-## Per-persona auto-approve overrides
+## Per-persona auto-approve
 
-Configure per-tool approval behavior per persona in **Settings → Notor → Persona auto-approve**. Each tool offers three states:
+A persona controls which tools run without asking through a `<notor_tool_config>` block in its `system-prompt.md` body. The block also sets which tools are enabled and which paths they may touch:
 
-- **Global default** — inherit the global auto-approve setting for that tool
-- **Auto-approve** — always auto-approve this tool when this persona is active
-- **Require approval** — always require manual approval, overriding a global auto-approve
+```markdown
+<notor_tool_config>
+write_note:
+  auto_approve: true
+read_note:
+  auto_approve: true
+execute_command:
+  enabled: false
+</notor_tool_config>
+```
 
-Unconfigured tools fall back to global defaults. Configuration is stored in plugin settings data, not in persona frontmatter. Per-persona overrides extend to [MCP tools](mcp-servers.md) alongside built-in tools.
-
-For more fine-grained control, personas also support `<notor_tool_config>` blocks in the `system-prompt.md` body to manage tool enabled/disabled state, auto-approve, and path restrictions declaratively. Persona-level tool config takes precedence over workflow and rule configs. See [Per-context tool configuration](vault-tools.md#per-context-tool-configuration) for the full syntax reference.
+Tools the block doesn't mention, and fields it leaves unset, fall back to **Settings → Notor → Tools**. MCP tools use their `server__tool` names. Precedence, highest first: workflow → persona → rule → global defaults, so a workflow's block can override its persona's. A global **Always ask** path scope still prompts even when the persona auto-approves the tool. See [Per-context tool configuration](vault-tools.md#per-context-tool-configuration) for the full syntax reference.
 
 ## Notes
 
 - Personas are regular Obsidian notes — fully visible in the file explorer, searchable, and editable.
 - The plugin rescans the personas directory when Settings is opened or the persona picker is activated; no plugin reload is needed when personas are created or deleted.
-- **Auto-refresh on file change** — when you save or modify a persona file, the active persona is automatically reloaded. If a parse error occurs, the previous persona state remains active and a persistent error Notice is shown.
+- **Auto-refresh on file change** — when you save or modify a persona file, every panel using that persona picks up the change, including its tool config, from the next message. If a parse error occurs, the previous persona state remains active and a persistent error Notice is shown.
 - **Per-panel isolation** — in multi-panel mode, each chat panel maintains independent persona state. Switching personas in one panel does not affect other open panels.
 
 ## Circuits

@@ -216,10 +216,8 @@ type StepPersona = Parameters<StepRuntimeFactory["build"]>[0]["persona"];
  * Assemble a fresh per-step {@link ToolDispatcher} + its resolved effective
  * config and filtered tool definitions — the assembly the conversation-step and
  * code-step runtime factories previously duplicated byte-for-byte (F6 §4.1). The
- * only variation is the `persona`: a conversation step pins the active persona
- * name and resolves the effective config against it; a code step passes `null`
- * (which leaves the dispatcher's default `activePersonaName` of `null` untouched,
- * so passing it is behavior-neutral vs. the old omit).
+ * only variation is the `persona`: a conversation step resolves the effective
+ * config against its persona; a code step passes `null`.
  *
  * The run policy's approval channel is set on the dispatcher instance: step
  * turns and code-step `callTool` pass no per-call callback, so the dispatcher
@@ -243,7 +241,6 @@ async function assembleStepDispatcher(
 	// `notor-open-notes-in-editor` override), independent of the chat
 	// `open_notes_on_access` setting, for every tool this step dispatches.
 	dispatcher.setOpenNotesOverride(opts.openNotesInEditor);
-	dispatcher.setActivePersonaName(opts.persona?.name ?? null);
 	if (opts.policy?.approvalCallback) dispatcher.setApprovalCallback(opts.policy.approvalCallback);
 	if (opts.policy?.approvalHook) dispatcher.setApprovalHookDispatcher(opts.policy.approvalHook);
 	if (host.vaultRootPath) dispatcher.setVaultRootPath(host.vaultRootPath);

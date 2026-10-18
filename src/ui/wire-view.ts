@@ -27,7 +27,6 @@ const log = logger("WireView");
 export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, plugin: NotorPlugin): void {
 	const historyManager = plugin.getHistoryManager();
 	const providerRegistry = plugin.getProviderRegistry();
-	const toolDispatcher = plugin.getToolDispatcher();
 
 	// Wire orchestrator ↔ view
 	orchestrator.setView(view);
@@ -173,8 +172,6 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 			new Notice(`Model: ${after}${running ? " — applies from next step" : ""}`);
 		}
 
-		toolDispatcher.setActivePersonaName(persona?.name ?? null);
-
 		plugin.settings.active_persona = persona?.name ?? "";
 		void plugin.saveData(plugin.settings);
 
@@ -240,9 +237,6 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		vaultRuleManager.clearAccessedNotes();
 
 		plugin.loadSettings().then(() => {
-			toolDispatcher.setActivePersonaName(
-				plugin.settings.active_persona || null
-			);
 			orchestrator.updateSettings(plugin.settings);
 			plugin.updateMcpHubSettings();
 

@@ -669,11 +669,6 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			this.app.workspace.on("active-leaf-change", (leaf) => {
 				if (leaf?.view instanceof NotorChatView) {
 					this._lastFocusedChatLeafId = leaf.id;
-					// Sync ToolDispatcher persona to the focused panel's conversation
-					// so auto-approve resolution uses the correct persona context.
-					const orch = this._orchestrators.get(leaf.id);
-					const conv = orch?.getDisplayedConversation();
-					this.getToolDispatcher().setActivePersonaName(conv?.persona_name ?? null);
 				}
 			})
 		);
@@ -1960,10 +1955,6 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			this._toolDispatcher.setOnToolsChanged(debounce(() => {
 				for (const orchestrator of this._orchestrators.values()) void orchestrator.refreshDisplayConfig();
 			}, 250, true));
-
-			this._toolDispatcher.setActivePersonaName(
-				this.settings.active_persona || null
-			);
 
 			// Set vault root path for working directory validation
 			if (this.vaultRootPath) {

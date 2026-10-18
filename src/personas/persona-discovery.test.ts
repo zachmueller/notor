@@ -5,7 +5,12 @@
  * cleared `active_persona`).
  */
 import { describe, it, expect, vi } from "vitest";
+import { parse as parseYamlReal } from "yaml";
 
+vi.mock("obsidian", async (importOriginal) => ({
+	...(await importOriginal<typeof import("obsidian")>()),
+	parseYaml: (text: string) => parseYamlReal(text),
+}));
 vi.mock("../utils/logger", () => ({
 	logger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));

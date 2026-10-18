@@ -91,9 +91,6 @@ export class ToolDispatcher {
 	/** Registered tools keyed by name. */
 	private tools = new Map<string, DispatchableTool>();
 
-	/** Currently active persona name (null = no persona). */
-	private activePersonaName: string | null = null;
-
 	/** Plugin settings (for tool-specific pre-execution checks). */
 	private settings?: NotorSettings;
 
@@ -272,21 +269,6 @@ export class ToolDispatcher {
 			log.info("Stopped stream at blocked tool call", { toolName, error: decision.error });
 			return true;
 		};
-	}
-
-	/**
-	 * Set the currently active persona name.
-	 *
-	 * Called on plugin load with `settings.active_persona` (or null if
-	 * empty), and whenever the user switches personas via the persona picker.
-	 * Changes take effect on the next `dispatch()` call.
-	 *
-	 * @param name - Active persona name, or null for "no persona"
-	 * @see specs/03-workflows-personas/tasks/group-b-tasks.md — B-003
-	 */
-	setActivePersonaName(name: string | null): void {
-		this.activePersonaName = name;
-		log.debug("Updated active persona for auto-approve", { persona: name });
 	}
 
 	// -----------------------------------------------------------------------
@@ -472,16 +454,22 @@ export class ToolDispatcher {
 					return result;
 				}
 			}
-		} else if (approvalCb && !tool.internal) {
+		} else if (!tool.internal) {
+			log.debug("Tool auto-approved", {
+				toolName,
+				...(decision.autoApproveReason ? { reason: decision.autoApproveReason } : {}),
+			});
 			// Auto-approved: render the collapsed diff for after-the-fact review.
 			// Internal tools (only update_tasks) stay invisible — they fire no render.
 			// Fire-and-forget, so the reason must travel at call time.
-			void approvalCb(
-				toolCall,
-				abortSignal,
-				messageId,
-				decision.autoApproveReason ? { reason: decision.autoApproveReason } : true,
-			);
+			if (approvalCb) {
+				void approvalCb(
+					toolCall,
+					abortSignal,
+					messageId,
+					decision.autoApproveReason ? { reason: decision.autoApproveReason } : true,
+				);
+			}
 		}
 
 		// Mark as approved

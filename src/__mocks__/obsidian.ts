@@ -6,14 +6,8 @@
  */
 
 import { vi } from "vitest";
-import { parse } from "yaml";
 
 export const requestUrl = vi.fn();
-
-/** Real YAML parsing (Obsidian's `parseYaml` is a YAML 1.2 parser too). */
-export function parseYaml(text: string): unknown {
-	return parse(text);
-}
 
 /**
  * Minimal `Notice` stub. Records the most recent message so a suite can assert on
