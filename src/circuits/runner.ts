@@ -422,6 +422,13 @@ export class CircuitRunner {
 
 			if (job.step.mode === "conversation") this.llmTurns += 1;
 
+			// An abort mid-turn ends the turn early with a synthesized emission;
+			// publishing it could still complete the run (a default-publish
+			// FLOW_COMPLETE), so a cancelled run stops here instead.
+			if (this.deps.abortSignal.aborted) {
+				return this.terminalResult("cancelled", this.synthTerminal(FLOW_CANCELLED, "Run aborted."));
+			}
+
 			// INT-047: fold this turn into the run-level subtree rollup. The turn's
 			// own cost/iteration is what RunLoop accrued into runContext.subtreeConsumed
 			// (a fresh per-turn accumulator); plus the per-turn cost/tokens the executor

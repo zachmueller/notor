@@ -187,3 +187,37 @@ describe("LocalProvider — transient failure classification", () => {
 		expect(chunks.at(-1)).toMatchObject({ type: "error", code: "CONNECTION_FAILED" });
 	});
 });
+
+describe("LocalProvider — tool call streaming", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("forwards arguments sent in a tool call's opening chunk", async () => {
+		const sse = [
+			{ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "write_note", arguments: '{"path":"a.md"}' } }] } }] },
+			{ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+		].map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n";
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode(sse));
+				controller.close();
+			},
+		});
+		vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, body })));
+
+		const provider = new LocalProvider(
+			{ id: "local", type: "local", endpoint: "http://localhost:11434/v1" } as LLMProviderConfig,
+			makeApp(),
+		);
+		const chunks = [];
+		for await (const chunk of provider.sendMessage([{ role: "user", content: "hi" }], [], { model: "llama3" })) {
+			chunks.push(chunk);
+		}
+		expect(chunks).toEqual([
+			{ type: "tool_call_start", id: "call_1", tool_name: "write_note" },
+			{ type: "tool_call_delta", id: "call_1", partial_json: '{"path":"a.md"}' },
+			{ type: "tool_call_end", id: "call_1" },
+		]);
+	});
+});

@@ -386,6 +386,15 @@ export class LocalProvider implements LLMProvider {
 									tool_name: tc.function.name,
 								};
 							}
+							// Some servers (e.g. Ollama) send the complete arguments in
+							// the opening chunk; forward them like any later delta.
+							if (tc.function?.arguments) {
+								yield {
+									type: "tool_call_delta",
+									id: tc.id,
+									partial_json: tc.function.arguments,
+								};
+							}
 						} else {
 							// Delta for existing tool call
 							const existing = activeToolCalls.get(index);

@@ -335,6 +335,37 @@ describe("CircuitRunner", () => {
 		expect(runOrder.filter((n) => n === "Planner").length).toBeGreaterThanOrEqual(2);
 	});
 
+	it("an abort during a turn cancels the run instead of publishing the turn's emission", async () => {
+		const only = step("Only", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
+		const f = flow([only]);
+		const controller = new AbortController();
+		const executor = fakeExecutor(() => {
+			controller.abort();
+			return { topic: FLOW_COMPLETE, payload: "default publish" };
+		}, []);
+		const runner = new CircuitRunner({
+			executor,
+			sessionLog: noopLog(),
+			makeOrchestrationContext: () => ({
+				sessionId: "s1",
+				scratchpadPath: "sp",
+				tasksPath: "tp",
+				pendingEmission: null,
+				emissionOverwrites: [],
+			}),
+			makeConversationId: () => "c0",
+			mode: "act",
+			sessionId: "s1",
+			abortSignal: controller.signal,
+			origin: "api",
+		});
+
+		const result = await runner.start(f, "objective");
+
+		expect(result.status).toBe("cancelled");
+		expect(result.terminal.topic).toBe(FLOW_CANCELLED);
+	});
+
 	it("FLOW_COMPLETE finalizes immediately when there are no open tasks (INT-003)", async () => {
 		const planner = step("Planner", { triggers: ["start"], publishes: [FLOW_COMPLETE] });
 		const f = flow([planner]);
