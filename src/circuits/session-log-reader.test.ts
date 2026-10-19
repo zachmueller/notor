@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { SessionLogReader, SessionLogParseError } from "./session-log-reader";
+import { SessionLogReader, SessionLogParseError, parseJsonlEntries } from "./session-log-reader";
 
 const reader = new SessionLogReader();
 
@@ -120,5 +120,46 @@ describe("SessionLogReader", () => {
 
 	it("defaults schema_version to 1 for an empty log", () => {
 		expect(reader.parse("").schema_version).toBe(1);
+	});
+});
+
+describe("parseJsonlEntries (generic typed-JSONL parser)", () => {
+	interface Demo {
+		type: string;
+		n?: number;
+	}
+
+	it("parses typed entries and reports a clean final line", () => {
+		const raw = line({ type: "a", n: 1 }) + "\n" + line({ type: "b", n: 2 }) + "\n";
+		const { entries, truncatedFinalLine } = parseJsonlEntries<Demo>(raw);
+		expect(entries.map((e) => e.type)).toEqual(["a", "b"]);
+		expect(truncatedFinalLine).toBe(false);
+	});
+
+	it("applies the same malformed-line policy as the session-log reader", () => {
+		const truncated = line({ type: "a" }) + "\n" + '{"type":"b","n":';
+		expect(parseJsonlEntries<Demo>(truncated)).toEqual({ entries: [{ type: "a" }], truncatedFinalLine: true });
+		const interior = "not json\n" + line({ type: "b" }) + "\n";
+		expect(() => parseJsonlEntries<Demo>(interior)).toThrow(SessionLogParseError);
+	});
+
+	it("round-trips a run.result entry through the session-log reader (type-agnostic)", () => {
+		const raw =
+			line({ type: "session.complete", ts: "t" }) +
+			"\n" +
+			line({
+				type: "run.result",
+				ts: "t",
+				status: "completed",
+				terminal_topic: "FLOW_COMPLETE",
+				text: "done",
+				structured: { ok: true },
+				cost_usd: 0.1,
+				token_usage: { input: 1, output: 1 },
+				iterations: 1,
+			}) +
+			"\n";
+		const { entries } = reader.parse(raw);
+		expect(entries[1]).toMatchObject({ type: "run.result", structured: { ok: true } });
 	});
 });

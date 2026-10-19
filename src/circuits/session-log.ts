@@ -134,6 +134,32 @@ export interface ChildResultEntry extends BaseEntry {
 	iterations?: number;
 }
 
+/**
+ * `run.result` — the root run's own terminal outcome, written by `finalizeRun`
+ * once the runner has settled (after `session.complete` / `session.cancelled`).
+ * Before this entry existed only a `run_flow` *child's* outcome reached disk
+ * (via the parent's `child.result`); a root run's `structured` return lived in
+ * memory only. Evaluation reads finished sessions from disk, so it needs this.
+ *
+ * A pure outcome record — recovery ignores it (it is not a `turn.*` / `event.*`
+ * entry and always follows the terminal `session.*` line). Logs written before
+ * this entry existed are read through `readRunOutcome`'s fallback.
+ */
+export interface RunResultEntry extends BaseEntry {
+	type: "run.result";
+	status: "completed" | "cancelled" | "error";
+	/** Canonical terminal topic (`FLOW_COMPLETE` / `FLOW_CANCELLED` / `FLOW_ERROR`). */
+	terminal_topic: string;
+	/** The closing text (terminal payload, or the last step text when the payload was empty). */
+	text: string;
+	/** The structured return (terminal `circuit.emit(..., structured)`), `null` when none / unserializable. */
+	structured: unknown;
+	/** The whole subtree's cost in USD (`CircuitRunResult.subtreeConsumed.costUsd`). */
+	cost_usd: number;
+	token_usage: { input: number; output: number };
+	iterations: number;
+}
+
 export interface SessionCancelledEntry extends BaseEntry {
 	type: "session.cancelled";
 	reason: string;
@@ -185,6 +211,7 @@ export type SessionLogEntry =
 	| SideEffectCommittedEntry
 	| ChildSpawnedEntry
 	| ChildResultEntry
+	| RunResultEntry
 	| SessionCancelledEntry
 	| SessionCompleteEntry
 	| UserInputRequiredEntry
@@ -292,6 +319,22 @@ export class SessionLog {
 
 	appendSessionComplete(): Promise<void> {
 		return this.write({ type: "session.complete", ts: this.now() });
+	}
+
+	/**
+	 * `run.result`: the root run's terminal outcome, appended by `finalizeRun`
+	 * after the terminal `session.*` entry. `structured` is coerced to `null` when
+	 * it cannot be JSON-serialized (a circular value, a BigInt) so the append
+	 * never throws — the outcome record must never mask the run's own result.
+	 */
+	appendRunResult(entry: Omit<RunResultEntry, "type" | "ts">): Promise<void> {
+		let structured: unknown = entry.structured ?? null;
+		try {
+			JSON.stringify(structured);
+		} catch {
+			structured = null;
+		}
+		return this.write({ type: "run.result", ts: this.now(), ...entry, structured });
 	}
 
 	// -- Forward-declared (Phase 5 INT-030 fills behavior) -------------------

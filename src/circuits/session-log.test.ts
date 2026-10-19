@@ -174,4 +174,49 @@ describe("SessionLog", () => {
 		const entry = JSON.parse(writer.content.trim());
 		expect(entry.schema_version).toBe(1);
 	});
+	it("appendRunResult writes the root run's terminal outcome (structured + cost + tokens)", async () => {
+		const writer = new FakeWriter();
+		const log = new SessionLog("l.jsonl", writer, fixedNow);
+		await log.appendRunResult({
+			status: "completed",
+			terminal_topic: "FLOW_COMPLETE",
+			text: "Research complete.",
+			structured: { report: "r", findings: ["a"] },
+			cost_usd: 0.42,
+			token_usage: { input: 1200, output: 300 },
+			iterations: 4,
+		});
+		const entry = JSON.parse(writer.content.trim());
+		expect(entry).toEqual({
+			type: "run.result",
+			ts: fixedNow(),
+			status: "completed",
+			terminal_topic: "FLOW_COMPLETE",
+			text: "Research complete.",
+			structured: { report: "r", findings: ["a"] },
+			cost_usd: 0.42,
+			token_usage: { input: 1200, output: 300 },
+			iterations: 4,
+		});
+	});
+
+	it("appendRunResult coerces an unserializable structured value to null instead of throwing", async () => {
+		const writer = new FakeWriter();
+		const log = new SessionLog("l.jsonl", writer, fixedNow);
+		const circular: Record<string, unknown> = {};
+		circular.self = circular;
+		await log.appendRunResult({
+			status: "error",
+			terminal_topic: "FLOW_ERROR",
+			text: "boom",
+			structured: circular,
+			cost_usd: 0,
+			token_usage: { input: 0, output: 0 },
+			iterations: 1,
+		});
+		const entry = JSON.parse(writer.content.trim());
+		expect(entry.structured).toBeNull();
+		expect(entry.status).toBe("error");
+	});
+
 });

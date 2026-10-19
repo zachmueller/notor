@@ -89,13 +89,43 @@ export async function maybeWriteFailureReport(
 }
 
 /**
+ * Persist the run's own terminal outcome as a `run.result` session-log entry.
+ * The runner lifts `structured` / `text` in memory only; evaluation (and any
+ * later reader of a finished session) needs them on disk. Best-effort: a failed
+ * append is logged and never masks the run's result.
+ */
+async function appendRunResult(
+	host: CircuitHost,
+	sessionManager: CircuitSessionManager,
+	sessionId: string,
+	result: CircuitRunResult,
+): Promise<void> {
+	try {
+		const ws = sessionManager.resolveWorkspace(sessionId);
+		const sessionLog = new SessionLog(ws.logPath, new VaultSessionLogWriter(host.app));
+		await sessionLog.appendRunResult({
+			status: result.status,
+			terminal_topic: result.terminal.topic,
+			text: result.text,
+			structured: result.structured ?? null,
+			cost_usd: result.subtreeConsumed.costUsd,
+			token_usage: { ...result.tokenUsage },
+			iterations: result.iterations,
+		});
+	} catch (e) {
+		log.warn("Failed to append run.result", { sessionId, error: String(e) });
+	}
+}
+
+/**
  * The shared finalize invariant applied identically by a fresh launch and a
- * crash-recovery resume: reflect the terminal status into session.json (the
- * recovery entry point) and, when the run ended in error with the setting on,
- * write the opt-in failure report (Part B). Returns the mapped final status so
- * the caller can mirror it into any additional surface (e.g. the flow-run
- * indicator). Extracting it keeps the "both sites finalize the same way"
- * invariant structural rather than a copy pair that can drift.
+ * crash-recovery resume: persist the run's outcome (`run.result`), reflect the
+ * terminal status into session.json (the recovery entry point) and, when the run
+ * ended in error with the setting on, write the opt-in failure report (Part B).
+ * Returns the mapped final status so the caller can mirror it into any
+ * additional surface (e.g. the flow-run indicator). Extracting it keeps the
+ * "both sites finalize the same way" invariant structural rather than a copy
+ * pair that can drift.
  */
 export async function finalizeRun(
 	host: CircuitHost,
@@ -104,6 +134,10 @@ export async function finalizeRun(
 	flow: Circuit,
 	result: CircuitRunResult,
 ): Promise<"completed" | "cancelled" | "error"> {
+	// The outcome record lands BEFORE the terminal status so a terminal
+	// session.json implies run.result is on disk for every new session.
+	await appendRunResult(host, sessionManager, sessionId, result);
+
 	// INT-001: `completed` → done; `cancelled`/`error` map to their statuses.
 	const finalStatus =
 		result.status === "completed"

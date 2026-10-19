@@ -159,6 +159,38 @@ describe("SessionRecovery — tail classification", () => {
 // Budget reconstruction
 // ---------------------------------------------------------------------------
 
+describe("SessionRecovery — run.result is inert", () => {
+	const runResult: SessionLogEntry = {
+		type: "run.result",
+		status: "completed",
+		terminal_topic: "FLOW_COMPLETE",
+		text: "done",
+		structured: { ok: true },
+		cost_usd: 0.5,
+		token_usage: { input: 10, output: 5 },
+		iterations: 2,
+		ts: TS,
+	};
+
+	it("a run.result tail after session.complete yields no action", () => {
+		const entries = [
+			sessionStart("user"),
+			eventEmitted(1, "build.start"),
+			turnComplete(2, "Verify", "FLOW_COMPLETE", 0.02, null),
+			{ type: "session.complete", ts: TS } as SessionLogEntry,
+			runResult,
+		];
+		expect(recovery.classifyTail(entries)).toEqual({ kind: "none" });
+	});
+
+	it("rebuildBudget does not double-count a run.result's subtree cost", () => {
+		const entries = [sessionStart("user"), turnComplete(1, "A", "x", 0.02), runResult];
+		const budget = recovery.rebuildBudget(entries, CEIL);
+		expect(budget.costRemainingUsd).toBeCloseTo(CEIL.maxCostUsd - 0.02, 10);
+		expect(budget.iterationsRemaining).toBe(CEIL.maxIterations - 1);
+	});
+});
+
 describe("SessionRecovery — budget reconstruction", () => {
 	it("replays turn.complete cost to the pre-crash remaining (not reset to full)", () => {
 		const entries = [

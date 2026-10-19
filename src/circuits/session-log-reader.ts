@@ -43,61 +43,81 @@ export interface ParsedSessionLog {
 	schema_version: number;
 }
 
+/** The generic parse result shared by every typed JSONL log (`session-log.jsonl`, `evals.jsonl`). */
+export interface ParsedJsonlEntries<T> {
+	entries: T[];
+	/** True when the final line was incomplete (crash-mid-append) and was dropped. */
+	truncatedFinalLine: boolean;
+}
+
+/**
+ * Parse newline-delimited JSON entries under the malformed-line policy described
+ * in the file header: a truncated **final** line is tolerated (dropped), a
+ * malformed **interior** line throws {@link SessionLogParseError}. Every entry
+ * must be an object with a string `type`. Generic over the entry union so other
+ * append-only logs (the evaluation log) share one parser.
+ */
+export function parseJsonlEntries<T extends { type: string }>(raw: string): ParsedJsonlEntries<T> {
+	// Split on newlines WITHOUT dropping empties yet — we need positional info
+	// to distinguish the (possibly partial) final line from interior lines.
+	const rawLines = raw.split("\n");
+
+	// A trailing newline produces a final empty element; the real "last line"
+	// is the last NON-empty element. Track its index in rawLines.
+	let lastNonEmpty = -1;
+	for (let i = rawLines.length - 1; i >= 0; i--) {
+		if (rawLines[i]!.trim() !== "") {
+			lastNonEmpty = i;
+			break;
+		}
+	}
+	// File terminated with a newline iff there is content and the final raw
+	// element is empty — i.e. the last real line was newline-terminated (a
+	// complete append) rather than a partial mid-write.
+	const finalLineComplete = lastNonEmpty >= 0 && lastNonEmpty < rawLines.length - 1;
+
+	const entries: T[] = [];
+	let truncatedFinalLine = false;
+
+	for (let i = 0; i <= lastNonEmpty; i++) {
+		const line = rawLines[i]!;
+		if (line.trim() === "") continue; // tolerate interior blank lines
+		const isFinalRealLine = i === lastNonEmpty;
+
+		try {
+			const parsed = JSON.parse(line) as T;
+			if (!parsed || typeof parsed !== "object" || typeof (parsed as { type?: unknown }).type !== "string") {
+				throw new Error("entry missing string `type`");
+			}
+			entries.push(parsed);
+		} catch (e) {
+			if (isFinalRealLine && !finalLineComplete) {
+				// Truncated final line (crash mid-append) — tolerated.
+				truncatedFinalLine = true;
+				continue;
+			}
+			// Interior corruption (or a complete-but-invalid final line) — loud.
+			throw new SessionLogParseError(
+				`Malformed interior session-log line ${i}: ${e instanceof Error ? e.message : String(e)}`,
+				i,
+			);
+		}
+	}
+
+	return { entries, truncatedFinalLine };
+}
+
 export class SessionLogReader {
 	/**
 	 * Parse raw `session-log.jsonl` content into ordered entries.
 	 *
 	 * Tolerant of a truncated **final** line; throws {@link SessionLogParseError}
 	 * on a malformed **interior** line. A line is "interior" iff a later non-empty
-	 * line exists after it.
+	 * line exists after it. Delegates to {@link parseJsonlEntries} and adds the
+	 * session-log-specific `schema_version` read.
 	 */
 	parse(raw: string): ParsedSessionLog {
-		// Split on newlines WITHOUT dropping empties yet — we need positional info
-		// to distinguish the (possibly partial) final line from interior lines.
-		const rawLines = raw.split("\n");
-
-		// A trailing newline produces a final empty element; the real "last line"
-		// is the last NON-empty element. Track its index in rawLines.
-		let lastNonEmpty = -1;
-		for (let i = rawLines.length - 1; i >= 0; i--) {
-			if (rawLines[i]!.trim() !== "") {
-				lastNonEmpty = i;
-				break;
-			}
-		}
-		// File terminated with a newline iff there is content and the final raw
-		// element is empty — i.e. the last real line was newline-terminated (a
-		// complete append) rather than a partial mid-write.
-		const finalLineComplete =
-			lastNonEmpty >= 0 && lastNonEmpty < rawLines.length - 1;
-
-		const entries: SessionLogEntry[] = [];
-		let truncatedFinalLine = false;
-
-		for (let i = 0; i <= lastNonEmpty; i++) {
-			const line = rawLines[i]!;
-			if (line.trim() === "") continue; // tolerate interior blank lines
-			const isFinalRealLine = i === lastNonEmpty;
-
-			try {
-				const parsed = JSON.parse(line) as SessionLogEntry;
-				if (!parsed || typeof parsed !== "object" || typeof (parsed as { type?: unknown }).type !== "string") {
-					throw new Error("entry missing string `type`");
-				}
-				entries.push(parsed);
-			} catch (e) {
-				if (isFinalRealLine && !finalLineComplete) {
-					// Truncated final line (crash mid-append) — tolerated.
-					truncatedFinalLine = true;
-					continue;
-				}
-				// Interior corruption (or a complete-but-invalid final line) — loud.
-				throw new SessionLogParseError(
-					`Malformed interior session-log line ${i}: ${e instanceof Error ? e.message : String(e)}`,
-					i,
-				);
-			}
-		}
+		const { entries, truncatedFinalLine } = parseJsonlEntries<SessionLogEntry>(raw);
 
 		// Read schema_version off the first entry (must be session.start); default 1 for legacy logs.
 		const firstEntry = entries[0];
