@@ -583,21 +583,16 @@ async function tests(ctx: TestContext): Promise<void> {
 
 const settings = buildDefaultSettings({
 	orchestration_enabled: true,
-	// Act mode so the code steps' manage_tags/move_note and the proposer's read tools
-	// + emit_event are allowed; auto-approve so the loop stays unattended. (The proposer
+	// Act mode so the code steps' manage_tags/move_note are allowed; auto-approve them
+	// and the proposer's read tools so the loop stays unattended. (The proposer
 	// persona's own <notor_tool_config> still withholds all write tools from the LLM.)
 	mode: "act",
 	auto_approve: {
-		emit_event: true,
 		read_note: true,
 		search_vault: true,
 		list_vault: true,
 		manage_tags: true,
 		move_note: true,
-		orchestration_task_ensure: true,
-		orchestration_task_start: true,
-		orchestration_task_close: true,
-		orchestration_task_list: true,
 	},
 });
 

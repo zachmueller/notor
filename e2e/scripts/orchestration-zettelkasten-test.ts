@@ -586,7 +586,6 @@ const settings = buildDefaultSettings({
 	orchestration_enabled: true,
 	mode: "act",
 	auto_approve: {
-		emit_event: true,
 		read_note: true,
 		search_vault: true,
 		get_backlinks: true,

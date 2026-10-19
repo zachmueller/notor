@@ -269,7 +269,6 @@ const settings = buildDefaultSettings({
 	orchestration_enabled: true,
 	mode: "act",
 	auto_approve: {
-		emit_event: true,
 		orchestration_task_ensure: true,
 		orchestration_task_close: true,
 	},

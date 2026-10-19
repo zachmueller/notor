@@ -386,15 +386,9 @@ async function tests(ctx: TestContext): Promise<void> {
 
 const settings = buildDefaultSettings({
 	orchestration_enabled: true,
-	// Act mode so the step turns' write tools (emit_event, task tools) are allowed.
+	// Act mode so the step turns' write-mode task tools are allowed (emit_event is
+	// read-only, and the circuit tools auto-approve by default).
 	mode: "act",
-	auto_approve: {
-		emit_event: true,
-		orchestration_task_ensure: true,
-		orchestration_task_start: true,
-		orchestration_task_close: true,
-		orchestration_task_list: true,
-	},
 });
 
 runTest(

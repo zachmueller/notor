@@ -406,11 +406,10 @@ async function tests(ctx: TestContext): Promise<void> {
 
 const settings = buildDefaultSettings({
 	orchestration_enabled: true,
-	// Act mode so the conversation steps' write_note/read_note/emit_event are allowed;
-	// auto-approve them so the multi-round loop stays unattended.
+	// Act mode so the conversation steps' write_note is allowed; auto-approve the note
+	// tools so the multi-round loop stays unattended (emit_event auto-approves by default).
 	mode: "act",
 	auto_approve: {
-		emit_event: true,
 		write_note: true,
 		read_note: true,
 	},

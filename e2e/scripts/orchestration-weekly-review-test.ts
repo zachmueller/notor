@@ -563,7 +563,6 @@ const settings = buildDefaultSettings({
 	orchestration_enabled: true,
 	mode: "act",
 	auto_approve: {
-		emit_event: true,
 		run_flow: true,
 		write_note: true,
 		read_note: true,

@@ -437,17 +437,10 @@ async function tests(ctx: TestContext): Promise<void> {
 
 const settings = buildDefaultSettings({
 	orchestration_enabled: true,
-	// Act mode so the code steps' task tools / emit are allowed. Code steps call
+	// Act mode so the code steps' task tools are allowed. Code steps call
 	// the task registry directly (orchestration.tasks.*), but Act mode keeps the
 	// run unattended regardless.
 	mode: "act",
-	auto_approve: {
-		emit_event: true,
-		orchestration_task_ensure: true,
-		orchestration_task_start: true,
-		orchestration_task_close: true,
-		orchestration_task_list: true,
-	},
 });
 
 runTest(
