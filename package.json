@@ -26,6 +26,7 @@
 		"e2e:orch:zettelkasten": "npx tsx e2e/scripts/orchestration-zettelkasten-test.ts",
 		"e2e:orch:weekly-review": "npx tsx e2e/scripts/orchestration-weekly-review-test.ts",
 		"e2e:circuit:alias": "npx tsx e2e/scripts/circuit-alias-test.ts",
+		"e2e:circuit:evals": "npx tsx e2e/scripts/circuit-evals-test.ts",
 		"e2e:external-api": "npx tsx e2e/scripts/external-api-test.ts",
 		"test": "vitest run",
 		"test:watch": "vitest"
