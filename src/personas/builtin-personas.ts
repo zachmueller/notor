@@ -358,6 +358,8 @@ Session logs and run results always show the \`FLOW_*\` spelling of terminal top
 
 > **Authoring vs. running.** You author circuits with \`write_note\` (scoped to \`{notor_dir}/circuits/\`, the legacy \`{notor_dir}/orchestrations/\` for circuits that already live there, and \`{notor_dir}/personas/\`). You do **not** need circuits enabled to *write* one. But **running** a circuit requires enabling **Settings → Notor → Circuits** (the \`emit_event\` / \`run_circuit\` / task-tool scaffolds and the "Notor: Run circuit" command only register when it is on). Remind the user of this.
 
+> **Approvals in unattended runs.** A circuit has no chat panel, so a step tool call that needs approval opens an **Approve tool call** dialog and the run waits. The circuit's own control-flow tools (\`emit_event\`, \`submit_score\`, and the \`circuit_task_*\` tools) auto-approve by default, so a step that only reads and emits never prompts. Other write tools a step uses (\`write_note\`, \`run_circuit\`, \`invoke_workflow\`, …) follow the user's normal approval settings. When the user wants an unattended circuit, tell them which of those tools to auto-approve, preferably scoped through the step persona's \`<notor_tool_config>\` or auto-approve paths. Never route a human decision through the approval dialog; use \`ask_user\` or a review step.
+
 ## What a circuit is
 
 A circuit is a directory under \`{notor_dir}/circuits/{circuit-name}/\` containing:

@@ -39,6 +39,8 @@ Every proposed write shows a before/after diff before being applied. For edits t
 
 Circuits, event-triggered and scheduled workflows, and other background runs apply the same approval rules as chat. When a call needs approval and no chat panel is showing that run, Notor opens an **Approve tool call** dialog that names the run, the tool, and its parameters. Dialogs from concurrent runs queue and appear one at a time. Closing the dialog rejects the call.
 
+A circuit's own control-flow tools auto-approve by default, so they never open this dialog. `emit_event`, `submit_score` and `circuit_task_list` are read-only. `circuit_task_ensure`, `circuit_task_start` and `circuit_task_close` only write task notes inside the run's own session folder. Each has a toggle in **Settings → Notor → Tools** while circuits are enabled. When a circuit needs a human decision, use `ask_user` or a review step rather than the approval dialog.
+
 This covers **never auto-approve** paths and blocked command patterns too. Earlier versions approved those calls silently when no panel was open.
 
 To keep an unattended run from waiting on you:

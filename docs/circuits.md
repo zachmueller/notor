@@ -18,7 +18,8 @@ Circuits were called **orchestrations** (or *orchestration flows*) in earlier No
 Toggle **Enable circuits** under [Settings → Notor → Circuits](notor-settings://Circuits). When enabled, Notor:
 
 - materializes the reference circuits (`code-assist`, `research`, `review`) under `{notor_dir}/circuits/` — preserving any edits you've made on subsequent enables, and skipping any you already have under the legacy `{notor_dir}/orchestrations/`;
-- registers the circuit tool scaffolds (`emit_event`, `submit_score`, `run_circuit`, and the four `circuit_task_*` tools) and the **Notor: Run circuit** / **Notor: Evaluate circuit sessions** commands;
+- registers the circuit tool scaffolds (`emit_event`, `submit_score`, `run_circuit`, `invoke_workflow`, and the four `circuit_task_*` tools) and the **Notor: Run circuit** / **Notor: Evaluate circuit sessions** commands;
+- adds the circuit tools to [Settings → Notor → Tools](notor-settings://Tools) with their own **Enabled** and **Auto-approve** toggles;
 - enables the unified **run-tree view** and the `flow-run` entries in the activity indicator.
 
 Toggling it off removes the command and all scaffolds after the extension reload. (Authoring a circuit with the `circuit-creator` persona works regardless — only *running* a circuit needs the group on.)
@@ -262,7 +263,7 @@ Open the command palette → **Notor: Run circuit**, pick a circuit, and enter a
 
 A circuit can also be launched unattended by a **hook** with the `run_circuit` action type (Settings → Notor → Hooks), stamped `origin: "hook"`. Scripts and other plugins can start one with [`runCircuit`](api.md#running-a-circuit), stamped `origin: "api"`.
 
-Step tool calls follow the normal approval rules. A call that needs approval opens an **Approve tool call** dialog, because a circuit has no chat panel to prompt in. `run_flow` children and `notor-on-complete-flow` successors use the same approval channel and Plan/Act mode as the run that started them. For unattended circuits, see [Runs with no chat panel](safety.md#runs-with-no-chat-panel).
+Step tool calls follow the normal approval rules. A call that needs approval opens an **Approve tool call** dialog, because a circuit has no chat panel to prompt in. The circuit's own control-flow tools (`emit_event`, `submit_score` and the `circuit_task_*` tools) auto-approve by default, so a step that only reads notes and emits its event never prompts. `run_circuit` and `invoke_workflow` still need approval unless you turn on auto-approve for them. `run_flow` children and `notor-on-complete-flow` successors use the same approval channel and Plan/Act mode as the run that started them. For unattended circuits, see [Runs with no chat panel](safety.md#runs-with-no-chat-panel).
 
 Each step turn creates its own conversation, but step conversations are **hidden from the flat conversation sidebar** (the run-tree is their only surface).
 

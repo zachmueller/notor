@@ -44,6 +44,15 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `submit_plan` | Hand a complete step-by-step plan to you for review in a dedicated tab; approving switches to Act mode (see [Plan review](#plan-review)) | Plan & Act |
 | `read_notor_settings` | Read the current Notor plugin settings as JSON | Plan & Act |
 | `edit_notor_settings` | Change a single Notor plugin setting by key path | Act only |
+| `emit_event` | Publish a [circuit](circuits.md) event that routes the run to its next step (circuits only; auto-approved by default) | Plan & Act |
+| `submit_score` | Report an evaluator's per-dimension scores for a circuit run (circuits only; auto-approved by default) | Plan & Act |
+| `circuit_task_list` | List the current circuit session's tasks (circuits only; auto-approved by default) | Plan & Act |
+| `circuit_task_ensure` | Create a task in the current circuit session's task registry (circuits only; auto-approved by default) | Act only |
+| `circuit_task_start` | Mark a circuit task as running (circuits only; auto-approved by default) | Act only |
+| `circuit_task_close` | Mark a circuit task as closed (circuits only; auto-approved by default) | Act only |
+| `invoke_workflow` | Run a named workflow from a circuit step and fold its result into the step (circuits only) | Act only |
+
+The circuit tools register only while **Settings → Notor → Circuits → Enable circuits** is on.
 
 ### User-defined tools
 
