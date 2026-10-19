@@ -4984,3 +4984,97 @@
 .notor-voice-preflight-error {
 	color: var(--text-error);
 }
+
+/* ---------------------------------------------------------------------------
+   Circuit evaluation — session checklist modal ("Evaluate circuit sessions")
+   --------------------------------------------------------------------------- */
+
+.notor-circuit-eval-select-row {
+	display: flex;
+	gap: 6px;
+	margin: 8px 0;
+}
+
+.notor-circuit-eval-sessions {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-height: 50vh;
+	overflow-y: auto;
+	margin-bottom: 8px;
+}
+
+.notor-circuit-eval-session {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	text-align: left;
+	padding: 6px 10px;
+	border-radius: var(--radius-s);
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}
+
+.notor-circuit-eval-session::before {
+	content: "☐";
+	color: var(--text-muted);
+}
+
+.notor-circuit-eval-session--checked {
+	border-color: var(--interactive-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+}
+
+.notor-circuit-eval-session--checked::before {
+	content: "☑";
+	color: var(--interactive-accent);
+}
+
+.notor-circuit-eval-status {
+	text-transform: uppercase;
+	font-size: var(--font-ui-smallest);
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.notor-circuit-eval-status--completed {
+	color: var(--color-green);
+}
+
+.notor-circuit-eval-status--error {
+	color: var(--color-red);
+}
+
+.notor-circuit-eval-when,
+.notor-circuit-eval-cost {
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.notor-circuit-eval-badge {
+	padding: 0 6px;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-border);
+	font-size: var(--font-ui-smallest);
+	white-space: nowrap;
+}
+
+.notor-circuit-eval-badge--stale {
+	opacity: 0.7;
+}
+
+.notor-circuit-eval-objective {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.notor-circuit-eval-footer {
+	margin: 4px 0 8px;
+}

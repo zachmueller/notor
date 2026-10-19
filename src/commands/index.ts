@@ -436,6 +436,24 @@ export function registerCommands(plugin: NotorPlugin): void {
 		},
 	});
 
+	// Evaluate circuit sessions — pick a circuit that declares evaluators, then
+	// the finished sessions to score. New command, so it has a circuit-native id.
+	plugin.addCommand({
+		id: "evaluate-circuit-sessions",
+		name: "Evaluate circuit sessions",
+		checkCallback: (checking: boolean) => {
+			if (!plugin.settings.circuits_enabled) return false;
+			if (checking) return true;
+			void import("../ui/circuit-eval-modals").then(({ showEvaluationPicker }) =>
+				showEvaluationPicker(plugin).catch((e) => {
+					log.error("Evaluate circuit sessions command failed", { error: String(e) });
+					new Notice(`Evaluate circuit sessions failed: ${e instanceof Error ? e.message : String(e)}`);
+				}),
+			);
+			return true;
+		},
+	});
+
 	// Stop circuit — abort a live circuit run via the run registry (F1 Fix 1).
 	// The command ID keeps its original value so users' hotkeys survive the rename.
 	// The activity dropdown is the canonical Stop surface; this command is a cheap

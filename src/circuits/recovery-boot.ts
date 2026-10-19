@@ -29,11 +29,17 @@ import { circuitDataRootOf } from "./data-root";
 
 const log = logger("CircuitLaunch");
 
-/** Build the {@link RecoveryFs} the scan + child-resume read sessions through. */
+/** {@link RecoveryFs} plus the evaluation log, for the session pickers. */
+export interface SessionReadFs extends RecoveryFs {
+	/** Raw `evals.jsonl` for a session, or `null` if absent. */
+	readEvals(sessionId: string): Promise<string | null>;
+}
+
+/** Build the {@link RecoveryFs} the scan + child-resume read sessions through (plus `readEvals` for evaluation). */
 export function makeRecoveryFs(
 	host: CircuitHost,
 	sessionManager: CircuitSessionManager,
-): RecoveryFs {
+): SessionReadFs {
 	const fsVault = new VaultSessionFs(host.app);
 	const sessionsRoot = `${sessionManager.rootPath}/sessions`;
 	return {
@@ -49,6 +55,11 @@ export function makeRecoveryFs(
 		},
 		readLog: async (sessionId) => {
 			const path = `${sessionsRoot}/${sessionId}/session-log.jsonl`;
+			if (!(await fsVault.exists(path))) return null;
+			return fsVault.read(path);
+		},
+		readEvals: async (sessionId) => {
+			const path = `${sessionsRoot}/${sessionId}/evals.jsonl`;
 			if (!(await fsVault.exists(path))) return null;
 			return fsVault.read(path);
 		},
