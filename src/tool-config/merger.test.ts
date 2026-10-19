@@ -10,6 +10,7 @@ vi.mock("../mcp/mcp-tool-adapter", () => ({
 }));
 
 import { mergeToolConfigs, intersectToolConfig } from "./merger";
+import { DEFAULT_AUTO_APPROVE } from "../settings/defaults";
 import type { EffectiveToolConfig, ParsedToolConfig, ResolvedToolConfigEntry } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,12 @@ describe("mergeToolConfigs", () => {
 			expect(result.tools.circuit_task_ensure!.auto_approve).toBe(false);
 			expect(result.tools.invoke_workflow!.auto_approve).toBe(false);
 			expect(result.tools["some_mcp__tool"]!.auto_approve).toBe(false);
+		});
+
+		it("seeded task-tool defaults win over the mode-derived write default", () => {
+			const result = mergeToolConfigs([], { ...DEFAULT_AUTO_APPROVE }, ["circuit_task_ensure", "circuit_task_close"]);
+			expect(result.tools.circuit_task_ensure!.auto_approve).toBe(true);
+			expect(result.tools.circuit_task_close!.auto_approve).toBe(true);
 		});
 
 		it("an explicit emit_event=false opt-out still prompts", () => {

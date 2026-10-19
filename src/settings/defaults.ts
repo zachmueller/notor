@@ -90,6 +90,17 @@ export const DEFAULT_AUTO_APPROVE: Record<string, boolean> = {
 	// submit_plan is read-only and suspends on its own plan-review prompt;
 	// a separate approval gate would only double-prompt.
 	submit_plan: true,
+	// The circuit task tools are write tools, but they only create/update task
+	// notes inside the run's own sessions/<id>/tasks folder (the path comes from
+	// the engine, never the model). Gating them stalls unattended Act-mode
+	// circuits without protecting user notes, so they auto-approve like
+	// capture_memory. emit_event / submit_score / circuit_task_list are read
+	// tools and get their default from defaultAutoApproveFor(); don't seed read
+	// tools here, since seeded keys persist into data.json and shadow later
+	// default changes.
+	circuit_task_ensure: true,
+	circuit_task_start: true,
+	circuit_task_close: true,
 };
 
 /** Default empty hook configuration. */

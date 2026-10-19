@@ -122,6 +122,11 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 		desc: "Read a .docx file and return its content as Markdown (desktop only).",
 		isWrite: false,
 	},
+	import_docx: {
+		name: "Import Word doc",
+		desc: "Parse a .docx file and save its content as a Markdown note in the vault, extracting embedded images (desktop only).",
+		isWrite: true,
+	},
 	write_docx: {
 		name: "Write Word doc",
 		desc: "Convert Markdown to a .docx file on the filesystem (desktop only).",
@@ -215,6 +220,44 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
 	apply_template: {
 		name: "Apply template",
 		desc: "Apply a template to create a new note. For Templater templates, automatically answers prompts and suggestors.",
+		isWrite: true,
+	},
+	// Circuit tools (featureGroup "circuits"): their rows render only while
+	// circuits are enabled, because the Tools section intersects this table with
+	// the registered extension tools.
+	emit_event: {
+		name: "Emit circuit event",
+		desc: "Publish a circuit event to route the run to its next step. Control flow only; changes nothing in the vault.",
+		isWrite: false,
+	},
+	submit_score: {
+		name: "Submit evaluation score",
+		desc: "Report an evaluator's per-dimension scores and rationale for a circuit run.",
+		isWrite: false,
+	},
+	circuit_task_list: {
+		name: "List circuit tasks",
+		desc: "List the current circuit session's tasks, optionally filtered by status.",
+		isWrite: false,
+	},
+	circuit_task_ensure: {
+		name: "Ensure circuit task",
+		desc: "Create a task in the current circuit session's task registry (idempotent).",
+		isWrite: true,
+	},
+	circuit_task_start: {
+		name: "Start circuit task",
+		desc: "Mark a circuit task as running.",
+		isWrite: true,
+	},
+	circuit_task_close: {
+		name: "Close circuit task",
+		desc: "Mark a circuit task as closed.",
+		isWrite: true,
+	},
+	invoke_workflow: {
+		name: "Invoke workflow",
+		desc: "Run a named workflow from a circuit step and fold its result into the step. The workflow runs uncapped.",
 		isWrite: true,
 	},
 };

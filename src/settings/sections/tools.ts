@@ -84,11 +84,14 @@ export function generateToolConfigSnippet(
 	mcpServers: Record<string, McpServerConfig>,
 	mcpHub: McpHub | undefined,
 	userTools?: Array<{ name: string; mode: "read" | "write" }>,
+	registeredToolNames?: ReadonlySet<string>,
 ): string {
 	const lines: string[] = [];
 
-	// Built-in tools
+	// Built-in tools (only registered ones when known, so feature-gated tools
+	// such as the circuit tools are omitted while their group is off)
 	for (const [toolId] of Object.entries(TOOL_DISPLAY_NAMES)) {
+		if (registeredToolNames && !registeredToolNames.has(toolId)) continue;
 		const currentAutoApprove = autoApprove[toolId] ?? defaultAutoApproveFor(toolId);
 		const currentEnabled = toolEnabled[toolId] ?? !TOOLS_DEFAULT_DISABLED.has(toolId);
 		lines.push(`${toolId}:`);
@@ -301,6 +304,7 @@ export function renderToolsSection(
 						ctx.settings.mcp_servers ?? {},
 						getMcpHub(ctx),
 						userToolsList,
+						new Set(ctx.plugin.getToolDispatcher().getRegisteredToolNames()),
 					);
 					await navigator.clipboard.writeText(snippet);
 					new Notice("Tool config YAML copied to clipboard.");
