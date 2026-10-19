@@ -5,6 +5,8 @@
  * dropdown and tool display metadata for the auto-approve section.
  */
 
+import { BUILTIN_TOOL_SCAFFOLDS } from "../extensions/builtin-tool-scaffolds";
+
 // ---------------------------------------------------------------------------
 // AWS regions for Bedrock dropdown
 // ---------------------------------------------------------------------------
@@ -225,13 +227,23 @@ export const TOOL_DISPLAY_NAMES: Record<string, { name: string; desc: string; is
  * UI and the tool-config merger so they can never diverge (the divergence that
  * caused enabled read tools like `sleep` to prompt despite an "on" toggle).
  *
- * Tools not in `TOOL_DISPLAY_NAMES` (MCP, user-extension) default to `false`
- * (conservative) — their auto-approve is sourced elsewhere (e.g. MCP server
- * `autoApprove[]`, pre-expanded into `globalAutoApprove`).
+ * Resolution order:
+ *  1. `TOOL_DISPLAY_NAMES` — built-in tools with a settings row (`!isWrite`).
+ *  2. `BUILTIN_TOOL_SCAFFOLDS` — feature-gated scaffolds that may have no
+ *     settings row (`emit_event`, `ask_user`, …) derive the default from their
+ *     own declared `mode`, so a scaffold can never fall into the MCP/user-tool
+ *     branch below (the gap that made every circuit step's `emit_event` prompt
+ *     once runs with no chat panel started applying the approval rules).
+ *  3. Anything else (MCP, user-extension) defaults to `false` (conservative) —
+ *     their auto-approve is sourced elsewhere (e.g. MCP server `autoApprove[]`,
+ *     pre-expanded into `globalAutoApprove`).
  */
 export function defaultAutoApproveFor(toolName: string): boolean {
 	const meta = TOOL_DISPLAY_NAMES[toolName];
-	return meta ? !meta.isWrite : false;
+	if (meta) return !meta.isWrite;
+	const scaffold = BUILTIN_TOOL_SCAFFOLDS.get(toolName);
+	if (scaffold) return scaffold.mode === "read";
+	return false;
 }
 
 // ---------------------------------------------------------------------------

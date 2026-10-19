@@ -154,6 +154,33 @@ describe("mergeToolConfigs", () => {
 			expect(result.tools["some_mcp__tool"]!.auto_approve).toBe(false);
 		});
 
+		it("circuit scaffolds absent from globalAutoApprove default from their own mode", () => {
+			// emit_event / submit_score / circuit_task_list are read scaffolds with
+			// no settings row; they used to fall into the unknown-tool branch and
+			// prompt in every circuit step. MCP-style names stay conservative.
+			const toolNames = [
+				"emit_event",
+				"submit_score",
+				"circuit_task_list",
+				"circuit_task_ensure",
+				"invoke_workflow",
+				"some_mcp__tool",
+			];
+			const result = mergeToolConfigs([], {}, toolNames);
+
+			expect(result.tools.emit_event!.auto_approve).toBe(true);
+			expect(result.tools.submit_score!.auto_approve).toBe(true);
+			expect(result.tools.circuit_task_list!.auto_approve).toBe(true);
+			expect(result.tools.circuit_task_ensure!.auto_approve).toBe(false);
+			expect(result.tools.invoke_workflow!.auto_approve).toBe(false);
+			expect(result.tools["some_mcp__tool"]!.auto_approve).toBe(false);
+		});
+
+		it("an explicit emit_event=false opt-out still prompts", () => {
+			const result = mergeToolConfigs([], { emit_event: false }, ["emit_event"]);
+			expect(result.tools.emit_event!.auto_approve).toBe(false);
+		});
+
 		it("explicit globalAutoApprove=false wins over the mode-aware default (opt-out preserved)", () => {
 			// A user who deliberately disabled auto-approve for a read tool stores
 			// `false`; the deep-merge keeps that value, so it must short-circuit

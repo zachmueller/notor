@@ -3,6 +3,7 @@ import type { SubAgentResult } from "../../chat/sub-agent-runner";
 import { SubAgentRunner } from "../../chat/sub-agent-runner";
 import { ToolDispatcher } from "../../chat/dispatcher";
 import { intersectToolConfig } from "../../tool-config/merger";
+import { defaultAutoApproveFor } from "../../settings/constants";
 import { SUB_AGENT_PREAMBLE } from "../../sub-agents/preamble";
 import { SUB_AGENT_ITERATION_CAP, SUB_AGENT_TOKEN_LIMIT } from "../../sub-agents/constants";
 import { retryPolicyFromSettings } from "../../providers/stream-retry";
@@ -88,7 +89,7 @@ export function buildSubAgentUtils(ctx: BuilderContext): Pick<ExtensionUtils, "r
 				for (const name of toolRegistry.getNames()) {
 					tools[name] = {
 						enabled: true,
-						auto_approve: plugin.settings.auto_approve[name] ?? false,
+						auto_approve: plugin.settings.auto_approve[name] ?? defaultAutoApproveFor(name),
 						allowed_paths: [],
 						blocked_paths: [],
 						allowed_command_patterns: [],

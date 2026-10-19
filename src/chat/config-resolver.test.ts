@@ -130,3 +130,48 @@ describe("ConfigResolver.resolveEffectiveConfig — persona auto_approve", () =>
 		expect(decision).toMatchObject({ allowed: true, autoApproved: false });
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Circuit control-flow tools with no explicit setting (headless circuit steps)
+// ---------------------------------------------------------------------------
+
+describe("ConfigResolver.resolveEffectiveConfig — circuit tools with no explicit setting", () => {
+	const CIRCUIT_TOOL_NAMES = [...TOOL_NAMES, "emit_event", "circuit_task_ensure"];
+	const EMIT_EVENT: DispatchableTool = { name: "emit_event", mode: "read" } as any;
+	const TASK_ENSURE: DispatchableTool = { name: "circuit_task_ensure", mode: "write" } as any;
+
+	function circuitResolver(): ConfigResolver {
+		const settings = {
+			auto_approve: { ...DEFAULT_AUTO_APPROVE },
+			tool_enabled: {},
+			path_scope_rules: [],
+		} as unknown as NotorSettings;
+		const builder = new SystemPromptBuilder({} as any, "notor");
+		const dispatcher = { getRegisteredToolNames: () => CIRCUIT_TOOL_NAMES } as unknown as ToolDispatcher;
+		return new ConfigResolver(settings, builder, dispatcher);
+	}
+
+	beforeEach(() => {
+		for (const key of Object.keys(TOOL_PATH_PARAMS)) delete TOOL_PATH_PARAMS[key];
+	});
+
+	it("emit_event auto-approves in Plan mode, so a circuit step never prompts on its own output", async () => {
+		const { effective } = await circuitResolver().resolveEffectiveConfig([], null, null, "plan");
+		const decision = evaluateToolPolicy("emit_event", { topic: "FLOW_COMPLETE", payload: "x" }, EMIT_EVENT, {
+			effectiveConfig: effective,
+			mode: "plan",
+			vaultRootPath: "/vault",
+		});
+		expect(decision).toMatchObject({ allowed: true, autoApproved: true });
+	});
+
+	it("write-mode task tools are still blocked in Plan mode", async () => {
+		const { effective } = await circuitResolver().resolveEffectiveConfig([], null, null, "plan");
+		const decision = evaluateToolPolicy("circuit_task_ensure", { key: "t1" }, TASK_ENSURE, {
+			effectiveConfig: effective,
+			mode: "plan",
+			vaultRootPath: "/vault",
+		});
+		expect(decision.allowed).toBe(false);
+	});
+});
