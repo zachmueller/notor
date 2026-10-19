@@ -105,6 +105,13 @@ export class VaultEventScheduler {
 	 */
 	private flowLaunchExecutor: ((flow: Circuit) => Promise<void>) | null = null;
 
+	/**
+	 * Evaluator for a circuit's scheduled evaluation (`notor-eval-schedule`):
+	 * scores the circuit's finished sessions the current evaluators have not
+	 * scored yet. Set via `setCircuitEvaluator()`.
+	 */
+	private circuitEvalExecutor: ((flow: Circuit) => Promise<void>) | null = null;
+
 	// ---------------------------------------------------------------------------
 	// Initialization
 	// ---------------------------------------------------------------------------
@@ -164,6 +171,15 @@ export class VaultEventScheduler {
 	): void {
 		this.getDiscoveredCircuits = getFlows;
 		this.flowLaunchExecutor = launchFlow;
+	}
+
+	/**
+	 * Set the executor for scheduled circuit evaluations (`notor-eval-schedule`).
+	 * Uses the circuit accessor from `setDiscoveredFlows()`; a circuit with an
+	 * eval schedule gets its own `eval:{flowDir}` job alongside any run schedule.
+	 */
+	setCircuitEvaluator(evaluate: (flow: Circuit) => Promise<void>): void {
+		this.circuitEvalExecutor = evaluate;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -306,7 +322,7 @@ export class VaultEventScheduler {
 	 *
 	 * @param target - Hook, workflow, automation, or circuit to schedule. Its
 	 *                 key (hook ID, `workflow:{filePath}`, `ext-auto:{filePath}`,
-	 *                 or `orch:{flowDir}`) identifies the job.
+	 *                 `orch:{flowDir}`, or `eval:{flowDir}`) identifies the job.
 	 */
 	private startJob(target: TriggerTarget): void {
 		const { key: id, label } = target;
@@ -356,6 +372,7 @@ export class VaultEventScheduler {
 			dispatchFn: this.dispatchFn,
 			executeAutomation: this.extensionAutomationExecutor,
 			launchCircuit: this.flowLaunchExecutor,
+			evaluateCircuit: this.circuitEvalExecutor,
 		});
 	}
 
@@ -379,6 +396,8 @@ const SCHEDULE_TRIGGER_SPEC: TriggerSourceSpec = {
 	hookEvent: "on_schedule",
 	workflowTrigger: "on-schedule",
 	circuitMatches: (circuit) => !!circuit.schedule,
+	// An eval schedule with nothing to run is inert.
+	circuitEvalMatches: (circuit) => !!circuit.evalSchedule && circuit.evaluators.length > 0,
 	requireSchedule: true,
 };
 
@@ -389,5 +408,6 @@ function scheduleOf(target: TriggerTarget): string {
 		case "workflow": return target.workflow.schedule ?? "";
 		case "automation": return target.automation.schedule?.trim() ?? "";
 		case "circuit": return target.circuit.schedule ?? "";
+		case "circuit_eval": return target.circuit.evalSchedule ?? "";
 	}
 }

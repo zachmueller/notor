@@ -1344,6 +1344,15 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			},
 		);
 
+		// Scheduled circuit evaluation (`notor-eval-schedule`): score the circuit's
+		// finished sessions the current evaluators have not scored yet. Lazy-loads
+		// the evaluation stack like the launcher above; gated on `circuits_enabled`.
+		vaultEventScheduler.setCircuitEvaluator(async (flow) => {
+			if (!this.settings.circuits_enabled) return;
+			const { evaluateUnevaluatedSessions } = await import("./circuits/evaluation");
+			await evaluateUnevaluatedSessions(this, flow);
+		});
+
 		// on_daily_start: fires once per logical day on the first activity after
 		// the reset time. Started once initial discovery finishes (see onload).
 		this._dailyStart = new DailyStart(this, {

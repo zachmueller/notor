@@ -8,6 +8,7 @@
  * 2. Discovered workflows with a matching `notor-trigger`
  * 3. Extension automations with a matching trigger
  * 4. Circuits that opt in via frontmatter (`notor-schedule` / `notor-daily-start`)
+ * 5. Circuit evaluations that opt in via `notor-eval-schedule` (schedule only)
  *
  * `collectTriggerTargets()` gathers them (respecting the per-item enable
  * maps) and `fireTriggerTarget()` routes one to its executor, so the two
@@ -21,7 +22,7 @@ import type { DispatchRunObserver, HookCircuitLaunchOptions } from "./vault-even
 import type { NotorSettings } from "../settings/types";
 import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
 import type { Circuit } from "../circuits/types";
-import { circuitEnabledKey, circuitJobKey } from "../circuits/circuit-enabled";
+import { circuitEnabledKey, circuitEvalEnabledKey, circuitEvalJobKey, circuitJobKey } from "../circuits/circuit-enabled";
 import { logger } from "../utils/logger";
 
 const log = logger("TriggerSources");
@@ -35,7 +36,9 @@ export type TriggerTarget =
 	| { kind: "hook"; key: string; label: string; hook: VaultEventHook }
 	| { kind: "workflow"; key: string; label: string; workflow: Workflow }
 	| { kind: "automation"; key: string; label: string; automation: UserAutomationDefinition }
-	| { kind: "circuit"; key: string; label: string; circuit: Circuit };
+	| { kind: "circuit"; key: string; label: string; circuit: Circuit }
+	/** Evaluate the circuit's not-yet-scored finished sessions (never launches a run). */
+	| { kind: "circuit_eval"; key: string; label: string; circuit: Circuit };
 
 /** Vault events driven by a trigger source rather than an Obsidian event. */
 export type TimerHookEvent = "on_schedule" | "on_daily_start";
@@ -54,6 +57,11 @@ export interface TriggerSourceSpec {
 	workflowTrigger: WorkflowTrigger;
 	/** Circuit opt-in (e.g. has a schedule, or `dailyStart`). */
 	circuitMatches: (circuit: Circuit) => boolean;
+	/**
+	 * Circuit EVALUATION opt-in (`notor-eval-schedule`). Omitted for triggers
+	 * that never evaluate (daily start): no `circuit_eval` targets are collected.
+	 */
+	circuitEvalMatches?: (circuit: Circuit) => boolean;
 	/** Require a cron expression on hooks, workflows, and automations. */
 	requireSchedule: boolean;
 }
@@ -74,6 +82,8 @@ export interface TriggerExecutors {
 	dispatchFn: TriggerDispatchFn | null;
 	executeAutomation: ((automation: UserAutomationDefinition, context: Record<string, unknown>) => Promise<unknown>) | null;
 	launchCircuit: ((circuit: Circuit, options?: HookCircuitLaunchOptions) => Promise<void>) | null;
+	/** Evaluate a circuit's un-scored finished sessions (`circuit_eval` targets). Optional: only the scheduler sets it. */
+	evaluateCircuit?: ((circuit: Circuit) => Promise<void>) | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +164,20 @@ export function collectTriggerTargets(
 		for (const circuit of circuits) {
 			targets.push({ kind: "circuit", key: circuitJobKey(circuit.flowDir), label: circuit.name, circuit });
 		}
+
+		// Circuit evaluations that opt in (`notor-eval-schedule`), toggled by their own enable key.
+		if (spec.circuitEvalMatches) {
+			for (const circuit of accessors.getDiscoveredCircuits()) {
+				if (!spec.circuitEvalMatches(circuit)) continue;
+				if (flowEnabled?.[circuitEvalEnabledKey(circuit.flowDir)] === false) continue;
+				targets.push({
+					kind: "circuit_eval",
+					key: circuitEvalJobKey(circuit.flowDir),
+					label: `${circuit.name} (evaluation)`,
+					circuit,
+				});
+			}
+		}
 	}
 
 	return targets;
@@ -196,6 +220,24 @@ export function fireTriggerTarget(
 					const msg = e instanceof Error ? e.message : String(e);
 					log.error(`${noticeLabel} circuit launch failed`, { key, error: msg });
 					new Notice(`${noticeLabel} circuit '${label}' failed to launch: ${msg}`);
+				}
+			})();
+			return;
+		}
+
+		case "circuit_eval": {
+			const evaluate = executors.evaluateCircuit;
+			if (!evaluate) {
+				log.warn(`${hookEvent} circuit evaluation fired but no evaluator set — skipping`, { key });
+				return;
+			}
+			void (async () => {
+				try {
+					await evaluate(target.circuit);
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : String(e);
+					log.error(`${noticeLabel} circuit evaluation failed`, { key, error: msg });
+					new Notice(`${noticeLabel} evaluation of circuit '${target.circuit.name}' failed: ${msg}`);
 				}
 			})();
 			return;

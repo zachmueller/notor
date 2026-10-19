@@ -21,7 +21,7 @@ import type { Workflow } from "../../types";
 import { discoverWorkflows } from "../../workflows/workflow-discovery";
 import type { VaultEventScheduler } from "../../hooks/vault-event-scheduler";
 import type { Circuit } from "../../circuits/types";
-import { circuitEnabledKey, circuitJobKey } from "../../circuits/circuit-enabled";
+import { circuitEnabledKey, circuitEvalEnabledKey, circuitEvalJobKey, circuitJobKey } from "../../circuits/circuit-enabled";
 import { logger } from "../../utils/logger";
 
 const log = logger("UserAutomationsSection");
@@ -92,6 +92,13 @@ type AutomationItem = {
 	name: string;
 	triggerKey: string;
 	isBuiltin: false;
+} | {
+	/** A circuit's scheduled evaluation (`notor-eval-schedule`). */
+	kind: "flow-eval";
+	flow: Circuit;
+	name: string;
+	triggerKey: string;
+	isBuiltin: false;
 };
 
 // ---------------------------------------------------------------------------
@@ -143,6 +150,16 @@ function collectAllItems(ctx: SettingsContext): AutomationItem[] {
 					flow,
 					name: flow.name,
 					triggerKey,
+					isBuiltin: false,
+				});
+			}
+			// A scheduled evaluation is its own row (own enable key + cron job).
+			if (flow.evalSchedule && flow.evaluators.length > 0) {
+				items.push({
+					kind: "flow-eval",
+					flow,
+					name: `${flow.name} — evaluation`,
+					triggerKey: "on-schedule",
 					isBuiltin: false,
 				});
 			}
@@ -348,6 +365,57 @@ function renderFlowRow(
 	});
 }
 
+function renderFlowEvalRow(
+	containerEl: HTMLElement,
+	item: AutomationItem & { kind: "flow-eval" },
+	scheduler: VaultEventScheduler | undefined,
+	ctx: SettingsContext,
+): void {
+	const flow = item.flow;
+	const enableKey = circuitEvalEnabledKey(flow.flowDir);
+	const isEnabled = ctx.settings.flow_enabled[enableKey] !== false;
+
+	let desc = `Evaluates finished runs · Schedule: ${flow.evalSchedule}`;
+	const nextRun = flow.evalSchedule ? scheduler?.getNextRun(flow.evalSchedule) ?? null : null;
+	if (nextRun) {
+		desc += ` · Next: ${nextRun.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+	}
+
+	const setting = new Setting(containerEl)
+		.setName(item.name)
+		.setDesc(desc);
+
+	setting.nameEl.createSpan({
+		cls: "notor-automation-builtin-badge",
+		text: "circuit eval",
+	});
+
+	const isActive = scheduler?.isJobActive(circuitEvalJobKey(flow.flowDir)) ?? false;
+	const dot = setting.nameEl.createSpan({
+		cls: `notor-schedule-status-dot ${isActive ? "notor-schedule-active" : "notor-schedule-inactive"}`,
+	});
+	dot.setAttribute("aria-label", isActive ? "Active" : "Inactive");
+	setting.nameEl.prepend(dot);
+
+	setting.addToggle((toggle) =>
+		toggle
+			.setValue(isEnabled)
+			.setTooltip("Enabled")
+			.onChange(async (value) => {
+				ctx.settings.flow_enabled[enableKey] = value;
+				await ctx.saveSettings();
+				// Re-sync cron jobs so the evaluation schedule starts/stops immediately.
+				await ctx.plugin.rescanCircuits();
+				ctx.redisplay();
+			}),
+	);
+
+	// Invisible gear placeholder for column alignment
+	setting.addExtraButton((btn) => {
+		btn.extraSettingsEl.addClass("notor-tool-icon-placeholder");
+	});
+}
+
 function renderAutomationRow(
 	containerEl: HTMLElement,
 	item: AutomationItem & { kind: "automation" },
@@ -504,6 +572,8 @@ export function renderUserAutomationsSection(
 				renderWorkflowRow(containerEl, item, scheduler, ctx);
 			} else if (item.kind === "flow") {
 				renderFlowRow(containerEl, item, scheduler, ctx);
+			} else if (item.kind === "flow-eval") {
+				renderFlowEvalRow(containerEl, item, scheduler, ctx);
 			} else {
 				renderAutomationRow(containerEl, item, scheduler, ctx);
 			}
@@ -525,6 +595,8 @@ export function renderUserAutomationsSection(
 				renderWorkflowRow(containerEl, item, scheduler, ctx);
 			} else if (item.kind === "flow") {
 				renderFlowRow(containerEl, item, scheduler, ctx);
+			} else if (item.kind === "flow-eval") {
+				renderFlowEvalRow(containerEl, item, scheduler, ctx);
 			} else {
 				renderAutomationRow(containerEl, item, scheduler, ctx);
 			}

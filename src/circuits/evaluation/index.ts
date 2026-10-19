@@ -19,3 +19,7 @@ export { JUDGE_DISABLED_TOOLS, JUDGE_ITERATION_CAP, SUBMIT_SCORE_TOOL, judgeTool
 export { CODE_EVALUATOR_ARG_NAMES, makeCodeEvaluatorRuntimeFactory, runCodeEvaluator } from "./code-evaluator-runner";
 export type { CodeEvaluationHelper, CodeEvaluatorRuntime, CodeEvaluatorRuntimeFactory } from "./code-evaluator-runner";
 export { buildEvalInput, readNoteContents, stepConversationIdsOf } from "./eval-input";
+export { estimateEvalCeiling, listEvaluableSessions } from "./session-listing";
+export type { EvalSessionFs, EvaluableSession } from "./session-listing";
+export { maybeAutoEvaluate, shouldAutoEvaluate } from "./auto-trigger";
+export { DEFAULT_SCHEDULED_EVAL_MAX_SESSIONS, evaluateUnevaluatedSessions, listUnevaluatedSessions, selectScheduledSessions } from "./scheduled";

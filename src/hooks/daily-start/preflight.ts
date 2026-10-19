@@ -47,6 +47,9 @@ export function needsPreflight(target: TriggerTarget): boolean {
 			return true;
 		case "automation":
 			return false;
+		// Never collected for daily start (its spec has no eval opt-in).
+		case "circuit_eval":
+			return false;
 		case "hook":
 			return target.hook.action_type !== "execute_command";
 	}
@@ -107,6 +110,7 @@ export async function resolveTargetProviders(target: TriggerTarget, deps: Prefli
 			break;
 		}
 		case "automation":
+		case "circuit_eval":
 			break;
 	}
 	return [...ids].filter((id) => id !== "");

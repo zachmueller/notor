@@ -20,3 +20,17 @@ export function circuitEnabledKey(flowDir: string): string {
 export function circuitJobKey(flowDir: string): string {
 	return `orch:${flowDir}`;
 }
+
+/**
+ * Settings `flow_enabled` map key for a circuit's scheduled EVALUATION
+ * (`notor-eval-schedule`). Distinct from {@link circuitEnabledKey} so the run
+ * schedule and the evaluation schedule toggle independently.
+ */
+export function circuitEvalEnabledKey(flowDir: string): string {
+	return `eval:${flowDir}`;
+}
+
+/** Scheduler job-map key for a circuit's scheduled evaluation cron job. */
+export function circuitEvalJobKey(flowDir: string): string {
+	return `eval:${flowDir}`;
+}

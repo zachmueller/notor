@@ -10,7 +10,7 @@ import type { VaultEventHook, Workflow } from "../types";
 import type { NotorSettings } from "../settings/types";
 import type { UserAutomationDefinition } from "../extensions/types";
 import type { Circuit } from "../circuits/types";
-import { circuitJobKey } from "../circuits/circuit-enabled";
+import { circuitEvalJobKey, circuitJobKey } from "../circuits/circuit-enabled";
 
 const DAILY: TriggerSourceSpec = {
 	hookEvent: "on_daily_start",
@@ -159,5 +159,67 @@ describe("fireTriggerTarget", () => {
 
 		await vi.waitFor(() => expect(launchCircuit).toHaveBeenCalledWith(c, observer.circuit));
 		expect(dispatchFn.mock.calls[0]![3]).toBe(observer);
+	});
+});
+
+describe("circuit evaluation targets (notor-eval-schedule)", () => {
+	const SCHEDULE_WITH_EVAL: TriggerSourceSpec = {
+		...SCHEDULE,
+		circuitEvalMatches: (c) => !!c.evalSchedule && c.evaluators.length > 0,
+	};
+	const evaluated = (flowDir: string, over: Partial<Circuit> = {}) =>
+		circuit(flowDir, { evalSchedule: "0 6 * * *", evaluators: [{ name: "j" }] as Circuit["evaluators"], ...over });
+
+	it("collects circuit_eval targets only when the spec opts in, keyed eval:{dir}, alongside the run job", () => {
+		const accessors = {
+			getSettings: () => settings(),
+			getDiscoveredWorkflows: null,
+			getAutomations: null,
+			getDiscoveredCircuits: () => [
+				evaluated("c/both", { schedule: "0 9 * * *" }),
+				evaluated("c/eval-only"),
+				evaluated("c/no-evaluators", { evaluators: [] }),
+				circuit("c/run-only", { schedule: "0 9 * * *" }),
+			],
+		};
+		expect(collectTriggerTargets(SCHEDULE_WITH_EVAL, [], accessors).map((t) => [t.kind, t.key])).toEqual([
+			["circuit", circuitJobKey("c/both")],
+			["circuit", circuitJobKey("c/run-only")],
+			["circuit_eval", circuitEvalJobKey("c/both")],
+			["circuit_eval", circuitEvalJobKey("c/eval-only")],
+		]);
+		// The daily-start spec has no eval opt-in: no circuit_eval targets ever.
+		expect(collectTriggerTargets(SCHEDULE, [], accessors).some((t) => t.kind === "circuit_eval")).toBe(false);
+	});
+
+	it("honors the separate eval:{dir} enable key", () => {
+		const targets = collectTriggerTargets(SCHEDULE_WITH_EVAL, [], {
+			getSettings: () => settings({ flow_enabled: { "eval:c/eval-only": false } }),
+			getDiscoveredWorkflows: null,
+			getAutomations: null,
+			getDiscoveredCircuits: () => [evaluated("c/eval-only", { schedule: "0 9 * * *" })],
+		});
+		// The run job survives; only the evaluation job is switched off.
+		expect(targets.map((t) => t.kind)).toEqual(["circuit"]);
+	});
+
+	it("fires circuit_eval through evaluateCircuit, and skips without an evaluator", async () => {
+		const evaluateCircuit = vi.fn().mockResolvedValue(undefined);
+		const c = evaluated("c/e");
+		fireTriggerTarget({ kind: "circuit_eval", key: circuitEvalJobKey(c.flowDir), label: c.name, circuit: c }, "on_schedule", "Scheduled", {
+			dispatchFn: null,
+			executeAutomation: null,
+			launchCircuit: null,
+			evaluateCircuit,
+		});
+		await vi.waitFor(() => expect(evaluateCircuit).toHaveBeenCalledWith(c));
+
+		const launchCircuit = vi.fn();
+		fireTriggerTarget({ kind: "circuit_eval", key: "k", label: c.name, circuit: c }, "on_schedule", "Scheduled", {
+			dispatchFn: null,
+			executeAutomation: null,
+			launchCircuit,
+		});
+		expect(launchCircuit).not.toHaveBeenCalled();
 	});
 });

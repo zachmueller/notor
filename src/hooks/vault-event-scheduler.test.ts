@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { VaultEventScheduler } from "./vault-event-scheduler";
-import { circuitJobKey } from "../circuits/circuit-enabled";
+import { circuitEvalJobKey, circuitJobKey } from "../circuits/circuit-enabled";
 import type { Circuit } from "../circuits/types";
 import type { NotorSettings } from "../settings/types";
 
@@ -118,5 +118,65 @@ describe("VaultEventScheduler — scheduled orchestration flows", () => {
 		await new Promise((resolve) => setTimeout(resolve, 1200));
 
 		expect(launch).toHaveBeenCalledWith(flow);
+	});
+});
+
+describe("VaultEventScheduler — scheduled circuit evaluation (notor-eval-schedule)", () => {
+	let scheduler: VaultEventScheduler;
+	const evaluators = [{ name: "judge" }] as unknown as Circuit["evaluators"];
+
+	beforeEach(() => {
+		scheduler = new VaultEventScheduler();
+		scheduler.setDispatch(vi.fn(), () => []);
+	});
+
+	afterEach(() => {
+		scheduler.destroy();
+	});
+
+	it("registers an eval:{dir} job next to the run job, only when the circuit has evaluators", () => {
+		const flow = makeFlow({ evalSchedule: "0 6 * * *", evaluators });
+		const inert = makeFlow({ flowDir: "notor/orchestrations/inert", schedule: null, evalSchedule: "0 6 * * *", evaluators: [] });
+		scheduler.setSettingsAccessor(() => settingsWith({}));
+		scheduler.setDiscoveredFlows(() => [flow, inert], vi.fn());
+		scheduler.setCircuitEvaluator(vi.fn());
+
+		scheduler.syncJobs([]);
+
+		expect(scheduler.isJobActive(circuitJobKey(flow.flowDir))).toBe(true);
+		expect(scheduler.isJobActive(circuitEvalJobKey(flow.flowDir))).toBe(true);
+		expect(scheduler.isJobActive(circuitEvalJobKey(inert.flowDir))).toBe(false);
+	});
+
+	it("toggles the evaluation job with its own flow_enabled key", () => {
+		const flow = makeFlow({ evalSchedule: "0 6 * * *", evaluators });
+		let enabled: Record<string, boolean> = { [circuitEvalJobKey(flow.flowDir)]: false };
+		scheduler.setSettingsAccessor(() => settingsWith(enabled));
+		scheduler.setDiscoveredFlows(() => [flow], vi.fn());
+
+		scheduler.syncJobs([]);
+		expect(scheduler.isJobActive(circuitJobKey(flow.flowDir))).toBe(true);
+		expect(scheduler.isJobActive(circuitEvalJobKey(flow.flowDir))).toBe(false);
+
+		enabled = {};
+		scheduler.syncJobs([]);
+		expect(scheduler.isJobActive(circuitEvalJobKey(flow.flowDir))).toBe(true);
+	});
+
+	it("fires the circuit evaluator (not the launcher) when the eval job triggers", async () => {
+		const flow = makeFlow({ schedule: null, evalSchedule: "* * * * * *", evaluators });
+		const launch = vi.fn().mockResolvedValue(undefined);
+		const evaluate = vi.fn().mockResolvedValue(undefined);
+		scheduler.setSettingsAccessor(() => settingsWith({}));
+		scheduler.setDiscoveredFlows(() => [flow], launch);
+		scheduler.setCircuitEvaluator(evaluate);
+
+		scheduler.syncJobs([]);
+		expect(scheduler.isJobActive(circuitEvalJobKey(flow.flowDir))).toBe(true);
+
+		await new Promise((resolve) => setTimeout(resolve, 1200));
+
+		expect(evaluate).toHaveBeenCalledWith(flow);
+		expect(launch).not.toHaveBeenCalled();
 	});
 });
