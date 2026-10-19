@@ -116,6 +116,8 @@ All Notor commands are accessible via the Obsidian command palette (Ctrl/Cmd+P):
 | **Notor: Import conversation from HTML** | Imports a previously exported HTML conversation |
 | **Notor: Open tool config inspector** | Opens a debugging view showing the effective tool configuration |
 | **Notor: Reload user extensions** | Re-discovers and recompiles all user-defined tools and automations |
+| **Notor: Toggle voice mode** | Starts or stops the hands-free [voice loop](voice.md) for the active chat panel (macOS; shown when voice mode is enabled) |
+| **Notor: Stop speaking (voice mode)** | Cuts off the current spoken reply without stopping voice mode |
 | **Notor: Launch active note workflow** | Opens a picker filtered to workflows with `notor-active-note-prompt`, runs against the active note |
 | **Notor: Open new chat panel** | Opens an additional chat panel in a new tab |
 | **Notor: Find in messages** | Opens the find bar in the chat panel to search across message content |

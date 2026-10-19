@@ -282,6 +282,7 @@ export class ExtensionManager {
 		memory: "memory_enabled",
 		templates: "templates_enabled",
 		circuits: "circuits_enabled",
+		voice: "voice_enabled",
 		// Legacy group id, persisted in user-materialized tool overrides
 		// (`notor-feature-group: orchestration`). Accepted forever.
 		orchestration: "circuits_enabled",

@@ -348,6 +348,31 @@ export function registerCommands(plugin: NotorPlugin): void {
 	});
 
 	plugin.addCommand({
+		id: "toggle-voice-mode",
+		name: "Toggle voice mode",
+		checkCallback: (checking: boolean) => {
+			if (!plugin.getVoiceManager().isAvailable()) return false;
+			const orchestrator = plugin.getActiveOrchestrator();
+			if (!orchestrator?.getView()) return false;
+			if (checking) return true;
+			void plugin.getVoiceManager().toggle(orchestrator);
+			return true;
+		},
+	});
+
+	plugin.addCommand({
+		id: "voice-stop-speaking",
+		name: "Stop speaking (voice mode)",
+		checkCallback: (checking: boolean) => {
+			const controller = plugin.peekVoiceManager()?.getActiveController() ?? null;
+			if (!controller) return false;
+			if (checking) return true;
+			controller.stopSpeaking();
+			return true;
+		},
+	});
+
+	plugin.addCommand({
 		id: "switch-persona",
 		name: "Switch persona",
 		checkCallback: (checking: boolean) => {

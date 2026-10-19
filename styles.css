@@ -4911,3 +4911,76 @@
 	gap: var(--size-4-2);
 	margin-top: var(--size-4-2);
 }
+
+/* ==========================================================================
+   Voice mode (docs/voice.md)
+   ========================================================================== */
+
+.notor-voice-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border-radius: var(--radius-s);
+	border: none;
+	cursor: pointer;
+	padding: 0;
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+.notor-voice-btn:hover {
+	color: var(--text-normal);
+}
+
+.notor-voice-btn.is-listening {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	animation: notor-voice-pulse 1.6s ease-in-out infinite;
+}
+
+.notor-voice-btn.is-transcribing,
+.notor-voice-btn.is-thinking {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	opacity: 0.75;
+}
+
+.notor-voice-btn.is-speaking {
+	background: var(--color-green);
+	color: var(--text-on-accent);
+}
+
+.notor-voice-btn.is-starting {
+	opacity: 0.6;
+}
+
+.notor-voice-btn.is-error {
+	background: var(--color-red);
+	color: var(--text-on-accent);
+}
+
+@keyframes notor-voice-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 0 0 hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.45);
+	}
+	50% {
+		box-shadow: 0 0 0 6px hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0);
+	}
+}
+
+.notor-voice-status {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-left: 6px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 40vw;
+}
+
+.notor-voice-preflight-error {
+	color: var(--text-error);
+}

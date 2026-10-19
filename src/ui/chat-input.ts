@@ -5,7 +5,7 @@
  * mode toggle, attachment chips, and workflow slash-command tokens.
  */
 
-import { Notice, setIcon } from "obsidian";
+import { Notice, Platform, setIcon } from "obsidian";
 import type { App, TFile } from "obsidian";
 import type { Attachment } from "../context/attachment";
 import {
@@ -20,6 +20,7 @@ import {
 import { parseWikilinkSegments } from "../context/wikilink-attachments";
 import type { ConversationMode, Workflow } from "../types";
 import type { NotorSettings } from "../settings/types";
+import type { VoiceState, VoiceStatus } from "../voice/voice-controller";
 import {
 	VaultNoteSuggest,
 	SectionSuggest,
@@ -36,6 +37,16 @@ import { WorkflowSlashSuggest, detectSlashTrigger } from "./workflow-suggest";
 import { logger } from "../utils/logger";
 
 const log = logger("ChatInput");
+
+const VOICE_STATE_LABELS: Record<VoiceState, string> = {
+	idle: "Off",
+	starting: "Starting…",
+	listening: "Listening…",
+	transcribing: "Transcribing…",
+	thinking: "Summarizing…",
+	speaking: "Speaking…",
+	error: "Error",
+};
 
 export interface ChatInputDeps {
 	container: HTMLElement;
@@ -56,6 +67,9 @@ export interface ChatInputDeps {
 
 	onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
 	onStopResponse?: () => void;
+	/** Voice mode (macOS): toggle the hands-free loop for this panel. */
+	onToggleVoice?: () => void;
+	getVoiceStatus?: () => VoiceStatus | null;
 	onSendWorkflow?: (workflow: Workflow, supplementaryText: string, attachments: Attachment[]) => Promise<void>;
 	onModeToggle?: (mode: ConversationMode) => void;
 	onForkToNewPanel?: (messageId: string | undefined, initialText?: string) => Promise<void>;
@@ -81,6 +95,8 @@ export class ChatInput {
 	private stopButtonEl!: HTMLButtonElement;
 	private modeToggleEl!: HTMLButtonElement;
 	private autoAcceptBadgeEl!: HTMLElement;
+	private voiceButtonEl?: HTMLButtonElement;
+	private voiceStatusEl?: HTMLElement;
 	private responding = false;
 	private hasPendingComments = false;
 	private attachmentChipContainerEl!: HTMLElement;
@@ -304,6 +320,11 @@ export class ChatInput {
 			attr: { "aria-label": "Write tools are auto-approved until this response finishes" },
 		});
 
+		this.voiceStatusEl = leftGroup.createSpan({
+			cls: "notor-voice-status notor-hidden",
+			attr: { "aria-live": "polite" },
+		});
+
 		// Button wrapper (right side of toolbar)
 		const buttonWrapper = this.inputToolbarEl.createDiv({ cls: "notor-input-buttons" });
 
@@ -318,6 +339,17 @@ export class ChatInput {
 			settings.external_file_size_threshold_mb,
 			settings,
 		);
+
+		// Voice mode toggle (macOS only, when enabled in settings)
+		if (settings.voice_enabled && Platform.isMacOS) {
+			this.voiceButtonEl = buttonWrapper.createEl("button", {
+				cls: "notor-voice-btn",
+				attr: { "aria-label": "Turn on voice mode" },
+			});
+			setIcon(this.voiceButtonEl, "mic-off");
+			this.voiceButtonEl.addEventListener("click", () => this.deps.onToggleVoice?.());
+			this.applyVoiceStatus(this.deps.getVoiceStatus?.() ?? null);
+		}
 
 		// Send button
 		this.sendButtonEl = buttonWrapper.createEl("button", {
@@ -413,6 +445,31 @@ export class ChatInput {
 				? "Add a note to send with your comments…"
 				: "Ask Notor...";
 		this.textInputEl.setAttribute("data-placeholder", placeholder);
+	}
+
+	/** Update the mic button and status chip for this panel's voice-mode state. */
+	setVoiceStatus(status: VoiceStatus | null): void {
+		this.applyVoiceStatus(status);
+	}
+
+	private applyVoiceStatus(status: VoiceStatus | null): void {
+		const state: VoiceState = status?.state ?? "idle";
+		const label = VOICE_STATE_LABELS[state];
+		const btn = this.voiceButtonEl;
+		if (btn) {
+			btn.removeClass("is-starting", "is-listening", "is-transcribing", "is-thinking", "is-speaking", "is-error");
+			if (state !== "idle") btn.addClass(`is-${state}`);
+			setIcon(btn, state === "idle" || state === "error" ? "mic-off" : "mic");
+			btn.setAttribute(
+				"aria-label",
+				state === "idle" ? "Turn on voice mode" : `Voice mode: ${label}. Click to turn off.`,
+			);
+		}
+		if (this.voiceStatusEl) {
+			const text = state === "idle" ? "" : status?.detail ? `${label} · ${status.detail}` : label;
+			this.voiceStatusEl.setText(text);
+			this.voiceStatusEl.toggleClass("notor-hidden", !text);
+		}
 	}
 
 	/** Show/hide the "Auto-accepting edits" badge next to the mode toggle. */

@@ -64,3 +64,7 @@ How the custom system prompt interacts with [personas](personas.md) depends on t
 - [`<include_note>`](include-note.md) tags work inside the custom system prompt file — dynamically inject vault note content.
 - Changes to the custom prompt file take effect on the next message sent (no extension reload needed).
 - The exported file includes an HTML comment documenting all available static and dynamic template variables for reference.
+
+## Other customizable prompts
+
+The same export-and-edit pattern is used for the two [voice mode](voice.md) shaping prompts, `notor/prompts/voice-input-cleanup.md` and `notor/prompts/voice-speech-summary.md`, created from **Settings → Notor → Voice**. The compaction prompt is a plain text field under **Settings → Notor → Conversation → Context compaction**.

@@ -112,3 +112,7 @@ Notor includes a built-in **Title Generation** automation that uses an LLM call 
 When enabled, the automation fires once per conversation on the first user message. If the LLM call fails, the conversation keeps a truncated title from the first message as a fallback.
 
 The title generation automation is a built-in scaffold. To customize the prompt or behavior, click **Open** in its settings row to create a vault file (`notor/automations/title-generation.md`), then edit and reload extensions.
+
+## Voice mode shaping
+
+[Voice mode](voice.md) runs two secondary LLM passes per turn: cleaning up the dictated transcript before it is sent, and condensing the reply into a spoken summary. **Settings → Notor → Voice → Shaping model preset** selects the preset for both; the default ("same as the conversation") uses whatever model the conversation is currently on. Pick a small, fast preset to keep the hands-free loop snappy.

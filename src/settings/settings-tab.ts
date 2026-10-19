@@ -39,6 +39,7 @@ import { renderMemorySection } from "./sections/memory";
 import { renderTemplatesSection } from "./sections/templates";
 import { renderCircuitsSection } from "./sections/circuits";
 import { renderSystemPromptSection } from "./sections/system-prompt";
+import { renderVoiceSection } from "./sections/voice";
 import { renderUserAutomationsSection } from "./sections/user-automations";
 import { renderExternalApiSection } from "./sections/external-api";
 import { renderModelPresetsSection } from "./sections/model-presets";
@@ -196,6 +197,10 @@ export class NotorSettingTab extends PluginSettingTab {
 		renderAutoContextSection(conversationGroup, ctx);
 		renderCompactionSection(conversationGroup, ctx);
 		renderFileAttachmentsSection(conversationGroup, ctx);
+
+		// --- Voice (collapsed by default) ---
+		const voiceGroup = createSettingsGroup(containerEl, "Voice", false, persisted, onToggle);
+		renderVoiceSection(voiceGroup, ctx);
 
 		// --- Personas (collapsed by default) ---
 		const personasGroup = createSettingsGroup(containerEl, "Personas", false, persisted, onToggle);

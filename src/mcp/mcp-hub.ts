@@ -15,7 +15,7 @@
  * @see specs/04-mcp/data-model.md — McpConnection, McpHub
  */
 
-import { execSync } from "child_process";
+import { resolveLoginShellPath } from "../shell/login-shell-path";
 
 import { Platform } from "obsidian";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -106,16 +106,6 @@ export class McpHub {
 
 	/** Per-server exit timestamps for stdio crash-loop detection. */
 	private stdioExitTimestamps = new Map<string, number[]>();
-
-	/**
-	 * Cached PATH from the user's login shell.
-	 *
-	 * Obsidian is a GUI app and doesn't inherit the user's full shell PATH,
-	 * so tools installed via nvm, Homebrew, etc. are not found when spawning
-	 * stdio MCP servers. Populated lazily on first stdio spawn.
-	 * Null means "not yet resolved"; empty string means "resolution failed".
-	 */
-	private _loginShellPath: string | null = null;
 
 	/**
 	 * Per-lane FIFO serialization queue for cross-session MCP dispatch.
@@ -743,50 +733,6 @@ export class McpHub {
 	}
 
 	/**
-	 * Resolve the user's login shell PATH once and cache it.
-	 *
-	 * macOS (and Linux) GUI apps like Obsidian launch without running a login
-	 * shell, so `process.env.PATH` is a minimal system PATH that omits
-	 * Homebrew, nvm, pyenv, and other user-installed runtimes. MCP server
-	 * binaries (e.g. `#!/usr/bin/env node`) fail with "No such file or
-	 * directory" because `node` isn't on that stripped PATH.
-	 *
-	 * By running `$SHELL -l -c 'echo $PATH'` once we get the same PATH the
-	 * user sees in their terminal, which we then prepend to every stdio spawn.
-	 *
-	 * Only called on macOS/Linux desktop; Windows GUI apps inherit PATH normally.
-	 */
-	private resolveLoginShellPath(): string {
-		if (this._loginShellPath !== null) {
-			return this._loginShellPath;
-		}
-
-		try {
-			const shell = process.env.SHELL || "/bin/sh";
-			const output = execSync(`${shell} -l -c 'echo $PATH'`, {
-				encoding: "utf8",
-				timeout: 5000,
-				// Suppress shell startup output (e.g. from .bashrc echo statements)
-				stdio: ["ignore", "pipe", "ignore"],
-			}).trim();
-
-			// Use only the last non-empty line — some login shells print
-			// banner text before the PATH value.
-			const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
-			this._loginShellPath = lines[lines.length - 1] ?? process.env.PATH ?? "";
-
-			log.info("Resolved login shell PATH", { shell, path: this._loginShellPath });
-		} catch (e) {
-			log.warn("Could not resolve login shell PATH — using process PATH", {
-				error: String(e),
-			});
-			this._loginShellPath = process.env.PATH ?? "";
-		}
-
-		return this._loginShellPath;
-	}
-
-	/**
 	 * Create an stdio transport.
 	 *
 	 * Guarded behind Platform.isDesktopApp — returns error on mobile.
@@ -811,7 +757,7 @@ export class McpHub {
 		// Resolve the user's login shell PATH so tools installed via
 		// Homebrew, nvm, pyenv, etc. are found when spawning the process.
 		// Obsidian is a GUI app and doesn't inherit the full shell PATH.
-		const loginPath = this.resolveLoginShellPath();
+		const loginPath = resolveLoginShellPath();
 
 		// Merge system environment with config env. Filter out undefined values
 		// from process.env to satisfy Record<string, string> type.

@@ -65,6 +65,8 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 		view._unregisterPlanReview?.();
 		view._unregisterPersonaChanged?.();
 		view._removeActivityCallback?.();
+		view._unregisterVoiceStatus?.();
+		await plugin.peekVoiceManager()?.stopForLeaf(leafId);
 		plugin.removeOrchestrator(leafId);
 		await orchestrator.destroy();
 	});
@@ -216,6 +218,16 @@ export function wireView(view: NotorChatView, orchestrator: ChatOrchestrator, pl
 	view.setOnRetryLastTurn(async () => {
 		await orchestrator.retryLastTurn();
 	});
+
+	// Voice mode (macOS): mic toggle + status relay for this panel
+	view.setOnToggleVoice(() => {
+		void plugin.getVoiceManager().toggle(orchestrator);
+	});
+	view._unregisterVoiceStatus?.();
+	view._unregisterVoiceStatus = plugin.getVoiceManager().onStatusChange((statusLeafId, status) => {
+		if (statusLeafId === leafId) view.setVoiceStatus(status);
+	});
+	view.setVoiceStatus(plugin.getVoiceManager().getStatus(leafId));
 
 	// Stop response
 	view.setOnStopResponse(() => {

@@ -127,3 +127,14 @@ export class ButtonComponent {
 		return this;
 	}
 }
+
+/** Platform flags — desktop macOS by default; tests override per case with vi.mock. */
+export const Platform = {
+	isDesktop: true,
+	isDesktopApp: true,
+	isMobile: false,
+	isMobileApp: false,
+	isMacOS: true,
+	isWin: false,
+	isLinux: false,
+};

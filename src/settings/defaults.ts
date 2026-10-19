@@ -281,6 +281,29 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	path_scope_rules: [],
 	write_docx_default_output_dir: "",
 	write_docx_default_template_path: "",
+
+	// Voice mode (docs/voice.md)
+	voice_enabled: false,
+	voice_whisper_server_path: "whisper-server",
+	voice_whisper_model_path: "",
+	voice_whisper_server_port: 8178,
+	voice_whisper_language: "en",
+	voice_whisper_vocabulary: "",
+	voice_whisper_extra_args: "",
+	voice_end_of_turn_pause_ms: 2500,
+	voice_silence_threshold: 0.02,
+	voice_barge_in_threshold_multiplier: 3,
+	voice_min_utterance_ms: 600,
+	voice_stop_on_silence_ms: 0,
+	voice_progress_verbosity: "needs_me",
+	voice_progress_interval_ms: 25000,
+	voice_shaping_preset: "",
+	voice_input_cleanup_enabled: true,
+	voice_speech_summary_max_chars: 600,
+	voice_command_trigger_phrase: "voice command",
+	voice_tts_command: "say",
+	voice_tts_voice: "",
+	voice_tts_rate: 0,
 	};
 }
 

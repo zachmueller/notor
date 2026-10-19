@@ -15,6 +15,7 @@ import type { Attachment } from "../context/attachment";
 import type { ConversationListEntry } from "../chat/history";
 import type { PersonaManager } from "../personas/persona-manager";
 import { logger } from "../utils/logger";
+import type { VoiceStatus } from "../voice/voice-controller";
 import { SettingsPopover } from "./settings-popover";
 import { ConversationList } from "./conversation-list";
 import { ChatInput } from "./chat-input";
@@ -199,6 +200,7 @@ export class NotorChatView extends ItemView {
 	 * Ensures file-watcher-triggered refreshes update this panel's persona chip.
 	 */
 	_unregisterPersonaChanged?: () => void;
+	_unregisterVoiceStatus?: () => void;
 
 	/**
 	 * Async cleanup callback invoked on panel close.
@@ -217,6 +219,8 @@ export class NotorChatView extends ItemView {
 	// Callbacks (set by orchestrator)
 	private onSendMessage?: (content: string, attachments?: Attachment[]) => Promise<void>;
 	private onStopResponse?: () => void;
+	private onToggleVoice?: () => void;
+	private voiceStatus: VoiceStatus | null = null;
 	private onNewConversation?: () => void;
 	private onSwitchConversation?: (filename: string) => void;
 	private onExportConversation?: (filename: string) => void;
@@ -322,6 +326,17 @@ export class NotorChatView extends ItemView {
 	setOnStopResponse(callback: () => void): void {
 		this.onStopResponse = callback;
 		if (this.chatInput) this.chatInput.deps.onStopResponse = callback;
+	}
+
+	setOnToggleVoice(callback: () => void): void {
+		this.onToggleVoice = callback;
+		if (this.chatInput) this.chatInput.deps.onToggleVoice = callback;
+	}
+
+	/** Reflect this panel's voice-mode state on the mic button and status chip. */
+	setVoiceStatus(status: VoiceStatus | null): void {
+		this.voiceStatus = status;
+		if (this.chatInput) this.chatInput.setVoiceStatus(status);
 	}
 
 	setOnNewConversation(callback: () => void): void {
@@ -1091,6 +1106,8 @@ export class NotorChatView extends ItemView {
 			isActiveLeaf: () => this.app.workspace.getActiveViewOfType(NotorChatView) === this,
 			onSendMessage: this.onSendMessage,
 			onStopResponse: this.onStopResponse,
+			onToggleVoice: this.onToggleVoice,
+			getVoiceStatus: () => this.voiceStatus,
 			onSendWorkflow: this.onSendWorkflow,
 			onModeToggle: this.onModeToggle,
 			onForkToNewPanel: this.onForkToNewPanel,
@@ -1179,6 +1196,7 @@ export class NotorChatView extends ItemView {
 		// setOn* callbacks (24)
 		this.onSendMessage = undefined;
 		this.onStopResponse = undefined;
+		this.onToggleVoice = undefined;
 		this.onNewConversation = undefined;
 		this.onSwitchConversation = undefined;
 		this.onExportConversation = undefined;

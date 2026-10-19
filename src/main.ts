@@ -22,6 +22,9 @@ import type { LLMProviderConfig, Workflow } from "./types";
 // Group G: Workflow hook override manager
 import { WorkflowHookOverrideManager } from "./hooks/workflow-hook-override";
 
+// Voice mode (macOS hands-free loop)
+import { VoiceManager } from "./voice/voice-manager";
+
 // Group H: Workflow activity tracker
 import { WorkflowActivityTracker, type FlowRunEntry } from "./workflows/workflow-activity-tracker";
 
@@ -425,6 +428,9 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	/** Shared system sleep/wake detector (MCP reconnect + workflow reconciliation). */
 	private _sleepWakeDetector?: SleepWakeDetector;
 
+	/** Voice mode manager (lazy; see getVoiceManager). */
+	private _voiceManager?: VoiceManager;
+
 	/** Per-hook debounce delay manager (Phase 5). */
 	private _hookDelayManager?: HookDelayManager;
 
@@ -597,6 +603,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			const staleOrch = this._orchestrators.get(leaf.id);
 			if (staleOrch) {
 				this._orchestrators.delete(leaf.id);
+				void this._voiceManager?.stopForLeaf(leaf.id);
 				staleOrch.destroy().catch((e) => {
 					log.warn("Stale orchestrator destroy failed", { error: String(e) });
 				});
@@ -1155,6 +1162,8 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			// Short settle delay mirrors the MCP reconnect path — give the
 			// event loop a moment to stabilise before sweeping.
 			window.setTimeout(() => {
+				// The whisper server may not survive a sleep; restart it for active voice panels.
+				void this._voiceManager?.restartRecognitionAfterWake();
 				const { cleared, waitingApproval } =
 					workflowConcurrencyManager.reconcileAfterWake(gapMs);
 				if (cleared > 0) {
@@ -2066,6 +2075,25 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			this._extensionManager = new ExtensionManager(this, parseYaml);
 		}
 		return this._extensionManager;
+	}
+
+	/** Voice mode manager (macOS hands-free loop); created on first use, disposed on unload. */
+	getVoiceManager(): VoiceManager {
+		if (!this._voiceManager) {
+			const manager = new VoiceManager(this);
+			this._voiceManager = manager;
+			this.register(() => {
+				manager.dispose().catch((e) => {
+					log.error("VoiceManager dispose failed", { error: String(e) });
+				});
+			});
+		}
+		return this._voiceManager;
+	}
+
+	/** The voice manager if one has been created (never creates it). */
+	peekVoiceManager(): VoiceManager | undefined {
+		return this._voiceManager;
 	}
 
 	/** Vault event scheduler — provides cron job status for the settings UI. */

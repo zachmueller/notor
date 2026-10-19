@@ -114,6 +114,8 @@ export class ConversationSession {
 
 	private _status: SessionStatus = "running";
 	onStatusChange?: (session: ConversationSession) => void;
+	/** Additional status listeners (the single slot above is chained by the lifecycle manager). */
+	private readonly statusListeners = new Set<(session: ConversationSession) => void>();
 
 	constructor(opts: ConversationSessionOptions) {
 		this.conversationId = opts.conversationId;
@@ -171,6 +173,21 @@ export class ConversationSession {
 	setStatus(status: SessionStatus): void {
 		this._status = status;
 		this.onStatusChange?.(this);
+		for (const listener of this.statusListeners) {
+			try {
+				listener(this);
+			} catch {
+				// A misbehaving observer must never break the response loop.
+			}
+		}
+	}
+
+	/** Subscribe to status changes without displacing `onStatusChange`. Returns an unsubscribe. */
+	addStatusListener(listener: (session: ConversationSession) => void): () => void {
+		this.statusListeners.add(listener);
+		return () => {
+			this.statusListeners.delete(listener);
+		};
 	}
 
 	rejectAllPendingApprovals(): void {

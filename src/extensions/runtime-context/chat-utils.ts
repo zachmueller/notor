@@ -6,8 +6,7 @@ import { resolvePreset } from "../../presets/preset-resolver";
 import { getTextContent } from "../../media/types";
 import { estimateTokenCount } from "../../utils/tokens";
 import { checkRateLimit } from "../rate-limiter";
-import { retryPolicyFromSettings, withStreamRetry } from "../../providers/stream-retry";
-import { retryableCodeOfError, retryableCodeOfFailure } from "../../providers/network-errors";
+import { collectText } from "../../providers/collect-text";
 
 /**
  * Build the `askMany` primitive — the core follow-up-question channel. Wired
@@ -184,35 +183,15 @@ export function buildChatUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 					const provider = plugin.getProviderRegistry().getProvider(resolved.providerId);
 					// Retry transient failures; a final stream error still
 					// returns whatever text arrived (or null).
-					const outcome = await withStreamRetry(
-						async () => {
-							const stream = provider.sendMessage(
-								messages.map((m) => ({
-									role: m.role as "user" | "assistant" | "system",
-									content: m.content,
-								})),
-								[],
-								{ model: resolved.modelId },
-							);
-							let text = "";
-							for await (const chunk of stream) {
-								if (chunk.type === "text_delta") {
-									text += chunk.text;
-								} else if (chunk.type === "error") {
-									return { text, failure: chunk };
-								}
-							}
-							return { text, failure: undefined };
-						},
-						{
-							policy: retryPolicyFromSettings(plugin.settings),
-							label: `llmCall:${presetName}`,
-							classify: ({ result, error }) => {
-								if (result === undefined) return retryableCodeOfError(error);
-								return result.failure ? retryableCodeOfFailure(result.failure) : null;
-							},
-							onAbort: () => ({ text: "", failure: undefined }),
-						},
+					const outcome = await collectText(
+						provider,
+						messages.map((m) => ({
+							role: m.role as "user" | "assistant" | "system",
+							content: m.content,
+						})),
+						{ model: resolved.modelId },
+						plugin.settings,
+						{ label: `llmCall:${presetName}` },
 					);
 					if (outcome.failure) {
 						log.warn("llmCall stream error", { error: outcome.failure.error });

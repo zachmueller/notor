@@ -78,6 +78,9 @@ export interface HookConfig {
 	on_approval_required: Hook[];
 }
 
+/** How much mid-turn progress voice mode speaks aloud. */
+export type VoiceProgressVerbosity = "silent" | "needs_me" | "periodic" | "every_tool";
+
 /** Notor plugin settings persisted via loadData/saveData. */
 export interface NotorSettings {
 	/** Vault-relative path for Notor-managed files. */
@@ -637,4 +640,51 @@ export interface NotorSettings {
 	 * or in headless/no-channel runs (which keep the guard regardless).
 	 */
 	auto_skip_user_input_prompts: boolean;
+
+	// -----------------------------------------------------------------------
+	// Voice mode — macOS-only hands-free loop (docs/voice.md)
+	// -----------------------------------------------------------------------
+
+	/** Master toggle: shows the mic button and command, enables the `voice` feature group. */
+	voice_enabled: boolean;
+	/** whisper.cpp server binary — a bare name found on the login-shell PATH, or an absolute path. */
+	voice_whisper_server_path: string;
+	/** Absolute path to a ggml whisper model file (required). */
+	voice_whisper_model_path: string;
+	/** Loopback port the spawned whisper server listens on. */
+	voice_whisper_server_port: number;
+	/** Whisper language code (`-l`). */
+	voice_whisper_language: string;
+	/** Extra vocabulary (names, jargon) added to whisper's initial prompt after the trigger phrase. */
+	voice_whisper_vocabulary: string;
+	/** Additional whisper-server arguments (shell-style string). */
+	voice_whisper_extra_args: string;
+	/** Silence after speech that ends an utterance and submits it; listening stays on. */
+	voice_end_of_turn_pause_ms: number;
+	/** RMS level (0–1) at or above which audio counts as speech. */
+	voice_silence_threshold: number;
+	/** While Notor is speaking, speech must exceed threshold × this to count as a barge-in. */
+	voice_barge_in_threshold_multiplier: number;
+	/** Utterances shorter than this are discarded as noise. */
+	voice_min_utterance_ms: number;
+	/** Turn listening off after this much continuous silence; 0 disables. */
+	voice_stop_on_silence_ms: number;
+	/** How much mid-turn progress is spoken. */
+	voice_progress_verbosity: VoiceProgressVerbosity;
+	/** Minimum spacing between spoken progress lines at the `periodic` level. */
+	voice_progress_interval_ms: number;
+	/** Model preset for the clean-up and speech-summary passes; "" = the panel's current model. */
+	voice_shaping_preset: string;
+	/** Run the LLM clean-up pass on transcripts before sending them. */
+	voice_input_cleanup_enabled: boolean;
+	/** Target length of the spoken summary, in characters. */
+	voice_speech_summary_max_chars: number;
+	/** Prefix that marks an utterance as a voice command. */
+	voice_command_trigger_phrase: string;
+	/** Text-to-speech command; it reads the text to speak from stdin. */
+	voice_tts_command: string;
+	/** Voice name passed to the TTS command (`say -v`); "" = system default. */
+	voice_tts_voice: string;
+	/** Speech rate in words per minute (`say -r`); 0 = default. */
+	voice_tts_rate: number;
 }

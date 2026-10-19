@@ -33,6 +33,7 @@ import { CompactionManager } from "./compaction-manager";
 import { recoverFromContextOverflow } from "./context-overflow-recovery";
 import { ViewRouter } from "./view-router";
 import { SessionManager } from "./session-manager";
+import { TurnObserverRegistry, findTurnUserMessageId, type TurnObserver } from "./turn-observer";
 import { ConversationLifecycleManager } from "./conversation-lifecycle";
 import { WorkflowExecutor, type WorkflowRunOptions } from "./workflow-executor";
 import type { HistoryManager } from "./history";
@@ -598,10 +599,15 @@ export class ChatOrchestrator implements ToolSessionContext {
 		return this.configResolver.getActiveParsedConfigs();
 	}
 
+	/** In-process observers of this panel's turn lifecycle (voice mode, future UIs). */
+	private readonly turnObservers = new TurnObserverRegistry();
+
+	/** Listeners fired whenever this panel's displayed conversation changes. */
+	private readonly displayConversationListeners = new Set<(conversationId: string | null) => void>();
+
 	// -----------------------------------------------------------------------
 	// Session accessors
 	// -----------------------------------------------------------------------
-
 	/**
 	 * Get the active session for a given conversation ID.
 	 *
@@ -621,6 +627,28 @@ export class ChatOrchestrator implements ToolSessionContext {
 
 	onSessionsChanged(callback: () => void): () => void {
 		return this.sessionManager.onSessionsChanged(callback);
+	}
+
+	/**
+	 * Observe this panel's turns (start/finish, tool call start/finish).
+	 * Observers run synchronously and are never awaited.
+	 *
+	 * @returns An unregister function.
+	 */
+	addTurnObserver(observer: TurnObserver): () => void {
+		return this.turnObservers.add(observer);
+	}
+
+	/**
+	 * Listen for changes of the displayed conversation (new, switch, switch-by-id).
+	 *
+	 * @returns An unregister function.
+	 */
+	addDisplayConversationListener(listener: (conversationId: string | null) => void): () => void {
+		this.displayConversationListeners.add(listener);
+		return () => {
+			this.displayConversationListeners.delete(listener);
+		};
 	}
 
 	/**
@@ -736,6 +764,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 	 * @see specs/ZZ-misc/thread-safe-streaming-multi-panel-design.md — Step 1h
 	 */
 	async destroy(timeoutMs: number = 2000): Promise<void> {
+		this.turnObservers.clear();
+		this.displayConversationListeners.clear();
 		return this.sessionManager.destroy(timeoutMs);
 	}
 
@@ -759,6 +789,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 	private syncViewToConversation(): void {
 		const view = this.viewRouter.getView();
 		const conv = this.conversationManager.getActiveConversation();
+		for (const listener of this.displayConversationListeners) {
+			try {
+				listener(conv?.id ?? null);
+			} catch (e) {
+				log.error("displayConversation listener threw", { error: String(e) });
+			}
+		}
 		if (!view || !conv) return;
 		view.setActiveConversationId(conv.id);
 		view.updateHeaderTitle(conv.id, conv.title ?? null);
@@ -1296,6 +1333,8 @@ export class ChatOrchestrator implements ToolSessionContext {
 	): Promise<void> {
 		// Register session and start response loop
 		this.sessionManager.registerSession(session);
+		const turnUserMessageId = findTurnUserMessageId(session.conversationManager.getMessages());
+		this.turnObservers.emitTurnStarted(session, { userMessageId: turnUserMessageId });
 
 		session.responsePromise = (async () => {
 			if (opts?.preLoop) await opts.preLoop();
@@ -1378,6 +1417,13 @@ export class ChatOrchestrator implements ToolSessionContext {
 			if (session.autoAcceptWrites) this.setSessionAutoAcceptWrites(session, false);
 			this.sessionManager.unregisterSession(session.conversationId);
 			this.getViewForSession(session)?.setRespondingState(false);
+			// After unregisterSession so an observer may submit a follow-up message
+			// from here without tripping the session guard.
+			this.turnObservers.emitTurnFinished(session, {
+				status: session.status,
+				cancelled: session.abortController.signal.aborted,
+				userMessageId: turnUserMessageId,
+			});
 		}
 	}
 
@@ -1853,6 +1899,10 @@ export class ChatOrchestrator implements ToolSessionContext {
 				this.hookDispatcher.dispatchApprovalRequiredHook(currentConv.id, tn, params, m)
 			: undefined;
 
+		for (const entry of toolCallEntries) {
+			this.turnObservers.emitToolCallStarted(session, entry.call.toolName, entry.call.parameters, entry.message.id);
+		}
+
 		const batchResults = await executeToolBatches(
 			batches,
 			this.dispatcher,
@@ -1925,6 +1975,9 @@ export class ChatOrchestrator implements ToolSessionContext {
 					convForToolResult.id, entry.call.toolName, entry.call.parameters, toolResult,
 				);
 			}
+			this.turnObservers.emitToolCallFinished(
+				session, entry.call.toolName, entry.call.parameters, toolResult, toolResultMessage.id,
+			);
 
 			// Update token footer after sub-agent token rollup
 			const convAfterToolResult = convManager.getActiveConversation();
