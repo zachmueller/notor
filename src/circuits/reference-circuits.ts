@@ -26,6 +26,10 @@
  *  3. `review` — composition demo: a code step calls `code-assist` via `run_circuit`,
  *     then a conversation step composes the final review.
  *
+ * Two of them also ship **evaluators** (`evals/`), so authors have a working
+ * example of each evaluator mode: `research` carries an LLM judge with a rubric
+ * note, `code-assist` a deterministic code evaluator over the structured return.
+ *
  * @see specs/ZZ-misc/orchestration/tasks/phase-7-composability.md — POL-002
  * @see specs/ZZ-misc/orchestration/contracts/vault-schema.md
  */
@@ -42,6 +46,8 @@ export interface ReferenceCircuit {
 	definition: string;
 	/** Step note contents keyed by file name (written under `steps/`). */
 	steps: Record<string, string>;
+	/** Evaluator / rubric note contents keyed by file name (written under `evals/`). */
+	evals?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +81,8 @@ notor-circuit-returns: "A summary of what was implemented and the list of files 
 notor-handoff-isolation: isolated
 notor-max-depth: 3
 notor-max-cost-usd: 5.00
+notor-evaluators:
+  - "[[structured-summary]]"
 ---
 
 # Code Assist
@@ -83,8 +91,54 @@ A TDD-style implementation loop. Provide a feature description and the target re
 path as the objective. The circuit plans the work, implements it, verifies with the
 test suite (a deterministic code step), reviews, and finalizes.
 
+Ships with one **code evaluator** (\`evals/structured-summary.md\`) that checks a
+finished run completed and returned the structured summary + plan. Run it with
+**Notor: Evaluate circuit sessions**.
+
 (This body is documentation only — it is never injected into a step's prompt.)
 `,
+	evals: {
+		"structured-summary.md": `---
+notor-type: circuit-evaluator
+notor-eval-name: "Structured summary"
+notor-eval-description: "Deterministic shape check: the run completed and returned a summary and a plan."
+notor-eval-mode: code
+notor-eval-dimensions:
+  - { name: completed, type: boolean, description: "The run ended in CIRCUIT_COMPLETE" }
+  - { name: has_summary, type: boolean, description: "The structured return carries a non-empty summary" }
+  - { name: has_plan, type: boolean, description: "The structured return carries a non-empty plan" }
+---
+
+# Structured summary
+
+A **code evaluator**: no LLM, zero cost. It inspects the finished run's outcome
+(\`input.outcome\`) and returns one boolean per dimension. Use it as the template for
+any deterministic check (a file exists, tests pass, a word count is in range).
+
+\`\`\`typescript
+const structured = input.outcome.structured;
+const field = (key: string): string =>
+  structured && typeof structured === "object" && typeof (structured as Record<string, unknown>)[key] === "string"
+    ? ((structured as Record<string, unknown>)[key] as string)
+    : "";
+
+const completed = input.outcome.status === "completed";
+const summary = field("summary").trim();
+const plan = field("plan").trim();
+
+return {
+  scores: {
+    completed,
+    has_summary: summary.length > 0,
+    has_plan: plan.length > 0,
+  },
+  rationale:
+    \`status=\${input.outcome.status}; summary=\${summary.length} chars; plan=\${plan.length} chars; \` +
+    \`notes edited=\${input.notesEdited.length}\`,
+};
+\`\`\`
+`,
+	},
 	steps: {
 		"planner.md": `---
 notor-type: circuit-step
@@ -257,6 +311,9 @@ notor-circuit-returns: "A short markdown report with at least one cited source p
 notor-handoff-isolation: isolated
 notor-max-depth: 2
 notor-max-cost-usd: 3.00
+notor-evaluators:
+  - "[[report-quality]]"
+notor-eval-max-cost-usd: 1.00
 ---
 
 # Research
@@ -266,8 +323,50 @@ into the scratchpad, verifies something was gathered, then a terminal **code ste
 emits the completion event with a **structured** report (so a \`run_circuit\` caller
 receives \`structured\`, not loose text).
 
+Ships with one **LLM evaluator** (\`evals/report-quality.md\`, rubric in
+\`evals/_rubric.md\`) that scores a finished run's report. Run it with **Notor: Evaluate
+circuit sessions**; each pass is capped by \`notor-eval-max-cost-usd\`.
+
 (This body is documentation only.)
 `,
+	evals: {
+		"report-quality.md": `---
+notor-type: circuit-evaluator
+notor-eval-name: "Report quality"
+notor-eval-description: "LLM judge: scores the final report against the rubric."
+notor-eval-mode: conversation
+notor-eval-persona: null
+notor-eval-rubric: "[[_rubric]]"
+notor-eval-dimensions:
+  - accuracy
+  - completeness
+  - concision
+  - { name: cited_sources, type: boolean, description: "Every factual claim names a source" }
+---
+
+# Report quality
+
+An **LLM judge**. It receives the circuit objective, the run's status and closing text,
+the structured return (\`report\` + \`findings\`), and the notes the run edited, then
+scores each dimension by calling \`submit_score\`. Set \`notor-eval-persona\` (or
+\`notor-eval-subagent\`) to pin a judge; otherwise the active provider/model is used.
+
+Judge the **report** field of the structured return first; fall back to the closing text
+when it is empty. Score \`accuracy\`, \`completeness\`, and \`concision\` from 1 (poor) to
+5 (excellent). Mark \`cited_sources\` true only when every factual claim in the report
+names its source.
+`,
+		"_rubric.md": `# Research report rubric
+
+- **accuracy** — Claims are correct and consistent with the cited findings. 5 = no errors;
+  3 = minor imprecision; 1 = a central claim is wrong or unsupported.
+- **completeness** — The report answers the research question from every angle the
+  objective implies. 5 = nothing material missing; 3 = one angle thin; 1 = mostly missing.
+- **concision** — No padding, no repetition, no unexplained jargon. 5 = tight;
+  3 = some filler; 1 = bloated or unreadable.
+- **cited_sources** — true when every factual claim names its source.
+`,
+	},
 	steps: {
 		"explore.md": `---
 notor-type: circuit-step
@@ -474,7 +573,9 @@ export interface MaterializeReferenceCircuitsResult {
  * Materialize the reference circuits under `{notorDir}/circuits/` (POL-002).
  * **Idempotent + edit-preserving**: a file that already exists is never
  * overwritten (mirrors the built-in-persona "materialize-on-enable, preserve-user-
- * edits" lifecycle), so re-enabling the feature group is safe.
+ * edits" lifecycle), so re-enabling the feature group is safe. Files added in a
+ * later release (the `evals/` notes) are backfilled into an existing circuit dir
+ * on the next enable, again without touching anything that already exists.
  *
  * A slug that already exists under the legacy `{notorDir}/orchestrations/` is
  * skipped entirely: seeding it again under `circuits/` would create a second
@@ -514,6 +615,21 @@ export async function materializeReferenceCircuits(
 				if (!(await fs.exists(stepPath))) {
 					await fs.write(stepPath, body);
 					touched = true;
+				}
+			}
+			// Evaluator notes follow the same write-if-absent rule, so an install
+			// that predates them gets `evals/` backfilled without any other file
+			// being rewritten (the user still adds `notor-evaluators` to an edited
+			// definition.md by hand — it is never touched).
+			if (flow.evals) {
+				const evalsDir = `${flowDir}/evals`;
+				if (!(await fs.exists(evalsDir))) await fs.mkdir(evalsDir);
+				for (const [fileName, body] of Object.entries(flow.evals)) {
+					const evalPath = `${evalsDir}/${fileName}`;
+					if (!(await fs.exists(evalPath))) {
+						await fs.write(evalPath, body);
+						touched = true;
+					}
 				}
 			}
 			if (touched) written.push(flow.slug);

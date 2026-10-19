@@ -66,10 +66,28 @@ function buildFakeVault(files: Record<string, string>) {
 			if (currentKey && listAccum) fm[currentKey] = listAccum;
 			listAccum = null;
 		};
+		const scalar = (raw: string): unknown => {
+			const trimmed = raw.trim();
+			if (trimmed === "null" || trimmed === "~") return null;
+			const val = trimmed.replace(/^["']|["']$/g, "");
+			return val === "true" ? true : val === "false" ? false : /^-?\d+(\.\d+)?$/.test(val) ? Number(val) : val;
+		};
 		for (const line of lines) {
 			if (/^\s*-\s+/.test(line)) {
-				const item = line.replace(/^\s*-\s+/, "").trim().replace(/^["']|["']$/g, "");
-				(listAccum ??= []).push(item);
+				const rawItem = line.replace(/^\s*-\s+/, "").trim();
+				// Inline flow map (`- { name: x, type: boolean }`), as the evaluator
+				// dimensions use. Values never contain commas in the reference notes.
+				const flow = rawItem.match(/^\{(.*)\}$/);
+				if (flow) {
+					const obj: Record<string, unknown> = {};
+					for (const pair of flow[1]!.split(",")) {
+						const kv = pair.match(/^\s*([\w-]+):\s*(.*)$/);
+						if (kv) obj[kv[1]!] = scalar(kv[2]!);
+					}
+					(listAccum ??= []).push(obj as unknown as string);
+					continue;
+				}
+				(listAccum ??= []).push(rawItem.replace(/^["']|["']$/g, ""));
 				continue;
 			}
 			const kv = line.match(/^([\w-]+):\s*(.*)$/);
@@ -80,9 +98,7 @@ function buildFakeVault(files: Record<string, string>) {
 				if (rawVal === "") {
 					listAccum = []; // a list follows on subsequent lines
 				} else {
-					const val = rawVal.replace(/^["']|["']$/g, "");
-					fm[currentKey] =
-						val === "true" ? true : val === "false" ? false : /^-?\d+(\.\d+)?$/.test(val) ? Number(val) : val;
+					fm[currentKey] = scalar(rawVal);
 					currentKey = null;
 				}
 			}
@@ -106,8 +122,9 @@ function buildFakeVault(files: Record<string, string>) {
 			return { frontmatter: parseFrontmatter(raw) };
 		},
 		getFirstLinkpathDest: (linkpath: string, sourcePath: string) => {
-			const flowDir = sourcePath.slice(0, sourcePath.lastIndexOf("/"));
-			return fileObjs.get(`${flowDir}/steps/${linkpath}.md`) ?? null;
+			let flowDir = sourcePath.slice(0, sourcePath.lastIndexOf("/"));
+			if (flowDir.endsWith("/steps") || flowDir.endsWith("/evals")) flowDir = flowDir.slice(0, flowDir.lastIndexOf("/"));
+			return fileObjs.get(`${flowDir}/steps/${linkpath}.md`) ?? fileObjs.get(`${flowDir}/evals/${linkpath}.md`) ?? null;
 		},
 	} as unknown as import("obsidian").MetadataCache;
 
@@ -150,14 +167,45 @@ describe("reference flows (POL-002)", () => {
 		expect(files["notor/orchestrations/code-assist/definition.md"]).toBe("LEGACY USER COPY");
 	});
 
-	it("materializes all three flows with their definition + steps", async () => {
+	it("materializes all three flows with their definition + steps (+ evals where declared)", async () => {
 		const files = await materializeToMap();
 		for (const flow of REFERENCE_CIRCUITS) {
 			expect(files[`notor/circuits/${flow.slug}/definition.md`]).toBeDefined();
 			for (const stepFile of Object.keys(flow.steps)) {
 				expect(files[`notor/circuits/${flow.slug}/steps/${stepFile}`]).toBeDefined();
 			}
+			for (const evalFile of Object.keys(flow.evals ?? {})) {
+				expect(files[`notor/circuits/${flow.slug}/evals/${evalFile}`]).toBeDefined();
+			}
 		}
+		expect(files["notor/circuits/research/evals/report-quality.md"]).toContain("notor-type: circuit-evaluator");
+		expect(files["notor/circuits/research/evals/_rubric.md"]).toBeDefined();
+		expect(files["notor/circuits/code-assist/evals/structured-summary.md"]).toContain("notor-eval-mode: code");
+	});
+
+	it("backfills evals/ into a pre-existing reference dir without touching definition.md or steps", async () => {
+		const files = await materializeToMap();
+		for (const key of Object.keys(files)) if (key.includes("/evals/")) delete files[key];
+		files["notor/circuits/research/definition.md"] = "USER EDITED DEFINITION";
+		files["notor/circuits/research/steps/explore.md"] = "USER EDITED STEP";
+		const mkdirs: string[] = [];
+		const fs: ReferenceCircuitFs = {
+			exists: (p) => Promise.resolve(p in files || Object.keys(files).some((k) => k.startsWith(p + "/"))),
+			mkdir: (p) => {
+				mkdirs.push(p);
+				return Promise.resolve();
+			},
+			write: (p, data) => {
+				files[p] = data;
+				return Promise.resolve();
+			},
+		};
+		const result = await materializeReferenceCircuits("notor", fs);
+		expect(result.written.sort()).toEqual(["code-assist", "research"]);
+		expect(mkdirs).toContain("notor/circuits/research/evals");
+		expect(files["notor/circuits/research/evals/report-quality.md"]).toBeDefined();
+		expect(files["notor/circuits/research/definition.md"]).toBe("USER EDITED DEFINITION");
+		expect(files["notor/circuits/research/steps/explore.md"]).toBe("USER EDITED STEP");
 	});
 
 	it("is edit-preserving — a second materialize never overwrites existing files", async () => {
@@ -214,6 +262,43 @@ describe("reference flows (POL-002)", () => {
 		const discovered = await parser.discoverCircuits();
 		const names = discovered.map((p) => p.flow.name).sort();
 		expect(names).toEqual(["Code Assist", "Research", "Review"]);
+	});
+
+	it("research ships an LLM judge with a rubric; code-assist ships a code evaluator; review has none", async () => {
+		const files = await materializeToMap();
+		const { vault, metadataCache } = buildFakeVault(files);
+		const parser = new CircuitDefinitionParser(vault, metadataCache, "notor");
+		const byName = new Map((await parser.discoverCircuits()).map((p) => [p.flow.name, p.flow]));
+
+		const research = byName.get("Research")!;
+		expect(research.evalMaxCostUsd).toBe(1);
+		expect(research.evaluators).toHaveLength(1);
+		expect(research.evaluators[0]).toMatchObject({
+			name: "Report quality",
+			mode: "conversation",
+			persona: null,
+			subagent: null,
+			rubricPath: "notor/circuits/research/evals/_rubric.md",
+			includeNoteContents: true,
+		});
+		expect(research.evaluators[0]!.dimensions).toEqual([
+			{ name: "accuracy", type: "numeric", min: 1, max: 5, description: null },
+			{ name: "completeness", type: "numeric", min: 1, max: 5, description: null },
+			{ name: "concision", type: "numeric", min: 1, max: 5, description: null },
+			{ name: "cited_sources", type: "boolean", min: 0, max: 1, description: "Every factual claim names a source" },
+		]);
+
+		const codeAssist = byName.get("Code Assist")!;
+		expect(codeAssist.evaluators).toHaveLength(1);
+		expect(codeAssist.evaluators[0]).toMatchObject({ name: "Structured summary", mode: "code", rubricPath: null });
+		expect(codeAssist.evaluators[0]!.dimensions.map((d) => [d.name, d.type])).toEqual([
+			["completed", "boolean"],
+			["has_summary", "boolean"],
+			["has_plan", "boolean"],
+		]);
+		expect(codeAssist.evaluators[0]!.bodyContent).toContain("return {");
+
+		expect(byName.get("Review")!.evaluators).toEqual([]);
 	});
 
 	it("code-assist + research are invocable; review is not", async () => {
