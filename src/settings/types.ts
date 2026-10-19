@@ -581,6 +581,15 @@ export interface NotorSettings {
 	circuits_write_failure_notes: boolean;
 
 	/**
+	 * When true, each evaluated circuit session gets a Markdown report note under
+	 * `{notor_dir}/{circuits|orchestrations}/evals/` with the scores in flat
+	 * frontmatter (one key per evaluator dimension) so Dataview / Bases can
+	 * compare runs. The scores are always appended to the session's `evals.jsonl`
+	 * regardless. Default true; read at evaluation time, so no reload needed.
+	 */
+	circuits_write_eval_reports: boolean;
+
+	/**
 	 * Expose `app.plugins.plugins.notor.api` to other plugins and scripts
 	 * (Templater, QuickAdd, …). When false, every API call throws `api_disabled`.
 	 * Runs still follow Plan/Act mode and the normal approval rules.

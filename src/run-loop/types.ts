@@ -198,6 +198,17 @@ export interface OrchestrationToolContext {
 	 */
 	emissionOverwrites?: Array<{ prev_topic: string; new_topic: string }>;
 	/**
+	 * Present only on a circuit **evaluator** (judge) turn: the evaluator's
+	 * declared dimensions and the `submit_score` capture slot (last-write-wins
+	 * within the turn; the judge runner reads it post-turn). `undefined` on step
+	 * turns and every non-orchestration carriage, so `submit_score` refuses there.
+	 */
+	evaluation?: {
+		evaluatorName: string;
+		dimensions: import("../circuits/types").EvalDimension[];
+		pendingScore: { scores: Record<string, number | boolean>; rationale: string; overall?: number } | null;
+	};
+	/**
 	 * Step→workflow spend accumulator (INT-031 / FR-151). The `invoke_workflow`
 	 * tool pushes each invoked workflow's reported `{ costUsd, iterations }` here
 	 * during a step turn; `StepTurnExecutor` drains it **after** the turn and folds

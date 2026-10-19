@@ -103,6 +103,25 @@ export function renderCircuitsSection(
 				}),
 		);
 
+	// Evaluation report notes. Read at evaluation time, so toggling needs no
+	// extension reload — just persist. Scores always land in evals.jsonl.
+	new Setting(containerEl)
+		.setName("Write evaluation reports")
+		.setDesc(
+			"When a circuit's evaluators score a finished run, write a Markdown report " +
+				"note under the evals/ folder with the scores in frontmatter so you (or " +
+				"Dataview/Bases) can compare runs. Scores are always recorded in the " +
+				"session's evals.jsonl either way.",
+		)
+		.addToggle((toggle) =>
+			toggle
+				.setValue(ctx.settings.circuits_write_eval_reports)
+				.onChange(async (value) => {
+					ctx.settings.circuits_write_eval_reports = value;
+					await ctx.saveSettings();
+				}),
+		);
+
 	// Whether orchestration reads/writes open notes in the editor. Read at launch
 	// time, so toggling needs no extension reload — just persist. Independent of
 	// the General "Open notes on access" setting; a flow can override it per-run

@@ -248,6 +248,7 @@ export function createDefaultSettings(configDir: string): NotorSettings {
 	// Orchestration
 	circuits_enabled: false,
 	circuits_write_failure_notes: false,
+	circuits_write_eval_reports: true,
 	circuits_open_notes_in_editor: false,
 
 	// External API (plugin.api)

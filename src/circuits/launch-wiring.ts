@@ -210,7 +210,7 @@ export class VaultSessionFs implements SessionFs {
  * The persona type threaded to a conversation step's dispatcher assembly (the
  * `persona` arg of {@link StepRuntimeFactory.build}). A code step passes `null`.
  */
-type StepPersona = Parameters<StepRuntimeFactory["build"]>[0]["persona"];
+export type StepPersona = Parameters<StepRuntimeFactory["build"]>[0]["persona"];
 
 /**
  * Assemble a fresh per-step {@link ToolDispatcher} + its resolved effective
@@ -223,7 +223,7 @@ type StepPersona = Parameters<StepRuntimeFactory["build"]>[0]["persona"];
  * turns and code-step `callTool` pass no per-call callback, so the dispatcher
  * falls back to it instead of auto-approving.
  */
-async function assembleStepDispatcher(
+export async function assembleStepDispatcher(
 	host: CircuitHost,
 	opts: { persona: StepPersona; openNotesInEditor: boolean; policy?: CircuitRunPolicy },
 ): Promise<{ dispatcher: ToolDispatcher; effective: EffectiveToolConfig; toolDefinitions: ToolDefinition[] }> {

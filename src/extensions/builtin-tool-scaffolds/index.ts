@@ -40,6 +40,7 @@ import { WEBVIEW } from "./webview";
 import { READ_NOTOR_SETTINGS } from "./read-notor-settings";
 import { EDIT_NOTOR_SETTINGS } from "./edit-notor-settings";
 import { EMIT_EVENT } from "./emit-event";
+import { SUBMIT_SCORE } from "./submit-score";
 import { INVOKE_WORKFLOW } from "./invoke-workflow";
 import { CIRCUIT_TASK_ENSURE } from "./circuit-task-ensure";
 import { CIRCUIT_TASK_START } from "./circuit-task-start";
@@ -94,6 +95,7 @@ export const BUILTIN_TOOL_SCAFFOLDS: ReadonlyMap<string, BuiltinToolScaffold> =
 		[READ_NOTOR_SETTINGS.name, READ_NOTOR_SETTINGS],
 		[EDIT_NOTOR_SETTINGS.name, EDIT_NOTOR_SETTINGS],
 		[EMIT_EVENT.name, EMIT_EVENT],
+		[SUBMIT_SCORE.name, SUBMIT_SCORE],
 		[INVOKE_WORKFLOW.name, INVOKE_WORKFLOW],
 		[CIRCUIT_TASK_ENSURE.name, CIRCUIT_TASK_ENSURE],
 		[CIRCUIT_TASK_START.name, CIRCUIT_TASK_START],

@@ -251,17 +251,17 @@ function isTerminalLike(topic: string): boolean {
 // --- Small formatting helpers ----------------------------------------------
 
 /** Quote a YAML scalar safely (double-quoted, escaping `"` and `\`). */
-function yamlString(s: string): string {
+export function yamlString(s: string): string {
 	return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 /** Escape pipes/newlines so a value is safe inside a Markdown table cell. */
-function mdCell(s: string): string {
+export function mdCell(s: string): string {
 	return s.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
 /** Wrap text in a fenced code block, picking a fence that won't collide. */
-function codeFence(text: string): string {
+export function codeFence(text: string): string {
 	const fence = text.includes("```") ? "````" : "```";
 	return `${fence}\n${text}\n${fence}`;
 }

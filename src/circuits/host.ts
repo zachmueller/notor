@@ -29,6 +29,7 @@ import type { ExtensionUtils } from "../extensions/runtime-context/types";
 import type { CircuitRunRegistry } from "./run-registry";
 import type { CircuitDataRootName } from "./data-root";
 import type { RunApprovalChannel } from "./run-policy";
+import type { SubAgentManager } from "../sub-agents/manager";
 
 export interface CircuitHost {
 	readonly app: App;
@@ -63,4 +64,10 @@ export interface CircuitHost {
 	 * compiling; without it the dispatcher auto-approves.
 	 */
 	getRunApproval?(runLabel: string): RunApprovalChannel;
+	/**
+	 * Sub-agent profiles, for `notor-eval-subagent` judges. Optional so narrow
+	 * test hosts keep compiling; without it a sub-agent evaluator fails with
+	 * `unresolved_subagent`.
+	 */
+	getSubAgentManager?(): SubAgentManager;
 }

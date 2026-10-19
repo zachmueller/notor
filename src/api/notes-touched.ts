@@ -125,6 +125,30 @@ export async function collectNotesTouched(
 	return { notesRead: [...read].sort(), notesEdited: touched.notesEdited };
 }
 
+/** The slice of the host the step-conversation path needs (any `CircuitHost` satisfies it). */
+export interface StepConversationHost {
+	app: App;
+	settings: { history_path: string };
+}
+
+/**
+ * Notes touched by a circuit's persisted step conversations only. Circuit
+ * evaluation reads a finished session from disk and reconstructs the notes its
+ * steps edited through this path, days after the run if need be. Code-step
+ * writes made directly through `utils` leave no tool-call record and are not
+ * captured; notes deleted since the run drop out (they no longer resolve).
+ */
+export async function collectStepNotesTouched(
+	host: StepConversationHost,
+	stepConversationIds: readonly string[],
+): Promise<NotesTouched> {
+	const calls: ToolCallRecord[] = [];
+	for (const id of stepConversationIds) {
+		calls.push(...toolCallsFromChatMessages(await readStepConversation(host, id)));
+	}
+	return classifyNotesTouched(calls, (t) => TOOL_PATH_PARAMS[t], (p) => resolveVaultFile(host.app, p));
+}
+
 /** The vault path of an existing file (folders and missing paths are dropped). */
 function resolveVaultFile(app: App, path: string): string | null {
 	const file = resolveNote(path, app.vault, app.metadataCache) ?? app.vault.getFileByPath(path);
@@ -132,7 +156,7 @@ function resolveVaultFile(app: App, path: string): string | null {
 }
 
 /** Messages of a persisted circuit step conversation (see VaultStepConversationStore). */
-async function readStepConversation(host: NotorApiHost, conversationId: string): Promise<ChatMessage[]> {
+async function readStepConversation(host: StepConversationHost, conversationId: string): Promise<ChatMessage[]> {
 	const dir = host.settings.history_path.replace(/\/+$/, "");
 	const path = `${dir}/orchestration_step_${conversationId}.jsonl`;
 	const adapter = host.app.vault.adapter;

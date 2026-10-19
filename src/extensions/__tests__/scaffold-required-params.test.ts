@@ -49,6 +49,7 @@ const EXPECTED_REQUIRED: Record<string, string[]> = {
 	delete_note: ["path"],
 	edit_notor_settings: ["key_path", "value"],
 	emit_event: ["payload", "topic"],
+	submit_score: ["rationale", "scores"],
 	execute_command: ["command"],
 	extract_docx_comments: ["docx_path", "output_path"],
 	fetch_webpage: ["url"],

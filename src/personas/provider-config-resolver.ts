@@ -33,6 +33,13 @@ import { logger } from "../utils/logger";
 const log = logger("PersonaProviderResolver");
 
 /**
+ * The slice of a persona the resolver reads. A `SubAgentProfile` carries the
+ * same four fields, so a circuit evaluator can resolve a sub-agent judge's
+ * model through this one function.
+ */
+export type ModelPreferences = Pick<Persona, "name" | "preferred_preset" | "preferred_provider" | "preferred_model">;
+
+/**
  * Resolve a persona's effective provider/model for a single step turn, as a
  * pinned value object — never writing to the global registry.
  *
@@ -51,7 +58,7 @@ const log = logger("PersonaProviderResolver");
  * @param providerRegistry - Read-only here: only `getActiveId` / `getConfig`.
  */
 export function resolvePersonaProviderConfig(
-	persona: Persona | null,
+	persona: ModelPreferences | null,
 	stepModelOverride: string | null,
 	settings: NotorSettings,
 	providerRegistry: ProviderRegistry,
