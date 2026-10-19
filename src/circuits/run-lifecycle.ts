@@ -31,6 +31,7 @@ import { chainToSuccessor, resolveSuccessorInputs } from "./chaining";
 import { circuitDataRootOf } from "./data-root";
 import { resolveRunPolicy, type CircuitRunPolicy } from "./run-policy";
 import type { CircuitRunObserver } from "./run-observer";
+import { maybeAutoEvaluate } from "./evaluation/auto-trigger";
 
 const log = logger("CircuitLaunch");
 
@@ -117,15 +118,21 @@ async function appendRunResult(
 	}
 }
 
+/** Test seam for {@link finalizeRun}'s post-run hooks. */
+export interface FinalizeRunDeps {
+	autoEvaluate?: typeof maybeAutoEvaluate;
+}
+
 /**
  * The shared finalize invariant applied identically by a fresh launch and a
  * crash-recovery resume: persist the run's outcome (`run.result`), reflect the
- * terminal status into session.json (the recovery entry point) and, when the run
- * ended in error with the setting on, write the opt-in failure report (Part B).
- * Returns the mapped final status so the caller can mirror it into any
- * additional surface (e.g. the flow-run indicator). Extracting it keeps the
- * "both sites finalize the same way" invariant structural rather than a copy
- * pair that can drift.
+ * terminal status into session.json (the recovery entry point), write the
+ * opt-in failure report when the run ended in error (Part B), and fire the
+ * opt-in automatic evaluation (`notor-eval-auto`) for a root session. Returns
+ * the mapped final status so the caller can mirror it into any additional
+ * surface (e.g. the flow-run indicator). Extracting it keeps the "both sites
+ * finalize the same way" invariant structural rather than a copy pair that can
+ * drift.
  */
 export async function finalizeRun(
 	host: CircuitHost,
@@ -133,6 +140,7 @@ export async function finalizeRun(
 	sessionId: string,
 	flow: Circuit,
 	result: CircuitRunResult,
+	deps: FinalizeRunDeps = {},
 ): Promise<"completed" | "cancelled" | "error"> {
 	// The outcome record lands BEFORE the terminal status so a terminal
 	// session.json implies run.result is on disk for every new session.
@@ -151,6 +159,14 @@ export async function finalizeRun(
 
 	// Part B: opt-in failed-run debug note (no-op unless status is error + setting on).
 	await maybeWriteFailureReport(host, sessionManager, sessionId, flow, result);
+
+	// Opt-in automatic evaluation (`notor-eval-auto`), roots only. Fire-and-forget
+	// AFTER the terminal status is on disk (evaluation reads the session from
+	// disk); it never blocks or alters the run.
+	if (flow.evalAuto !== "none" && flow.evaluators.length > 0) {
+		const meta = await sessionManager.readMeta(sessionId).catch(() => null);
+		void (deps.autoEvaluate ?? maybeAutoEvaluate)(host, flow, sessionId, result, meta?.parent_session_id ?? null);
+	}
 
 	return finalStatus;
 }
