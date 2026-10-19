@@ -40,6 +40,7 @@ import {
 } from "obsidian";
 import { logger } from "../utils/logger";
 import { validateCronExpression } from "../workflows/workflow-discovery";
+import { extractCodeFence } from "../extensions/parser";
 import {
 	DEFAULT_MAX_COST_USD,
 	DEFAULT_MAX_ITERATIONS,
@@ -51,12 +52,16 @@ import {
 	isTerminalTopic,
 	USER_INPUT_REQUIRED,
 	type Circuit,
+	type EvalAutoTrigger,
+	type EvalDimension,
+	type EvaluatorDefinition,
 	type StepDefinition,
 } from "./types";
 import {
 	CIRCUIT_ROOT_DIR_NAMES,
 	describeAliasedKey,
 	isCircuitDefinitionType,
+	isCircuitEvaluatorType,
 	isCircuitStepType,
 	readAliasedKey,
 } from "./schema-aliases";
@@ -75,9 +80,9 @@ export class CircuitParseError extends Error {
 	}
 }
 
-/** A non-blocking load warning (dead step, definition-lint, cross-root name collision). */
+/** A non-blocking load warning (dead step, definition-lint, cross-root name collision, evaluator lint). */
 export interface CircuitParseWarning {
-	kind: "dead_step" | "definition_lint" | "name_collision";
+	kind: "dead_step" | "definition_lint" | "name_collision" | "evaluator_lint";
 	message: string;
 }
 
@@ -215,18 +220,94 @@ function parseBoolOrNull(value: unknown): boolean | null {
  * expression is dropped to `null` with a logged warning rather than a hard load
  * error — a typo'd schedule must not make the whole flow unparseable.
  */
-function parseSchedule(value: unknown, flowName: string): string | null {
+function parseSchedule(value: unknown, flowName: string, key = "notor-schedule"): string | null {
 	const raw = parseStringOrNull(value);
 	if (raw === null) return null;
 	const result = validateCronExpression(raw);
 	if (!result.valid) {
-		log.warn(`Flow '${flowName}' has invalid 'notor-schedule' cron expression`, {
+		log.warn(`Flow '${flowName}' has invalid '${key}' cron expression`, {
 			schedule: raw,
 			error: result.error,
 		});
 		return null;
 	}
 	return raw;
+}
+
+/** Parse `notor-eval-auto`: one of the four triggers; absent or unrecognized → `none` (with a warning). */
+function parseEvalAuto(value: unknown, flowName: string): EvalAutoTrigger {
+	const raw = parseStringOrNull(value);
+	if (raw === null) return "none";
+	if (raw === "none" || raw === "complete" || raw === "error" || raw === "both") return raw;
+	log.warn(`Flow '${flowName}' has unrecognized 'notor-eval-auto'; using 'none'`, { value: raw });
+	return "none";
+}
+
+/** Parse `notor-eval-max-cost-usd`: a positive finite number, or `null` (fall back to the circuit ceiling). */
+function parseEvalMaxCostUsd(value: unknown): number | null {
+	if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+		return value;
+	}
+	return null;
+}
+
+/** Numeric-dimension defaults for the bare-string shorthand (`- accuracy` ⇒ scored 1–5). */
+const DEFAULT_DIMENSION_MIN = 1;
+const DEFAULT_DIMENSION_MAX = 5;
+
+/**
+ * Parse `notor-eval-dimensions`. Each item is a bare string (numeric 1–5) or a
+ * map `{ name, type?: numeric | boolean, min?, max?, description? }`. Throws a
+ * `CircuitParseError` on an empty list, a missing name, an unknown type, a
+ * non-increasing numeric range, or a duplicate name — the caller downgrades it
+ * to an `evaluator_lint` warning and drops the evaluator.
+ */
+function parseEvalDimensions(value: unknown, evaluatorLabel: string): EvalDimension[] {
+	const items = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+	if (items.length === 0) {
+		throw new CircuitParseError(`Evaluator '${evaluatorLabel}' declares no 'notor-eval-dimensions'.`);
+	}
+	const dimensions: EvalDimension[] = [];
+	const seen = new Set<string>();
+	for (const item of items) {
+		let dim: EvalDimension;
+		if (typeof item === "string" || typeof item === "number") {
+			const name = String(item).trim();
+			if (!name) throw new CircuitParseError(`Evaluator '${evaluatorLabel}' has an empty dimension name.`);
+			dim = { name, type: "numeric", min: DEFAULT_DIMENSION_MIN, max: DEFAULT_DIMENSION_MAX, description: null };
+		} else if (item && typeof item === "object") {
+			const rec = item as Record<string, unknown>;
+			const name = parseStringOrNull(rec["name"]);
+			if (!name) throw new CircuitParseError(`Evaluator '${evaluatorLabel}' has a dimension without a 'name'.`);
+			const rawType = parseStringOrNull(rec["type"]) ?? "numeric";
+			if (rawType !== "numeric" && rawType !== "boolean") {
+				throw new CircuitParseError(
+					`Evaluator '${evaluatorLabel}': dimension '${name}' has unknown type '${rawType}' (numeric | boolean).`,
+				);
+			}
+			const description = parseStringOrNull(rec["description"]);
+			if (rawType === "boolean") {
+				dim = { name, type: "boolean", min: 0, max: 1, description };
+			} else {
+				const min = typeof rec["min"] === "number" && Number.isFinite(rec["min"]) ? rec["min"] : DEFAULT_DIMENSION_MIN;
+				const max = typeof rec["max"] === "number" && Number.isFinite(rec["max"]) ? rec["max"] : DEFAULT_DIMENSION_MAX;
+				if (!(min < max)) {
+					throw new CircuitParseError(
+						`Evaluator '${evaluatorLabel}': dimension '${name}' needs min < max (got ${min}..${max}).`,
+					);
+				}
+				dim = { name, type: "numeric", min, max, description };
+			}
+		} else {
+			throw new CircuitParseError(`Evaluator '${evaluatorLabel}' has an unrecognized dimension entry.`);
+		}
+		if (seen.has(dim.name)) {
+			throw new CircuitParseError(`Evaluator '${evaluatorLabel}' declares dimension '${dim.name}' twice.`);
+		}
+		seen.add(dim.name);
+		dimensions.push(dim);
+	}
+	return dimensions;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +393,139 @@ export class StepNoteParser {
 }
 
 // ---------------------------------------------------------------------------
+// EvaluatorNoteParser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses a single evaluator note (discriminator `notor-type: circuit-evaluator`)
+ * into an `EvaluatorDefinition`. Same plumbing as `StepNoteParser`: frontmatter
+ * via `metadataCache.getFileCache()`, body via `vault.read()` +
+ * `getFrontMatterInfo()`. Every problem is thrown as a `CircuitParseError`; the
+ * circuit parser downgrades it to an `evaluator_lint` warning and drops the
+ * evaluator (an evaluator problem never blocks the circuit).
+ */
+export class EvaluatorNoteParser {
+	constructor(
+		private readonly vault: Vault,
+		private readonly metadataCache: MetadataCache,
+	) {}
+
+	async parse(file: TFile, evalsDir: string): Promise<EvaluatorDefinition> {
+		const cache = this.metadataCache.getFileCache(file);
+		const fm = cache?.frontmatter as Record<string, unknown> | undefined;
+		if (!fm || !isCircuitEvaluatorType(fm["notor-type"])) {
+			throw new CircuitParseError(
+				`Note '${file.path}' is missing 'notor-type: circuit-evaluator'.`,
+			);
+		}
+		const name = parseStringOrNull(fm["notor-eval-name"]);
+		if (!name) {
+			throw new CircuitParseError(`Evaluator note '${file.path}' is missing required 'notor-eval-name'.`);
+		}
+
+		const rawMode = parseStringOrNull(fm["notor-eval-mode"]) ?? "conversation";
+		if (rawMode !== "conversation" && rawMode !== "code") {
+			throw new CircuitParseError(
+				`Evaluator '${name}': invalid 'notor-eval-mode: ${rawMode}' — must be 'conversation' or 'code'.`,
+			);
+		}
+		const mode: "conversation" | "code" = rawMode;
+
+		const persona = parseStringOrNull(fm["notor-eval-persona"]);
+		const subagent = parseStringOrNull(fm["notor-eval-subagent"]);
+		if (persona && subagent) {
+			throw new CircuitParseError(
+				`Evaluator '${name}' sets both 'notor-eval-persona' and 'notor-eval-subagent'; choose one.`,
+			);
+		}
+
+		const dimensions = parseEvalDimensions(fm["notor-eval-dimensions"], name);
+
+		const rawTimeout = fm["notor-eval-timeout-seconds"];
+		const timeoutSeconds =
+			typeof rawTimeout === "number" && Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : null;
+
+		let rawContent: string;
+		try {
+			rawContent = await this.vault.read(file);
+		} catch (err) {
+			throw new CircuitParseError(
+				`Failed to read evaluator note '${file.path}': ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+		const fmInfo = getFrontMatterInfo(rawContent);
+		const bodyContent = rawContent.slice(fmInfo.contentStart);
+		if (mode === "code" && extractCodeFence(bodyContent) === null) {
+			throw new CircuitParseError(
+				`Evaluator '${name}' is 'notor-eval-mode: code' but its body has no ts/js code fence.`,
+			);
+		}
+
+		// Rubric: a wikilink resolved via the metadata cache (scoped to the
+		// evaluator note), then an explicit path under evals/.
+		let rubricPath: string | null = null;
+		const rawRubric = parseStringOrNull(fm["notor-eval-rubric"]);
+		if (rawRubric) {
+			const rubricFile = resolveLinkedNote(this.vault, this.metadataCache, stripWikilink(rawRubric), evalsDir, file.path);
+			if (!rubricFile) {
+				throw new CircuitParseError(
+					`Evaluator '${name}': rubric '${rawRubric}' could not be resolved under '${evalsDir}/'.`,
+				);
+			}
+			rubricPath = rubricFile.path;
+		}
+
+		return {
+			name,
+			description: parseStringOrNull(fm["notor-eval-description"]) ?? "",
+			mode,
+			persona: mode === "code" ? null : persona,
+			subagent: mode === "code" ? null : subagent,
+			model: mode === "code" ? null : parseStringOrNull(fm["notor-eval-model"]),
+			rubricPath,
+			dimensions,
+			timeoutSeconds,
+			includeNoteContents: parseBool(fm["notor-eval-include-note-contents"], true),
+			bodyContent,
+			notePath: file.path,
+		};
+	}
+}
+
+/**
+ * Resolve a wikilink to a `TFile` under a circuit sub-directory (`steps/`,
+ * `evals/`). Tries the metadata-cache link resolver first (handles `[[planner]]`
+ * shortnames), then an explicit path under `subDir` (with/without `.md`), then
+ * falls back to any cache hit.
+ */
+function resolveLinkedNote(
+	vault: Vault,
+	metadataCache: MetadataCache,
+	linkText: string,
+	subDir: string,
+	fromPath: string,
+): TFile | null {
+	// 1. Metadata-cache resolution (shortname or path), scoped to the source
+	//    note for disambiguation.
+	const viaCache = metadataCache.getFirstLinkpathDest(linkText, fromPath);
+	if (viaCache instanceof TFile && viaCache.path.startsWith(`${subDir}/`)) {
+		return viaCache;
+	}
+
+	// 2. Explicit path under subDir (exact, then with .md).
+	const base = linkText.endsWith(".md") ? linkText.slice(0, -3) : linkText;
+	const candidate = base.includes("/") ? base : `${subDir}/${base}`;
+	const exact = vault.getAbstractFileByPath(`${candidate}.md`);
+	if (exact instanceof TFile) return exact;
+	const noExt = vault.getAbstractFileByPath(candidate);
+	if (noExt instanceof TFile) return noExt;
+
+	// 3. Fall back to a cache hit even outside subDir (better than nothing).
+	if (viaCache instanceof TFile) return viaCache;
+	return null;
+}
+
+// ---------------------------------------------------------------------------
 // CircuitDefinitionParser
 // ---------------------------------------------------------------------------
 
@@ -321,6 +535,7 @@ export class StepNoteParser {
  */
 export class CircuitDefinitionParser {
 	private readonly stepParser: StepNoteParser;
+	private readonly evaluatorParser: EvaluatorNoteParser;
 
 	constructor(
 		private readonly vault: Vault,
@@ -329,6 +544,7 @@ export class CircuitDefinitionParser {
 		private readonly personaDisablesEmitEvent?: PersonaDisablesEmitEvent,
 	) {
 		this.stepParser = new StepNoteParser(vault, metadataCache);
+		this.evaluatorParser = new EvaluatorNoteParser(vault, metadataCache);
 	}
 
 	/** `{notor_dir}/circuits` then legacy `{notor_dir}/orchestrations`, in precedence order. */
@@ -425,6 +641,17 @@ export class CircuitDefinitionParser {
 		}
 		const steps = await this.resolveSteps(stepLinks, dir, defFile.path, name);
 
+		// Evaluators are optional and never block the circuit: each problem is
+		// collected as an `evaluator_lint` warning and that evaluator is dropped.
+		const evaluatorWarnings: CircuitParseWarning[] = [];
+		const evaluators = await this.resolveEvaluators(
+			parseStringArray(fm["notor-evaluators"]),
+			dir,
+			defFile.path,
+			name,
+			evaluatorWarnings,
+		);
+
 		const flow: Circuit = {
 			name,
 			description: parseStringOrNull(readAliasedKey(fm, "description")) ?? "",
@@ -458,13 +685,57 @@ export class CircuitDefinitionParser {
 			maxCostUsd: parseFiniteNumberOrDefault(fm["notor-max-cost-usd"], DEFAULT_MAX_COST_USD),
 			openNotesInEditor: parseBoolOrNull(fm["notor-open-notes-in-editor"]),
 			allowConcurrent: parseBool(readAliasedKey(fm, "allowConcurrent"), false),
+			// Evaluation.
+			evaluators,
+			evalAuto: parseEvalAuto(fm["notor-eval-auto"], name),
+			evalSchedule: parseSchedule(fm["notor-eval-schedule"], name, "notor-eval-schedule"),
+			evalMaxCostUsd: parseEvalMaxCostUsd(fm["notor-eval-max-cost-usd"]),
 		};
 
 		// Two layers of load-time validation.
 		this.validateTriggerRouting(flow);
-		const warnings = this.validateTopology(flow);
+		const warnings = [...this.validateTopology(flow), ...evaluatorWarnings];
 
 		return { flow, warnings };
+	}
+
+	/**
+	 * Resolve `notor-evaluators` wikilinks to evaluator notes under
+	 * `{circuit-dir}/evals/`. Unlike steps, a bad evaluator is a warning
+	 * (`evaluator_lint`) and is dropped — the circuit itself still loads.
+	 */
+	private async resolveEvaluators(
+		links: string[],
+		dir: TFolder,
+		definitionPath: string,
+		flowName: string,
+		warnings: CircuitParseWarning[],
+	): Promise<EvaluatorDefinition[]> {
+		const evalsDir = `${dir.path}/evals`;
+		const evaluators: EvaluatorDefinition[] = [];
+		const seen = new Set<string>();
+		for (const link of links) {
+			const linkText = stripWikilink(link);
+			try {
+				const file = resolveLinkedNote(this.vault, this.metadataCache, linkText, evalsDir, definitionPath);
+				if (!file) {
+					throw new CircuitParseError(
+						`evaluator '${linkText}' could not be resolved under '${evalsDir}/'.`,
+					);
+				}
+				const evaluator = await this.evaluatorParser.parse(file, evalsDir);
+				if (seen.has(evaluator.name)) {
+					throw new CircuitParseError(`evaluator name '${evaluator.name}' is declared twice.`);
+				}
+				seen.add(evaluator.name);
+				evaluators.push(evaluator);
+			} catch (e) {
+				const message = `Flow '${flowName}': ${e instanceof Error ? e.message : String(e)}`;
+				warnings.push({ kind: "evaluator_lint", message });
+				log.warn("Dropping invalid circuit evaluator", { flow: flowName, link: linkText, error: message });
+			}
+		}
+		return evaluators;
 	}
 
 	/** Resolve `notor-steps` wikilinks to step notes under `{flow-dir}/steps/`. */
@@ -479,7 +750,7 @@ export class CircuitDefinitionParser {
 
 		for (const link of stepLinks) {
 			const linkText = stripWikilink(link);
-			const file = this.resolveStepFile(linkText, stepsDir, definitionPath);
+			const file = resolveLinkedNote(this.vault, this.metadataCache, linkText, stepsDir, definitionPath);
 			if (!file) {
 				throw new CircuitParseError(
 					`Flow '${flowName}': step '${linkText}' could not be resolved under '${stepsDir}/'.`,
@@ -494,36 +765,6 @@ export class CircuitDefinitionParser {
 			steps.push(step);
 		}
 		return steps;
-	}
-
-	/**
-	 * Resolve a step wikilink to a `TFile`. Tries the metadata-cache link
-	 * resolver first (handles `[[planner]]` shortnames), then an explicit path
-	 * under `{flow-dir}/steps/` (with/without `.md`).
-	 */
-	private resolveStepFile(
-		linkText: string,
-		stepsDir: string,
-		definitionPath: string,
-	): TFile | null {
-		// 1. Metadata-cache resolution (shortname or path), scoped to the
-		//    definition note for disambiguation.
-		const viaCache = this.metadataCache.getFirstLinkpathDest(linkText, definitionPath);
-		if (viaCache instanceof TFile && viaCache.path.startsWith(`${stepsDir}/`)) {
-			return viaCache;
-		}
-
-		// 2. Explicit path under steps/ (exact, then with .md).
-		const base = linkText.endsWith(".md") ? linkText.slice(0, -3) : linkText;
-		const candidate = base.includes("/") ? base : `${stepsDir}/${base}`;
-		const exact = this.vault.getAbstractFileByPath(`${candidate}.md`);
-		if (exact instanceof TFile) return exact;
-		const noExt = this.vault.getAbstractFileByPath(candidate);
-		if (noExt instanceof TFile) return noExt;
-
-		// 3. Fall back to a cache hit even outside steps/ (better than nothing).
-		if (viaCache instanceof TFile) return viaCache;
-		return null;
 	}
 
 	// -- Layer 1: trigger routing (FR-111) ----------------------------------

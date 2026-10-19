@@ -3,6 +3,7 @@ import {
 	CIRCUIT_KEY_ALIASES,
 	CIRCUIT_ROOT_DIR_NAMES,
 	isCircuitDefinitionType,
+	isCircuitEvaluatorType,
 	isCircuitStepType,
 	readAliasedKey,
 } from "./schema-aliases";
@@ -23,6 +24,13 @@ describe("schema-aliases", () => {
 		expect(isCircuitStepType("circuit-step")).toBe(true);
 		expect(isCircuitStepType("orchestration-step")).toBe(true);
 		expect(isCircuitStepType("circuit")).toBe(false);
+	});
+
+	it("accepts only the circuit-evaluator discriminator (no legacy spelling)", () => {
+		expect(isCircuitEvaluatorType("circuit-evaluator")).toBe(true);
+		expect(isCircuitEvaluatorType("orchestration-evaluator")).toBe(false);
+		expect(isCircuitEvaluatorType("circuit-step")).toBe(false);
+		expect(isCircuitEvaluatorType(undefined)).toBe(false);
 	});
 
 	it("every alias pair maps a notor-*circuit* key to its notor-*flow* legacy key", () => {

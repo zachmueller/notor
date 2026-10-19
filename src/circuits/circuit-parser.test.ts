@@ -97,11 +97,19 @@ function buildFakeVault(files: Record<string, FileFixture>) {
 			const fx = files[file.path];
 			return fx ? { frontmatter: fx.frontmatter ?? undefined } : null;
 		},
-		// Resolve "[[planner]]" against the steps dir of the source flow.
+		// Resolve "[[planner]]" against the steps dir of the source flow, and
+		// "[[judge]]" / "[[_rubric]]" against its evals dir (a link from an
+		// evaluator note resolves relative to the circuit dir as well).
 		getFirstLinkpathDest: (linkpath: string, sourcePath: string) => {
-			const flowDir = sourcePath.slice(0, sourcePath.lastIndexOf("/"));
-			const candidate = `${flowDir}/steps/${linkpath}.md`;
-			return fileObjs.get(candidate) ?? null;
+			let flowDir = sourcePath.slice(0, sourcePath.lastIndexOf("/"));
+			if (flowDir.endsWith("/steps") || flowDir.endsWith("/evals")) {
+				flowDir = flowDir.slice(0, flowDir.lastIndexOf("/"));
+			}
+			return (
+				fileObjs.get(`${flowDir}/steps/${linkpath}.md`) ??
+				fileObjs.get(`${flowDir}/evals/${linkpath}.md`) ??
+				null
+			);
 		},
 	} as unknown as import("obsidian").MetadataCache;
 
@@ -410,6 +418,184 @@ describe("CircuitDefinitionParser", () => {
 		const files = validFlowFiles({ "notor-daily-start": true });
 		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
 		expect(flow.dailyStart).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Evaluators (notor-evaluators + evals/*.md)
+// ---------------------------------------------------------------------------
+
+function evaluatorFm(over: Record<string, unknown> = {}): Record<string, unknown> {
+	return {
+		"notor-type": "circuit-evaluator",
+		"notor-eval-name": "Report quality",
+		"notor-eval-dimensions": ["accuracy", "completeness"],
+		...over,
+	};
+}
+
+/** The valid two-step flow plus one LLM evaluator (with a rubric) and one code evaluator. */
+function flowWithEvaluators(
+	flowOver: Record<string, unknown> = {},
+	judgeOver: Record<string, unknown> = {},
+	judgeBody = "Judge the report against the rubric.",
+): Record<string, FileFixture> {
+	const files = validFlowFiles({
+		"notor-evaluators": ["[[judge]]", "[[shape]]"],
+		...flowOver,
+	});
+	files[`${FLOW_DIR}/evals/judge.md`] = {
+		frontmatter: evaluatorFm({
+			"notor-eval-description": "Scores the report.",
+			"notor-eval-persona": "critic",
+			"notor-eval-rubric": "[[_rubric]]",
+			"notor-eval-dimensions": [
+				"accuracy",
+				{ name: "completeness", type: "numeric", min: 0, max: 10, description: "Covers every ask" },
+				{ name: "cited_sources", type: "boolean" },
+			],
+			...judgeOver,
+		}),
+		body: judgeBody,
+	};
+	files[`${FLOW_DIR}/evals/_rubric.md`] = { frontmatter: null, body: "# Rubric\nBe strict." };
+	files[`${FLOW_DIR}/evals/shape.md`] = {
+		frontmatter: evaluatorFm({
+			"notor-eval-name": "Shape",
+			"notor-eval-mode": "code",
+			"notor-eval-timeout-seconds": 30,
+			"notor-eval-dimensions": [{ name: "completed", type: "boolean" }],
+		}),
+		body: "```ts\nreturn { scores: { completed: input.outcome.status === 'completed' }, rationale: 'status' };\n```",
+	};
+	return files;
+}
+
+describe("CircuitDefinitionParser — evaluators", () => {
+	it("defaults to no evaluators / no auto-eval / no eval schedule / null eval budget", async () => {
+		const { flow, warnings } = await parserFor(validFlowFiles()).parseCircuitByDir(FLOW_DIR);
+		expect(flow.evaluators).toEqual([]);
+		expect(flow.evalAuto).toBe("none");
+		expect(flow.evalSchedule).toBeNull();
+		expect(flow.evalMaxCostUsd).toBeNull();
+		expect(warnings).toEqual([]);
+	});
+
+	it("parses conversation + code evaluators with resolved rubric, typed dimensions, and shorthand defaults", async () => {
+		const { flow, warnings } = await parserFor(flowWithEvaluators()).parseCircuitByDir(FLOW_DIR);
+		expect(warnings).toEqual([]);
+		expect(flow.evaluators).toHaveLength(2);
+
+		const judge = flow.evaluators[0]!;
+		expect(judge).toMatchObject({
+			name: "Report quality",
+			description: "Scores the report.",
+			mode: "conversation",
+			persona: "critic",
+			subagent: null,
+			model: null,
+			rubricPath: `${FLOW_DIR}/evals/_rubric.md`,
+			timeoutSeconds: null,
+			includeNoteContents: true,
+			notePath: `${FLOW_DIR}/evals/judge.md`,
+		});
+		expect(judge.bodyContent).toContain("Judge the report against the rubric.");
+		expect(judge.dimensions).toEqual([
+			{ name: "accuracy", type: "numeric", min: 1, max: 5, description: null },
+			{ name: "completeness", type: "numeric", min: 0, max: 10, description: "Covers every ask" },
+			{ name: "cited_sources", type: "boolean", min: 0, max: 1, description: null },
+		]);
+
+		const shape = flow.evaluators[1]!;
+		expect(shape).toMatchObject({ name: "Shape", mode: "code", timeoutSeconds: 30, rubricPath: null });
+		expect(shape.dimensions).toEqual([{ name: "completed", type: "boolean", min: 0, max: 1, description: null }]);
+		expect(shape.bodyContent).toContain("return { scores:");
+	});
+
+	it("parses notor-eval-auto, notor-eval-schedule, and notor-eval-max-cost-usd", async () => {
+		const files = flowWithEvaluators({
+			"notor-eval-auto": "both",
+			"notor-eval-schedule": "0 6 * * *",
+			"notor-eval-max-cost-usd": 0.75,
+		});
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.evalAuto).toBe("both");
+		expect(flow.evalSchedule).toBe("0 6 * * *");
+		expect(flow.evalMaxCostUsd).toBe(0.75);
+	});
+
+	it("coerces an unknown notor-eval-auto to none, an invalid eval cron to null, and a non-positive eval budget to null", async () => {
+		const files = flowWithEvaluators({
+			"notor-eval-auto": "sometimes",
+			"notor-eval-schedule": "not a cron",
+			"notor-eval-max-cost-usd": -2,
+		});
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.evalAuto).toBe("none");
+		expect(flow.evalSchedule).toBeNull();
+		expect(flow.evalMaxCostUsd).toBeNull();
+	});
+
+	it("an unresolvable notor-evaluators link is an evaluator_lint warning, not a load error", async () => {
+		const files = validFlowFiles({ "notor-evaluators": ["[[missing]]"] });
+		const { flow, warnings } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.evaluators).toEqual([]);
+		expect(flow.steps).toHaveLength(2);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]!.kind).toBe("evaluator_lint");
+		expect(warnings[0]!.message).toMatch(/missing.*could not be resolved/);
+	});
+
+	it.each([
+		["wrong notor-type", { "notor-type": "circuit-step" }, /missing 'notor-type: circuit-evaluator'/],
+		["missing name", { "notor-eval-name": "" }, /missing required 'notor-eval-name'/],
+		["unknown mode", { "notor-eval-mode": "python" }, /invalid 'notor-eval-mode: python'/],
+		["persona AND subagent", { "notor-eval-subagent": "grader" }, /both 'notor-eval-persona' and 'notor-eval-subagent'/],
+		["zero dimensions", { "notor-eval-dimensions": [] }, /declares no 'notor-eval-dimensions'/],
+		["duplicate dimension", { "notor-eval-dimensions": ["a", "a"] }, /dimension 'a' twice/],
+		["unknown dimension type", { "notor-eval-dimensions": [{ name: "x", type: "ordinal" }] }, /unknown type 'ordinal'/],
+		["non-increasing range", { "notor-eval-dimensions": [{ name: "x", min: 5, max: 5 }] }, /needs min < max/],
+		["unresolved rubric", { "notor-eval-rubric": "[[nowhere]]" }, /rubric '\[\[nowhere\]\]' could not be resolved/],
+	])("drops the evaluator with an evaluator_lint warning on %s", async (_label, judgeOver, pattern) => {
+		const { flow, warnings } = await parserFor(flowWithEvaluators({}, judgeOver)).parseCircuitByDir(FLOW_DIR);
+		// The judge is dropped; the code evaluator and the circuit survive.
+		expect(flow.evaluators.map((e) => e.name)).toEqual(["Shape"]);
+		expect(flow.steps).toHaveLength(2);
+		const lint = warnings.filter((w) => w.kind === "evaluator_lint");
+		expect(lint).toHaveLength(1);
+		expect(lint[0]!.message).toMatch(pattern);
+	});
+
+	it("drops a code evaluator whose body has no ts/js fence", async () => {
+		const files = flowWithEvaluators();
+		files[`${FLOW_DIR}/evals/shape.md`]!.body = "No fence here.";
+		const { flow, warnings } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.evaluators.map((e) => e.name)).toEqual(["Report quality"]);
+		expect(warnings.some((w) => w.kind === "evaluator_lint" && /no ts\/js code fence/.test(w.message))).toBe(true);
+	});
+
+	it("drops a second evaluator that reuses a name", async () => {
+		const files = flowWithEvaluators();
+		files[`${FLOW_DIR}/evals/shape.md`]!.frontmatter!["notor-eval-name"] = "Report quality";
+		const { flow, warnings } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.evaluators).toHaveLength(1);
+		expect(warnings.some((w) => /declared twice/.test(w.message))).toBe(true);
+	});
+
+	it("ignores persona/subagent/model on a code evaluator", async () => {
+		const files = flowWithEvaluators();
+		Object.assign(files[`${FLOW_DIR}/evals/shape.md`]!.frontmatter!, {
+			"notor-eval-persona": "critic",
+			"notor-eval-model": "gpt-x",
+		});
+		const { flow } = await parserFor(files).parseCircuitByDir(FLOW_DIR);
+		expect(flow.evaluators[1]).toMatchObject({ mode: "code", persona: null, subagent: null, model: null });
+	});
+
+	it("does not treat the evals/ folder or its notes as circuits during discovery", async () => {
+		const results = await parserFor(flowWithEvaluators()).discoverCircuits();
+		expect(results).toHaveLength(1);
+		expect(results[0]!.flow.evaluators).toHaveLength(2);
 	});
 });
 

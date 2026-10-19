@@ -21,6 +21,12 @@ export const CIRCUIT_DEFINITION_TYPES = ["circuit", "orchestration-flow"] as con
 /** `notor-type` values accepted on a step note. */
 export const CIRCUIT_STEP_TYPES = ["circuit-step", "orchestration-step"] as const;
 
+/**
+ * `notor-type` values accepted on an evaluator note (`{circuit-dir}/evals/`).
+ * Evaluators post-date the circuit rename, so there is no legacy spelling.
+ */
+export const CIRCUIT_EVALUATOR_TYPES = ["circuit-evaluator"] as const;
+
 /** Pairs of `[newKey, legacyKey]` for definition frontmatter. */
 export const CIRCUIT_KEY_ALIASES = {
 	name: ["notor-circuit-name", "notor-flow-name"],
@@ -42,6 +48,11 @@ export function isCircuitDefinitionType(value: unknown): boolean {
 /** True when `value` is a step-note discriminator (new or legacy). */
 export function isCircuitStepType(value: unknown): boolean {
 	return (CIRCUIT_STEP_TYPES as readonly unknown[]).includes(value);
+}
+
+/** True when `value` is an evaluator-note discriminator. */
+export function isCircuitEvaluatorType(value: unknown): boolean {
+	return (CIRCUIT_EVALUATOR_TYPES as readonly unknown[]).includes(value);
 }
 
 /**

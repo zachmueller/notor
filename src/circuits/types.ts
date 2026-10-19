@@ -104,6 +104,27 @@ export interface Circuit {
 	 * recursion).
 	 */
 	allowConcurrent: boolean;
+
+	// --- Evaluation (post-run scoring of finished sessions) ---
+	/** Resolved from `notor-evaluators` wikilinks under `{circuit-dir}/evals/`, in declaration order (default `[]`). */
+	evaluators: EvaluatorDefinition[];
+	/**
+	 * `notor-eval-auto` (default `none`) — run the evaluators automatically when a
+	 * root session of this circuit finishes `completed` / `error` / either.
+	 */
+	evalAuto: EvalAutoTrigger;
+	/**
+	 * `notor-eval-schedule` — validated cron expression (`null` when absent or
+	 * invalid). When set, finished sessions not yet scored by the current
+	 * evaluator set are evaluated on this schedule.
+	 */
+	evalSchedule: string | null;
+	/**
+	 * `notor-eval-max-cost-usd` — per-pass USD ceiling for the evaluators
+	 * (`null` = fall back to `maxCostUsd`). Each eval pass gets a fresh budget;
+	 * eval spend never touches the run's own record.
+	 */
+	evalMaxCostUsd: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +160,60 @@ export interface StepDefinition {
 	/** Markdown body (instructions) OR code fence (mode: code); `<include_note>` tags preserved verbatim. */
 	bodyContent: string;
 	/** Vault-relative path to the step note. */
+	notePath: string;
+}
+
+// ---------------------------------------------------------------------------
+// EvaluatorDefinition — parsed from an evaluator note
+// ---------------------------------------------------------------------------
+
+/**
+ * One scored dimension of an evaluator. `numeric` dimensions are scored in
+ * `[min, max]` (the frontmatter shorthand — a bare string — means numeric 1–5);
+ * `boolean` dimensions are pass/fail (`min`/`max` are fixed to 0/1).
+ */
+export interface EvalDimension {
+	name: string;
+	type: "numeric" | "boolean";
+	min: number;
+	max: number;
+	description: string | null;
+}
+
+/** When `notor-eval-auto` fires the evaluators after a root run finishes. */
+export type EvalAutoTrigger = "none" | "complete" | "error" | "both";
+
+/**
+ * A parsed evaluator (a note under `{circuit-dir}/evals/` with
+ * `notor-type: circuit-evaluator`). Mirrors a step: `conversation` mode is an
+ * LLM judge (a persona OR a sub-agent profile, optionally with a rubric note)
+ * that reports scores via the `submit_score` tool; `code` mode is a snippet
+ * compiled like a code step that returns `{ scores, rationale }`.
+ */
+export interface EvaluatorDefinition {
+	/** `notor-eval-name`. */
+	name: string;
+	/** `notor-eval-description` (default `""`). */
+	description: string;
+	/** `notor-eval-mode` (default `"conversation"`). */
+	mode: "conversation" | "code";
+	/** `notor-eval-persona` — the judge persona (`null` = none; conversation only). */
+	persona: string | null;
+	/** `notor-eval-subagent` — the judge sub-agent profile (`null` = none; conversation only). */
+	subagent: string | null;
+	/** `notor-eval-model` — raw model id overriding the judge's model (`null` = inherit). */
+	model: string | null;
+	/** `notor-eval-rubric` — resolved vault path of the rubric note (`null` = none). */
+	rubricPath: string | null;
+	/** `notor-eval-dimensions` — the scored dimensions (at least one). */
+	dimensions: EvalDimension[];
+	/** `notor-eval-timeout-seconds` — code evaluators only (`null` → the code-step default). */
+	timeoutSeconds: number | null;
+	/** `notor-eval-include-note-contents` (default `true`) — give an LLM judge the edited notes' current contents. */
+	includeNoteContents: boolean;
+	/** Markdown body (judge instructions) OR code fence (mode: code); `<include_note>` tags preserved verbatim. */
+	bodyContent: string;
+	/** Vault-relative path to the evaluator note. */
 	notePath: string;
 }
 
