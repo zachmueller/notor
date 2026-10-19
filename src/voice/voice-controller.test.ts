@@ -493,3 +493,92 @@ describe("VoiceController during a turn", () => {
 		expect(h.stt.restarted).toBe(1);
 	});
 });
+
+describe("VoiceController settling prompts by voice", () => {
+	function withHooks(h: Harness) {
+		const dismissed: Array<[string, string, string | undefined]> = [];
+		const reviews: Array<[string, string]> = [];
+		const deps = (h.controller as unknown as {
+			deps: {
+				dismissPrompt?: (id: string, kind: string, decision?: string) => void;
+				resolvePlanReview?: (id: string, decision: string) => boolean;
+			};
+		}).deps;
+		deps.dismissPrompt = (id, kind, decision) => {
+			dismissed.push([id, kind, decision]);
+		};
+		deps.resolvePlanReview = (id, decision) => {
+			reviews.push([id, decision]);
+			return true;
+		};
+		return { dismissed, reviews };
+	}
+
+	it("approvePending and rejectPending settle tool approvals oldest-first and dismiss their prompts", async () => {
+		const h = makeHarness();
+		const { dismissed } = withHooks(h);
+		await startAndGreet(h);
+		const session = h.orchestrator.startTurn([{ role: "user", content: "write" }]);
+		const decisions: string[] = [];
+		session.pendingApprovals.set("m1", { resolve: (d) => decisions.push(`m1:${d}`), toolCallId: "t1", messageId: "m1", toolName: "write_note", parameters: {} });
+		session.pendingApprovals.set("m2", { resolve: (d) => decisions.push(`m2:${d}`), toolCallId: "t2", messageId: "m2", toolName: "write_note", parameters: {} });
+
+		expect(h.controller.approvePending()).toBe(1);
+		expect(decisions).toEqual(["m1:approved"]);
+		session.pendingApprovals.delete("m1"); // the panel's approval closure does this after a decision
+		expect(h.controller.rejectPending({ all: true })).toBe(1);
+		expect(decisions).toEqual(["m1:approved", "m2:rejected"]);
+		expect(dismissed).toEqual([["m1", "approval", "approved"], ["m2", "approval", "rejected"]]);
+		session.pendingApprovals.clear();
+		expect(h.controller.approvePending()).toBe(0);
+	});
+
+	it("approve/reject fall back to a pending plan review", async () => {
+		const h = makeHarness();
+		const { reviews } = withHooks(h);
+		await startAndGreet(h);
+		const session = h.orchestrator.startTurn([{ role: "user", content: "plan" }]);
+		session.pendingInteractions.set("m9", {
+			resolve: () => {},
+			reject: () => {},
+			messageId: "m9",
+			request: { type: "plan-review", id: "pr-1", conversationId: "conv-1", title: "Reorganize notes" },
+		});
+		expect(h.controller.approvePending()).toBe(1);
+		expect(h.controller.rejectPending()).toBe(1);
+		expect(reviews).toEqual([["conv-1", "approved"], ["conv-1", "rejected"]]);
+		// A plan review is not a question: answerPending leaves it alone.
+		expect(h.controller.answerPending(["yes"])).toBe(false);
+	});
+
+	it("answerPending resolves the oldest question prompt with index-aligned answers", async () => {
+		const h = makeHarness();
+		const { dismissed } = withHooks(h);
+		await startAndGreet(h);
+		const session = h.orchestrator.startTurn([{ role: "user", content: "ask" }]);
+		const responses: unknown[] = [];
+		session.pendingInteractions.set("m3", {
+			resolve: (r) => responses.push(r),
+			reject: () => {},
+			messageId: "m3",
+			request: { type: "ask", id: "ask-1", questions: [{ question: "Folder?" }, { question: "Tags?", multiSelect: true }] },
+		});
+		expect(h.controller.answerPending(["Inbox"])).toBe(true);
+		expect(responses).toEqual([{ id: "ask-1", values: ["Inbox", []] }]);
+		expect(dismissed).toEqual([["m3", "interaction", undefined]]);
+		session.pendingInteractions.clear();
+		expect(h.controller.answerPending(["again"])).toBe(false);
+	});
+
+	it("describeState reports pending work and queued dictation", async () => {
+		const h = makeHarness();
+		await startAndGreet(h);
+		expect(h.controller.describeState()).toBe("Idle and listening.");
+		const session = h.orchestrator.startTurn([{ role: "user", content: "go" }]);
+		h.orchestrator.observers.emitToolCallStarted(session, "read_note", {}, "m");
+		await h.controller.injectTranscript("and one more thing");
+		expect(h.controller.describeState()).toBe("The assistant is working; 1 tool call so far. 1 message queued.");
+		session.pendingApprovals.set("m1", { resolve: () => {}, toolCallId: "t", messageId: "m1", toolName: "write_note", parameters: {} });
+		expect(h.controller.describeState()).toBe("1 approval pending. 1 message queued.");
+	});
+});

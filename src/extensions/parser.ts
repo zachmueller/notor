@@ -29,6 +29,7 @@ const VALID_TRIGGERS = new Set<string>([
 	"on_tool_call",
 	"on_tool_result",
 	"after_completion",
+	"on_approval_required",
 	"on_conversation_start",
 	"on_note_open",
 	"on_note_create",
@@ -37,6 +38,7 @@ const VALID_TRIGGERS = new Set<string>([
 	"on_tag_change",
 	"on_schedule",
 	"on_daily_start",
+	"on_voice_command",
 ]);
 
 // ---------------------------------------------------------------------------

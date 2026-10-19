@@ -16,6 +16,7 @@ vi.mock("./chat-utils", () => ({
 vi.mock("./sub-agent-utils", () => ({ buildSubAgentUtils: () => ({ runSubAgent: async () => null }) }));
 vi.mock("./memory-utils", () => ({ buildMemoryUtils: () => ({ memory: null, memoryApprovalMode: null }) }));
 vi.mock("./plugin-utils", () => ({ buildPluginUtils: () => ({}) }));
+vi.mock("./voice-utils", () => ({ buildVoiceUtils: () => ({ voice: null }) }));
 const fakeTasks = { ensure: vi.fn(), start: vi.fn(), close: vi.fn(), list: vi.fn() };
 vi.mock("./circuit-utils", () => ({
 	buildCircuitUtils: () => ({ orchestrationTasks: fakeTasks, circuitTasks: fakeTasks, invokeWorkflow: null }),

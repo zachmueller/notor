@@ -77,7 +77,33 @@ Click **Customize clean-up prompt** or **Customize speech summary prompt** in se
 
 ## Voice commands
 
-Say the trigger phrase followed by a command to control Notor without sending a message, for example "voice command approve". Voice commands are implemented as a user-editable automation so you can add your own; see [extensions](extensions.md) for the `on_voice_command` trigger and the `utils.voice` helpers.
+Say the **trigger phrase** (default `voice command`, configurable) followed by a command to control Notor without sending a message, for example "voice command approve". Punctuation and casing do not matter, and "voice commands" is accepted too.
+
+| Say | Effect |
+|---|---|
+| approve / yes / go ahead / okay | Approve the oldest pending tool call (or a pending plan review) |
+| approve all | Approve every pending tool call |
+| reject / no / deny | Reject the oldest pending tool call (or plan review) |
+| reject all | Reject every pending tool call |
+| answer … / reply … | Answer the assistant's pending question with the words that follow |
+| cancel / stop | Abort the running turn (listening continues) |
+| stop speaking / quiet | Cut off the current spoken line |
+| repeat / say that again | Re-speak the last announcement or summary |
+| status | Hear what Notor is doing and what is pending or queued |
+| send | Send queued dictation now |
+| scratch that / never mind | Discard queued dictation |
+| stop listening / turn off | Turn voice mode off |
+| help | Hear the list of commands |
+
+While Notor is **waiting for your approval or answer**, the short confirmations work without the trigger phrase: a bare "yes", "no", "approve", "reject" or "answer …" (three words or fewer, except after "answer") is treated as a command rather than a message. Anything longer is queued as dictation and sent after the turn, with a one-time spoken reminder that an approval is pending.
+
+An unrecognized phrase after the trigger is answered with "Unknown voice command" and is not sent to the conversation.
+
+### Customizing and extending
+
+Voice commands are an ordinary built-in [automation](extensions.md) named **Voice commands**, triggered by `on_voice_command`. In **Settings → Notor → Automation**, open its definition to materialize `notor/automations/voice-commands.md`, edit the phrase table or add your own actions, and reload extensions. Any automation with `notor-trigger: on_voice_command` takes part: they run in `notor-automation-order`, and the first one to return `{ handled: true }` consumes the utterance.
+
+Inside an automation, `context` carries the transcript, whether the trigger phrase was present, and what is pending (see [extensions.md](extensions.md#context-object)), and `utils.voice` exposes the controls listed in the [runtime context](extensions.md#notor-utilities) — including `speak`, `approvePending`, `answerPending`, `cancelTurn` and `stopListening` — so you can wire phrases to anything an extension can do.
 
 ## Limitations
 

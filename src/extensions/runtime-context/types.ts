@@ -92,6 +92,40 @@ export interface WebviewElement {
 	src?: string;
 }
 
+/**
+ * Voice-mode facade (`utils.voice`). Non-null only while voice mode is active
+ * for the conversation the extension runs in. See docs/voice.md.
+ */
+export interface VoiceUtils {
+	/** Queue a line to speak; `interrupt` cuts whatever is playing first. */
+	speak: (text: string, opts?: { interrupt?: boolean }) => void;
+	stopSpeaking: () => void;
+	/** Re-speak the last announcement or summary. False when there is nothing to repeat. */
+	repeatLast: () => boolean;
+	/** Turn voice mode off (announces first). */
+	stopListening: () => void;
+	/** Abort the running turn; listening continues. False when nothing is running. */
+	cancelTurn: () => boolean;
+	/** Approve the oldest pending tool approval (or all), or a pending plan review. Returns the count settled. */
+	approvePending: (opts?: { all?: boolean }) => number;
+	rejectPending: (opts?: { all?: boolean }) => number;
+	/** Answer the oldest pending question prompt; values are index-aligned with its questions. */
+	answerPending: (values: Array<string | string[]>) => boolean;
+	/** Send dictation queued during the turn now (no-op while a turn is running). */
+	sendQueued: () => Promise<boolean>;
+	clearQueued: () => void;
+	/** A spoken one-liner describing the current state. */
+	describeState: () => string;
+	getState: () => {
+		listening: boolean;
+		speaking: boolean;
+		turnRunning: boolean;
+		queuedText: string;
+		pendingApprovals: Array<{ toolName: string; parameters: Record<string, unknown> }>;
+		pendingQuestions: string[];
+	};
+}
+
 /** Shape of the `utils` object injected into extension functions. */
 export interface ExtensionUtils {
 	/**
@@ -208,6 +242,8 @@ export interface ExtensionUtils {
 		presetName: string,
 		messages: Array<{ role: string; content: string }>,
 	) => Promise<string | null>;
+	/** Voice-mode controls; `null` unless voice mode is on for this conversation. See docs/voice.md. */
+	voice: VoiceUtils | null;
 	/**
 	 * API for reading/writing conversation metadata.
 	 *

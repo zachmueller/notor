@@ -11,6 +11,9 @@ import { Notice, Platform } from "obsidian";
 import type NotorPlugin from "../main";
 import type { ChatOrchestrator } from "../chat/orchestrator";
 import { logger } from "../utils/logger";
+import { getPlanReviewController } from "../plans/plan-review-controller";
+import { dispatchOnVoiceCommand } from "../hooks/hook-events";
+import { matchVoiceCommand } from "./command-matcher";
 import { VoiceController, type VoiceStatus, type VoiceUtteranceContext } from "./voice-controller";
 import { WhisperServerBackend } from "./stt/whisper-server-backend";
 import type { VoiceConfigProblem } from "./stt/types";
@@ -43,7 +46,9 @@ export class VoiceManager {
 	private commandHandler: VoiceCommandHandler | null = null;
 	private disposed = false;
 
-	constructor(private readonly plugin: NotorPlugin) {}
+	constructor(private readonly plugin: NotorPlugin) {
+		this.commandHandler = (ctx) => this.dispatchVoiceCommand(ctx);
+	}
 
 	// -----------------------------------------------------------------------
 	// Availability and status
@@ -86,7 +91,10 @@ export class VoiceManager {
 		return [...this.controllers.values()][0] ?? null;
 	}
 
-	/** Milestone B: route recognized utterances through the voice-command layer first. */
+	/**
+	 * Replace the voice-command handler (default: `on_voice_command` automations
+	 * via the extension manager). Pass null to send every utterance as chat.
+	 */
 	setCommandHandler(handler: VoiceCommandHandler | null): void {
 		this.commandHandler = handler;
 	}
@@ -174,6 +182,39 @@ export class VoiceManager {
 			notify: (message) => {
 				new Notice(message);
 			},
+			dismissPrompt: (messageId, kind, decision) => {
+				const view = orchestrator.getView();
+				if (!view) return;
+				const toolCallEl = view.getToolCallEl(messageId);
+				if (kind === "interaction") {
+					toolCallEl?.querySelectorAll(".notor-interaction-prompt").forEach((el) => el.remove());
+					return;
+				}
+				// A voice decision settles the dispatcher's promise, not the prompt's own,
+				// so its buttons would stay on screen. Inline prompts live in the tool-call
+				// card; diff previews are appended to the message list oldest-first, so the
+				// first one still showing actions belongs to the approval just settled.
+				const inline = toolCallEl ? Array.from(toolCallEl.querySelectorAll(".notor-approval-prompt")) : [];
+				if (inline.length > 0) {
+					inline.forEach((el) => el.remove());
+					return;
+				}
+				const actions = view.containerEl.querySelector(".notor-diff-actions");
+				if (!actions) return;
+				const wrapper = actions.parentElement;
+				actions.remove();
+				if (!wrapper || !decision) return;
+				const rejected = decision === "rejected";
+				wrapper.createDiv({
+					cls: `notor-diff-status ${rejected ? "notor-diff-status-rejected" : "notor-diff-status-applied"}`,
+					text: rejected ? "✗ Rejected by voice" : "✓ Approved by voice",
+				});
+			},
+			resolvePlanReview: (reviewConversationId, decision) =>
+				getPlanReviewController()?.resolve(
+					reviewConversationId,
+					decision === "approved" ? { kind: "approve" } : { kind: "reject", reason: "Rejected by voice command." },
+				) ?? false,
 		});
 		this.controllers.set(leafId, controller);
 
@@ -237,6 +278,44 @@ export class VoiceManager {
 	}
 
 	// -----------------------------------------------------------------------
+
+	/**
+	 * Default command handler: match the trigger phrase, run `on_voice_command`
+	 * automations in order, and never let a trigger-phrase utterance reach the
+	 * conversation even when no automation claims it.
+	 */
+	private async dispatchVoiceCommand(ctx: VoiceUtteranceContext): Promise<boolean> {
+		const controller = this.getControllerForConversation(ctx.conversationId);
+		if (!controller) return false;
+		const config = readVoiceConfig(this.plugin.settings);
+		const match = matchVoiceCommand(ctx.rawTranscript, config.triggerPhrase);
+		const extensions = this.plugin.getExtensionManager();
+		const result = await dispatchOnVoiceCommand(
+			{
+				conversationId: ctx.conversationId,
+				timestamp: new Date().toISOString(),
+				rawTranscript: ctx.rawTranscript,
+				transcript: match ? match.command : ctx.rawTranscript,
+				hasTriggerPhrase: match !== null,
+				isTurnRunning: ctx.isTurnRunning,
+				isSpeaking: ctx.isSpeaking,
+				queuedText: ctx.queuedText,
+				pendingApproval: ctx.pendingApproval,
+				pendingInteraction: ctx.pendingInteraction,
+			},
+			{
+				getForTrigger: (trigger) => extensions.getAutomationsForTrigger(trigger),
+				execute: (automation, context) => extensions.executeAutomation(automation, context),
+			},
+		);
+		if (result.handled) return true;
+		if (match) {
+			log.info("Voice command not handled by any automation", { command: match.command });
+			controller.speak(`Unknown voice command: ${match.command || "nothing"}.`);
+			return true;
+		}
+		return false;
+	}
 
 	private createStt(): WhisperServerBackend {
 		const config = readVoiceConfig(this.plugin.settings);

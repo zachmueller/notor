@@ -25,6 +25,7 @@ import { buildSubAgentUtils } from "./sub-agent-utils";
 import { buildMemoryUtils } from "./memory-utils";
 import { buildPluginUtils } from "./plugin-utils";
 import { buildCircuitUtils } from "./circuit-utils";
+import { buildVoiceUtils } from "./voice-utils";
 import { RUNTIME_API_VERSION } from "./version";
 
 // Bundled libraries (for buildLibs)
@@ -73,6 +74,7 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 		...subAgentResult,
 		...buildPluginUtils(ctx),
 		...buildCircuitUtils(ctx),
+		...buildVoiceUtils(ctx),
 		memory: null,
 		memoryApprovalMode: null,
 		// Placeholders — wired below once `utils` exists so `ask`/`askMany` can

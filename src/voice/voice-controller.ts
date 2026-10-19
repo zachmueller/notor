@@ -101,10 +101,14 @@ export interface VoiceControllerDeps {
 	commandHandler?: (ctx: VoiceUtteranceContext) => Promise<boolean>;
 	/** Shown as a Notice when the loop stops on its own. */
 	notify?: (message: string) => void;
+	/** Remove a stale on-screen prompt after it was settled by voice (the DOM is the panel's business). */
+	dismissPrompt?: (messageId: string, kind: "approval" | "interaction", decision?: "approved" | "rejected") => void;
+	/** Settle a pending plan review (routed through the PlanReviewController). */
+	resolvePlanReview?: (conversationId: string, decision: "approved" | "rejected") => boolean;
 	/** Delay before the detector returns to normal listening after speech ends. Default 300. */
 	postSpeechGuardMs?: number;
-	setTimeoutFn?: typeof setTimeout;
-	clearTimeoutFn?: typeof clearTimeout;
+	setTimeoutFn?: (handler: () => void, ms: number) => ReturnType<typeof setTimeout>;
+	clearTimeoutFn?: (id: ReturnType<typeof setTimeout>) => void;
 	now?: () => number;
 }
 
@@ -137,13 +141,15 @@ export class VoiceController {
 	private recognitionFailures = 0;
 	private guardTimer: ReturnType<typeof setTimeout> | null = null;
 
-	private readonly setTimeoutFn: typeof setTimeout;
-	private readonly clearTimeoutFn: typeof clearTimeout;
+	private readonly setTimeoutFn: (handler: () => void, ms: number) => ReturnType<typeof setTimeout>;
+	private readonly clearTimeoutFn: (id: ReturnType<typeof setTimeout>) => void;
 	private readonly now: () => number;
 
 	constructor(private readonly deps: VoiceControllerDeps) {
-		this.setTimeoutFn = deps.setTimeoutFn ?? setTimeout;
-		this.clearTimeoutFn = deps.clearTimeoutFn ?? clearTimeout;
+		// Wrap the globals: in the renderer `window.setTimeout` must not be called
+		// with another `this` ("Illegal invocation").
+		this.setTimeoutFn = deps.setTimeoutFn ?? ((handler, ms) => setTimeout(handler, ms));
+		this.clearTimeoutFn = deps.clearTimeoutFn ?? ((id) => clearTimeout(id));
 		this.now = deps.now ?? Date.now;
 		this.speech = new SpeechQueue(deps.tts, {
 			onStart: () => {
@@ -356,6 +362,68 @@ export class VoiceController {
 	getPendingInteractions(): PendingInteraction[] {
 		const session = this.deps.orchestrator.getActiveSession(this.deps.conversationId);
 		return session ? [...session.pendingInteractions.values()] : [];
+	}
+
+	/**
+	 * Approve the oldest pending tool approval (or all of them). When no tool
+	 * approval is pending but a plan review is, approves the plan instead.
+	 * Returns how many items were settled.
+	 */
+	approvePending(opts: { all?: boolean } = {}): number {
+		return this.settlePending("approved", opts.all === true);
+	}
+
+	/** Reject the oldest pending tool approval (or all), or a pending plan review. */
+	rejectPending(opts: { all?: boolean } = {}): number {
+		return this.settlePending("rejected", opts.all === true);
+	}
+
+	/**
+	 * Answer the oldest pending question prompt. `values` are index-aligned with
+	 * the prompt's questions; missing answers are left blank. Returns false when
+	 * no question is pending.
+	 */
+	answerPending(values: Array<string | string[]>): boolean {
+		const pending = this.getPendingInteractions().find((p) => p.request.type === "ask");
+		if (!pending || pending.request.type !== "ask") return false;
+		const answers = pending.request.questions.map((question, index) => {
+			const value = values[index];
+			if (question.multiSelect) return Array.isArray(value) ? value : value ? [value] : [];
+			return Array.isArray(value) ? value.join(", ") : (value ?? "");
+		});
+		pending.resolve({ id: pending.request.id, values: answers });
+		this.deps.dismissPrompt?.(pending.messageId, "interaction");
+		return true;
+	}
+
+	/** One or two spoken sentences describing what voice mode is doing right now. */
+	describeState(): string {
+		const parts: string[] = [];
+		const approvals = this.getPendingApprovals();
+		const questions = this.getPendingInteractions();
+		if (approvals.length > 0) parts.push(`${approvals.length} approval${approvals.length === 1 ? "" : "s"} pending.`);
+		else if (questions.length > 0) parts.push("Waiting for your answer.");
+		else if (this.isTurnRunning) parts.push(`The assistant is working; ${this.toolCount} tool call${this.toolCount === 1 ? "" : "s"} so far.`);
+		else parts.push("Idle and listening.");
+		if (this.queuedUtterances.length > 0) parts.push(`${this.queuedUtterances.length} message${this.queuedUtterances.length === 1 ? "" : "s"} queued.`);
+		return parts.join(" ");
+	}
+
+	private settlePending(decision: "approved" | "rejected", all: boolean): number {
+		const approvals = this.getPendingApprovals();
+		if (approvals.length > 0) {
+			const targets = all ? approvals : approvals.slice(0, 1);
+			for (const pending of targets) {
+				pending.resolve(decision);
+				this.deps.dismissPrompt?.(pending.messageId, "approval", decision);
+			}
+			return targets.length;
+		}
+		const review = this.getPendingInteractions().find((p) => p.request.type === "plan-review");
+		if (review && review.request.type === "plan-review" && this.deps.resolvePlanReview) {
+			return this.deps.resolvePlanReview(review.request.conversationId, decision) ? 1 : 0;
+		}
+		return 0;
 	}
 
 	/** The running session for this conversation, if any. */

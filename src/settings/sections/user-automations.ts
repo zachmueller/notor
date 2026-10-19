@@ -49,6 +49,7 @@ const TRIGGER_GROUP_ORDER: TriggerGroup[] = [
 	{ key: "on_tool_result", label: "On tool result" },
 	{ key: "after_completion", label: "After completion" },
 	{ key: "on_conversation_start", label: "On conversation start" },
+	{ key: "on_voice_command", label: "On voice command" },
 ];
 
 /**

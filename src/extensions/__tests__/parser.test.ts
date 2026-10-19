@@ -483,6 +483,15 @@ console.log("saved");
 		}
 	});
 
+	it("accepts the on_voice_command and on_approval_required triggers", () => {
+		for (const trigger of ["on_voice_command", "on_approval_required"]) {
+			const fm = { "notor-type": "automation" as const, "notor-trigger": trigger };
+			const result = parseExtensionFile(validAutomationContent, fm, "file.md", parseYAML);
+			expect("trigger" in result).toBe(true);
+			if ("trigger" in result) expect(result.trigger).toBe(trigger);
+		}
+	});
+
 	it("returns error for missing notor-trigger", () => {
 		const fm = { "notor-type": "automation" as const };
 		const result = parseExtensionFile(validAutomationContent, fm, "file.md", parseYAML);

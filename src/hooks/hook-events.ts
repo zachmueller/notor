@@ -1176,3 +1176,79 @@ export async function dispatchOnApprovalRequired(
 	log.info("All on_approval_required hooks returned pass", { toolName: context.toolName });
 	return "pass";
 }
+
+// ---------------------------------------------------------------------------
+// on_voice_command dispatch (awaited, sequential, first handler wins)
+// ---------------------------------------------------------------------------
+
+/** Context for `on_voice_command` automations (see docs/voice.md). */
+export interface VoiceCommandContext {
+	conversationId: string;
+	timestamp: string;
+	/** Exactly what was recognized. */
+	rawTranscript: string;
+	/** The text after the trigger phrase when `hasTriggerPhrase`; otherwise the raw transcript. */
+	transcript: string;
+	/** True when the utterance started with the configured trigger phrase. */
+	hasTriggerPhrase: boolean;
+	isTurnRunning: boolean;
+	isSpeaking: boolean;
+	/** Dictated text waiting to be sent after the current turn. */
+	queuedText: string;
+	pendingApproval: { toolName: string; parameters: Record<string, unknown>; count: number } | null;
+	pendingInteraction:
+		| { questions: Array<{ question: string; suggestions?: string[] }> }
+		| { planReview: string }
+		| null;
+}
+
+export interface VoiceCommandDispatchResult {
+	handled: boolean;
+	/** Display name or path of the automation that consumed the utterance. */
+	handledBy?: string;
+}
+
+/** `{ handled: true }`, `true`, or the string "handled" all consume the utterance. */
+function isVoiceCommandHandled(result: unknown): boolean {
+	if (result === true) return true;
+	if (typeof result === "string") return result.trim().toLowerCase() === "handled";
+	return typeof result === "object" && result !== null && (result as { handled?: unknown }).handled === true;
+}
+
+/**
+ * Dispatch a recognized utterance to `on_voice_command` automations.
+ *
+ * Unlike the fire-and-forget lifecycle events, automations run sequentially in
+ * `notor-automation-order` and are awaited: the first one that reports the
+ * utterance as handled stops the chain, and the voice loop then does not send
+ * the utterance as a chat message. Errors are reported and skipped.
+ */
+export async function dispatchOnVoiceCommand(
+	context: VoiceCommandContext,
+	extensionAutomations?: LifecycleAutomationAccessors,
+): Promise<VoiceCommandDispatchResult> {
+	const automations = extensionAutomations?.getForTrigger("on_voice_command") ?? [];
+	if (automations.length === 0 || !extensionAutomations) return { handled: false };
+
+	const automationCtx: Record<string, unknown> = { hookEvent: "on_voice_command", ...context };
+	for (const automation of automations) {
+		const displayName = automation.displayName ?? automation.filePath;
+		try {
+			const result = await extensionAutomations.execute(automation, automationCtx);
+			if (isVoiceCommandHandled(result)) {
+				log.info("Voice command handled", { automation: displayName, hasTriggerPhrase: context.hasTriggerPhrase });
+				return { handled: true, handledBy: displayName };
+			}
+		} catch (e) {
+			const message = e instanceof Error ? e.message : String(e);
+			new Notice(`Voice command automation error in ${displayName}: ${message}`);
+			log.error("Voice command automation failed", {
+				automation: displayName,
+				trigger: "on_voice_command",
+				error: String(e),
+				stack: e instanceof Error ? e.stack : undefined,
+			});
+		}
+	}
+	return { handled: false };
+}

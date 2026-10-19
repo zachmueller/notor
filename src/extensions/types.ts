@@ -151,6 +151,7 @@ export interface UserToolDefinition {
  *
  * LLM lifecycle: `pre_send`, `on_tool_call`, `on_tool_result`, `after_completion`
  * Vault events: `on_note_open`, `on_note_create`, `on_save`, `on_manual_save`, `on_tag_change`, `on_schedule`, `on_daily_start`
+ * Voice mode: `on_voice_command` (every recognized utterance while voice mode is on; see docs/voice.md)
  */
 export type AutomationTrigger =
 	| "pre_send"
@@ -165,7 +166,8 @@ export type AutomationTrigger =
 	| "on_manual_save"
 	| "on_tag_change"
 	| "on_schedule"
-	| "on_daily_start";
+	| "on_daily_start"
+	| "on_voice_command";
 
 /** Parsed representation of a user-defined automation from a vault Markdown file. */
 export interface UserAutomationDefinition {

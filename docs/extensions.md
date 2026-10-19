@@ -163,7 +163,7 @@ return { success: true, result: content };
 | `notor-blocking` | no | If `true`, the automation is awaited before the first LLM turn proceeds. Only meaningful for `on_conversation_start`. |
 | `notor-blocking-emit-kind` | no | Block kind to emit as a loading placeholder while a blocking automation runs (e.g., `memory_recalled`). Requires `notor-blocking: true`. |
 | `notor-blocking-timeout` | no | Timeout in seconds for blocking execution. Default: `10`. |
-| `notor-feature-group` | no | Feature group name for group-level gating (e.g., `memory`). When the feature group's toggle is disabled, the automation does not run. |
+| `notor-feature-group` | no | Feature group name for group-level gating (e.g., `memory`, `voice`). When the feature group's toggle is disabled, the automation does not run. |
 
 **Trigger values:**
 
@@ -181,6 +181,7 @@ return { success: true, result: content };
 | `on_schedule` | Scheduled | A cron schedule fires (while Obsidian is running). |
 | `on_daily_start` | Scheduled | The first time you use Obsidian each day, after the day reset time ([details](hooks.md#daily-start)). Runs right away, with no provider check. |
 | `on_conversation_start` | LLM lifecycle | After the first user message in a new conversation, before the LLM call. **Non-blocking.** Fires once per conversation. Not available as a shell hook — automation-only. |
+| `on_voice_command` | Voice mode | Every utterance recognized while [voice mode](voice.md) is on, before it is sent as a message. **Awaited** — automations run in order and the first that returns `{ handled: true }` consumes the utterance. Automation-only. |
 
 ### Context object
 
@@ -211,11 +212,26 @@ Automation code receives a `context` object with event-specific data.
 | `context.tagsAdded` | `on_tag_change` | `string[]` | Tags added |
 | `context.tagsRemoved` | `on_tag_change` | `string[]` | Tags removed |
 
+**Voice mode fields (`on_voice_command`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `context.conversationId` | `string` | Conversation the voice loop is bound to |
+| `context.rawTranscript` | `string` | Exactly what was recognized |
+| `context.transcript` | `string` | Text after the trigger phrase when `hasTriggerPhrase`; otherwise the raw transcript |
+| `context.hasTriggerPhrase` | `boolean` | Whether the utterance started with the configured trigger phrase |
+| `context.isTurnRunning` | `boolean` | Whether the assistant is mid-turn |
+| `context.isSpeaking` | `boolean` | Whether Notor was speaking when the utterance ended |
+| `context.queuedText` | `string` | Dictation held for after the current turn |
+| `context.pendingApproval` | `{ toolName, parameters, count } \| null` | Oldest pending tool approval and how many are pending |
+| `context.pendingInteraction` | `{ questions } \| { planReview } \| null` | Pending follow-up questions or plan review |
+
 ### Return semantics
 
 All automations are fire-and-forget — they execute asynchronously without blocking the pipeline. There are two exceptions:
 
 - **`pre_send`** — inherently blocking. A returned string is injected into the conversation as additional context.
+- **`on_voice_command`** — awaited, sequential in `notor-automation-order`. Return `{ handled: true }` (or `true`) to consume the utterance so it is not sent to the conversation; any other return lets the next automation, then the chat path, have it. Use `utils.voice` to act.
 - **`on_conversation_start` with `notor-blocking: true`** — awaited before the first LLM turn. The automation can emit a chat block (via `notor-blocking-emit-kind`) that is visible to the LLM on its first response. If the automation exceeds `notor-blocking-timeout`, it is cancelled and the conversation proceeds without its result.
 
 ### Example
@@ -460,6 +476,7 @@ All extension code executes with these variables in scope:
 | `utils.abortSignal` | `AbortSignal` for the current tool call (tools only, not automations). |
 | `utils.onProgress(status)` | Emit a progress status string for long-running tools (tools only, set per-invocation). |
 | `utils.notify(message, opts?)` | Display a toast notification. Options: `duration` (ms), `onClick`, `onRightClick`. |
+| `utils.voice` | [Voice mode](voice.md) controls: `speak(text, { interrupt? })`, `stopSpeaking()`, `repeatLast()`, `stopListening()`, `cancelTurn()`, `approvePending({ all? })`, `rejectPending({ all? })`, `answerPending(values)`, `sendQueued()`, `clearQueued()`, `describeState()`, `getState()`. `null` unless voice mode is on for this conversation. |
 
 ### Bundled libraries
 
@@ -516,7 +533,7 @@ In-flight tool calls continue using the version compiled at dispatch time; reloa
 | **`<notor_tool_config>`** | User tools can be toggled and configured by name in persona, workflow, and rule YAML blocks. See [per-context tool configuration](vault-tools.md#per-context-tool-configuration). |
 | **Tool config inspector** | User tools appear alongside built-in and MCP tools. |
 | **Built-in override** | If a user tool's name matches a built-in, the user tool replaces it. Delete the file and reload to restore the built-in. |
-| **Feature groups** | Extensions with `notor-feature-group` in their frontmatter are enabled/disabled as a group by the corresponding feature toggle (e.g., `memory` group → `memory_enabled` toggle in Settings). |
+| **Feature groups** | Extensions with `notor-feature-group` in their frontmatter are enabled/disabled as a group by the corresponding feature toggle (e.g., `memory` group → `memory_enabled` toggle, `voice` group → **Enable voice mode** in Settings). |
 
 ---
 

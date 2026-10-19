@@ -5,6 +5,7 @@ import { TITLE_GENERATION } from "./title-generation";
 import { MEMORY_SEARCH } from "./memory-search";
 import { MEMORY_CAPTURE } from "./memory-capture";
 import { MEMORY_DREAM } from "./memory-dream";
+import { VOICE_COMMANDS } from "./voice-commands";
 
 /**
  * Built-in automation scaffolds keyed by internal name.
@@ -14,4 +15,5 @@ export const BUILTIN_AUTOMATION_SCAFFOLDS: ReadonlyMap<string, BuiltinAutomation
 	["memory-search", MEMORY_SEARCH],
 	["memory-capture", MEMORY_CAPTURE],
 	["memory-dream", MEMORY_DREAM],
+	["voice-commands", VOICE_COMMANDS],
 ]);
