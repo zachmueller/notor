@@ -38,12 +38,14 @@ Access the persona picker from the gear icon in the chat panel header. Selecting
 
 ## Built-in personas
 
-Notor ships with two built-in personas that appear in the persona picker with a "Built-in" badge. Unlike user-defined personas (which live as vault files), built-in personas are bundled with the plugin. You can open them from **Settings → Notor → Personas** and customize them by clicking **Open** — this creates an editable vault file from the default. Click **Reset to default** to restore the original.
+Notor ships with four built-in personas that appear in the persona picker with a "Built-in" badge. Unlike user-defined personas (which live as vault files), built-in personas are bundled with the plugin. You can open them from **Settings → Notor → Personas** and customize them by clicking **Open** — this creates an editable vault file from the default. Click **Reset to default** to restore the original.
 
 | Persona | Chip | Purpose |
 |---------|------|---------|
 | `notor-help` | ⚙️ | Notor configuration assistant. Reads and edits plugin settings via `read_notor_settings` / `edit_notor_settings` with your approval, and delegates documentation lookups to the `notor-help` sub-agent. Use this persona when you want conversational help configuring the plugin. |
 | `tool-creator` | 🔧 | Guides creation of custom tools and automations. Specialized for writing extension Markdown files with correct frontmatter, parameter schemas, and TypeScript logic. |
+| `circuit-creator` | 🔀 | Guides authoring of circuits: `definition.md`, conversation and code steps, evaluators, and composition. See [Circuits](circuits.md). |
+| `circuit-eval-reviewer` | 📊 | Read-only reviewer of circuit evaluation reports. Compares finished runs of a circuit by their scores (grouped by evaluator fingerprint), drills into rationales, and recommends which run came out best. See [Evaluating runs](circuits.md#evaluating-runs). |
 
 ## Per-persona auto-approve
 
@@ -71,4 +73,4 @@ Tools the block doesn't mention, and fields it leaves unset, fall back to **Sett
 
 ## Circuits
 
-Personas also drive **circuit** conversation steps: a step note's `notor-step-persona` selects the persona (system prompt, tool config, provider/model) for that step's LLM turn. The built-in `circuit-creator` persona (formerly `orchestration-creator`, a name that still resolves) interactively guides authoring a circuit. See [Circuits](circuits.md).
+Personas also drive **circuit** conversation steps: a step note's `notor-step-persona` selects the persona (system prompt, tool config, provider/model) for that step's LLM turn, and an evaluator note's `notor-eval-persona` selects the judge for a circuit evaluation. The built-in `circuit-creator` persona (formerly `orchestration-creator`, a name that still resolves) interactively guides authoring a circuit; `circuit-eval-reviewer` compares evaluated runs. See [Circuits](circuits.md).

@@ -1,6 +1,6 @@
 ---
 name: audit-personas-docs
-description: Audit the built-in personas (notor-help, tool-creator, circuit-creator) and the repo docs against the real code, find drift (renamed/removed tools, dead settings deep-links, stale OR missing utils/libs API entries, missing tools in tables, stale circuit definition/step frontmatter or CircuitHelper API, or missing legacy-alias coverage), report it as a findings table, then propose diffs and apply them ONLY after the user approves. Diffs the utils/libs API in BOTH directions — flagging real supported members (e.g. utils.webview) that are documented in neither the persona nor docs/extensions.md, since that gap makes tool-creator misinform users. Use when personas or docs feel out of date, after adding/renaming/removing a built-in tool, setting, settings-section, sub-agent, extension API, or circuit surface, before a release, or when asked to "update notor-help / tool-creator / circuit-creator" or "bring the docs up to date".
+description: Audit the built-in personas (notor-help, tool-creator, circuit-creator, circuit-eval-reviewer) and the repo docs against the real code, find drift (renamed/removed tools, dead settings deep-links, stale OR missing utils/libs API entries, missing tools in tables, stale circuit definition/step frontmatter or CircuitHelper API, or missing legacy-alias coverage), report it as a findings table, then propose diffs and apply them ONLY after the user approves. Diffs the utils/libs API in BOTH directions — flagging real supported members (e.g. utils.webview) that are documented in neither the persona nor docs/extensions.md, since that gap makes tool-creator misinform users. Use when personas or docs feel out of date, after adding/renaming/removing a built-in tool, setting, settings-section, sub-agent, extension API, or circuit surface, before a release, or when asked to "update notor-help / tool-creator / circuit-creator" or "bring the docs up to date".
 ---
 
 # Audit Built-in Personas & Repo Docs for Drift
@@ -107,6 +107,11 @@ against these — never against memory or a hand-copied list.
 | Legacy circuit aliases (old names that must keep working) | `LEGACY_TOOL_NAMES` (`src/tools/tool-aliases.ts`), `CIRCUIT_KEY_ALIASES` / discriminators (`src/circuits/schema-aliases.ts`), `TOPIC_ALIASES` (`src/circuits/types.ts`, mirrored inline in `emit-event.ts`), `SETTINGS_GROUP_ALIASES` (`src/settings/group-aliases.ts`), `BUILTIN_PERSONA_ALIASES` (`src/personas/builtin-personas.ts`), hook action aliases (`src/hooks/hook-action-type.ts`) | read source; the "Legacy names" table in `docs/circuits.md` and the `circuit-creator` vocabulary table must list every alias |
 | `CircuitHelper` code-step API | `CircuitHelper` interface (`src/circuits/circuit-helper.ts`) | read source |
 | Circuit definition/step frontmatter fields | `CircuitDefinitionParser` / `StepNoteParser` (`src/circuits/circuit-parser.ts`) + `Circuit` / `StepDefinition` (`src/circuits/types.ts`); contract: `specs/ZZ-misc/orchestration/contracts/vault-schema.md` | read source |
+| Circuit evaluator frontmatter (`notor-type: circuit-evaluator`, `notor-eval-*`) + definition keys `notor-evaluators` / `notor-eval-auto` / `notor-eval-schedule` / `notor-eval-max-cost-usd` | `EvaluatorNoteParser` + `parseEvalDimensions` / `parseEvalAuto` / `parseEvalMaxCostUsd` (`src/circuits/circuit-parser.ts`); `EvaluatorDefinition` / `EvalDimension` / `EvalAutoTrigger` (`src/circuits/types.ts`); discriminator `CIRCUIT_EVALUATOR_TYPES` (`src/circuits/schema-aliases.ts`) | read source |
+| `submit_score` tool + what a judge may call | `SUBMIT_SCORE` scaffold (`src/extensions/builtin-tool-scaffolds/submit-score.ts`); `JUDGE_DISABLED_TOOLS` / `judgeToolConfig` (`src/circuits/evaluation/judge-runner.ts`) | read source |
+| Code-evaluator arg names + `evaluation` helper | `CODE_EVALUATOR_ARG_NAMES` + `CodeEvaluationHelper` (`src/circuits/evaluation/code-evaluator-runner.ts`) | read source |
+| Evaluation input bundle (`input.*`) | `EvalInput` (`src/circuits/evaluation/types.ts`) | read source |
+| `evals.jsonl` entry types + report frontmatter keys | `EvalLogEntry` union (`src/circuits/evaluation/eval-log.ts`); `buildEvalReportMarkdown` / `scoreKey` / `overallKey` (`src/circuits/evaluation/eval-report.ts`) | read source |
 | Circuits settings group (`notor-settings://Circuits`; legacy `Orchestration` resolves via `SETTINGS_GROUP_ALIASES`) | `createSettingsGroup(containerEl, "Circuits", …)` in `src/settings/settings-tab.ts` | read source (already covered by the settings-group row) |
 
 If you add a new claim surface to a persona or doc, add a row here so the next audit
@@ -169,6 +174,18 @@ covers it.
   circuits the parser rejects). Its "Vocabulary and legacy names" table must match the alias
   sources in the map.
 
+- **`circuit-eval-reviewer` prose — diff against the evaluation sources.** Its list of report
+  frontmatter keys must match `buildEvalReportMarkdown` (`src/circuits/evaluation/eval-report.ts`)
+  and the `evals.jsonl` entry names must match `EvalLogEntry`; its `<notor_tool_config>` tools must
+  exist in `inventory.ts.tools`, every write tool it names must be `enabled: false`, and the report
+  folder (`{data root}/evals/`) must match `evalReportPath`. A stale key name is high severity (the
+  persona tells users to query frontmatter that is not there).
+- **`circuit-creator` evaluation section — diff against the same evaluation sources.** The inlined
+  evaluator-note frontmatter must match `EvaluatorNoteParser`, the code-evaluator arg signature must
+  match `CODE_EVALUATOR_ARG_NAMES`, the `evaluation` helper members must match
+  `CodeEvaluationHelper`, and the trigger / budget / storage claims must match `auto-trigger.ts`,
+  `scheduled.ts`, `evaluate-sessions.ts`, and `eval-log.ts`.
+
 ### Docs (in scope — see Scope section)
 
 - **`docs/vault-tools.md` tool table.** The table must list **exactly** the tools in
@@ -194,7 +211,10 @@ covers it.
   circuit tool scaffolds (`emit_event`, `run_circuit`, `circuit_task_*`), the
   `notor-settings://Circuits` deep-link, the composition fields, and the "Legacy names" table
   against the circuit and alias sources in the map (the same surfaces the `circuit-creator`
-  persona inlines — keep the two in sync).
+  persona inlines — keep the two in sync). Its "Evaluating runs" section is checked against the
+  evaluation rows in the map (evaluator frontmatter, `submit_score` + `JUDGE_DISABLED_TOOLS`,
+  `CODE_EVALUATOR_ARG_NAMES` + `CodeEvaluationHelper`, `EvalInput`, `evals.jsonl` entries, report keys),
+  and its "Reference circuits" bullets against the `evals` maps in `src/circuits/reference-circuits.ts`.
 - **`README.md` / `AGENTS.md` / `examples/`.** Check the README feature list and any tool
   counts ("N built-in tools") against reality; check `AGENTS.md` paths/commands resolve;
   spot-check `examples/` extension templates against the current extension format.

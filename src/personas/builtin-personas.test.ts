@@ -24,6 +24,7 @@ const EXPECTED_AUTO_APPROVE: Record<string, string[]> = {
 	"notor-help": ["read_notor_settings"],
 	"tool-creator": ["read_note", "search_vault", "list_vault"],
 	"circuit-creator": ["read_note", "search_vault", "list_vault"],
+	"circuit-eval-reviewer": ["read_note", "read_frontmatter", "search_vault", "list_vault", "read_file"],
 };
 
 describe("built-in persona tool configs", () => {
@@ -44,6 +45,15 @@ describe("built-in persona tool configs", () => {
 			expect(actual.sort()).toEqual([...autoApproved].sort());
 		});
 	}
+
+	it("circuit-eval-reviewer: read-only — every write tool it lists is disabled", () => {
+		const { configs } = parseBuiltin("circuit-eval-reviewer");
+		const tools = configs[0]!.tools;
+		for (const name of ["write_note", "replace_in_note", "update_frontmatter", "delete_note", "move_note", "write_file", "replace_in_file"]) {
+			expect(tools[name]?.enabled, name).toBe(false);
+		}
+		expect(tools.read_file?.allowed_paths).toEqual(["notor/"]);
+	});
 
 	it("circuit-creator: {notor_dir} in write_note allowed_paths resolves", () => {
 		const { configs } = parseBuiltin("circuit-creator");

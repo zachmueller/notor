@@ -18,7 +18,7 @@ Circuits were called **orchestrations** (or *orchestration flows*) in earlier No
 Toggle **Enable circuits** under [Settings → Notor → Circuits](notor-settings://Circuits). When enabled, Notor:
 
 - materializes the reference circuits (`code-assist`, `research`, `review`) under `{notor_dir}/circuits/` — preserving any edits you've made on subsequent enables, and skipping any you already have under the legacy `{notor_dir}/orchestrations/`;
-- registers the circuit tool scaffolds (`emit_event`, `run_circuit`, and the four `circuit_task_*` tools) and the **Notor: Run circuit** command;
+- registers the circuit tool scaffolds (`emit_event`, `submit_score`, `run_circuit`, and the four `circuit_task_*` tools) and the **Notor: Run circuit** / **Notor: Evaluate circuit sessions** commands;
 - enables the unified **run-tree view** and the `flow-run` entries in the activity indicator.
 
 Toggling it off removes the command and all scaffolds after the extension reload. (Authoring a circuit with the `circuit-creator` persona works regardless — only *running* a circuit needs the group on.)
@@ -63,6 +63,10 @@ Steps communicate **only by publishing events**. A step is triggered by a topic,
 | `notor-max-depth` | number \| null | no | `null` | Composition-depth cap (`null` = unlimited depth). |
 | `notor-max-cost-usd` | number | no | `5.00` | Aggregate tree-wide USD cost ceiling. |
 | `notor-open-notes-in-editor` | boolean | no | _(global setting)_ | Open each note this circuit's steps read/write in the editor. Omit to inherit the global **Settings → Circuits → "Open notes in editor"** toggle (default off); set `true`/`false` to force it for this circuit, independent of the General "Open notes on access" chat setting. |
+| `notor-evaluators` | wikilink[] | no | `[]` | Evaluator notes under `evals/` that score finished runs (see [Evaluating runs](#evaluating-runs)). A bad evaluator is dropped with a warning; the circuit still loads. |
+| `notor-eval-auto` | `none` \| `complete` \| `error` \| `both` | no | `none` | Automatically evaluate a finished **root** run with that status. |
+| `notor-eval-schedule` | string (cron) | no | `null` | Periodically evaluate finished runs the current evaluators have not scored yet. Its own row and toggle under **Settings → Automations**. |
+| `notor-eval-max-cost-usd` | number \| null | no | `null` | Per-pass USD ceiling for the evaluators. `null` = the circuit's `notor-max-cost-usd`. Separate from, and never counted against, the run's budget. |
 
 > **Every circuit is bounded by construction.** `notor-max-iterations`, `notor-max-runtime-minutes`, and `notor-max-cost-usd` are optional in frontmatter but **never absent at runtime** — the parser injects finite defaults (`100` / `60` / `5.00`, never `Infinity`). So even a hand-authored circuit that sets nothing auto-terminates.
 
@@ -164,12 +168,91 @@ Each run gets a session directory under `{notor_dir}/{data root}/sessions/{sessi
 - `session-log.jsonl` — the append-only, write-before-route turn + event log (the crash-recovery source of truth).
 - `scratchpad/` — the restriction-free shared working dir for cross-step state. Its path is auto-allowed for the session's steps. **Write overwrite-only** (write the complete current content, or a per-iteration filename) — recovery re-runs a step from fresh context, so an *append* would duplicate content.
 - `tasks/` — the runtime task registry (`circuit_task_ensure` / `_start` / `_close` / `_list`). `CIRCUIT_COMPLETE` is rejected and re-triggered while any task is `open`/`running`; `CIRCUIT_CANCELLED` bypasses this.
+- `evals.jsonl` — the append-only evaluation log, written only when the session is evaluated (see [Evaluating runs](#evaluating-runs)). The run's own `session-log.jsonl` ends with a `run.result` entry (status, terminal topic, closing text, structured return, cost) that evaluation reads.
 
 A persistent cross-session note, `{notor_dir}/{data root}/memories.md`, is seeded on first use; the prompt scaffold instructs every step to consult it before acting in unfamiliar territory and append fix-memories when blocked.
 
 ### Debugging failed runs
 
 The per-session `session.json` / `session-log.jsonl` are raw machine state — useful but not browsable. Enable **Write failed-run debug notes** ([Settings → Notor → Circuits](notor-settings://Circuits)) and any run that ends in `error` also writes a human-readable Markdown report to `{notor_dir}/{data root}/failures/{circuit-slug}-{session-id}.md`. The note distils data already captured — the objective, the failure reason (the terminal `CIRCUIT_ERROR` payload), the failing step + stack (from the `{step}.code_error` event), and a compact turn-by-turn timeline — plus pointers to the raw session files. Open it, or `@`-reference it in a Notor chat, to debug the run. The setting is **off by default** and read at finalize time (no extension reload needed); the note carries `notor-type: circuit-failure-report` so circuit discovery ignores it.
+
+## Evaluating runs
+
+A circuit can declare **evaluators**: rubrics and checks that score a **finished** run after the fact, the way tests attach to code. The two goals are spotting regressions when a model or the circuit changes, and justifying a cheaper model that still clears the bar. Evaluation is **decoupled from the run** — it reads the finished session from disk — so it works the same seconds or days later, on one session or a batch. v1 captures and aggregates scores; it does not drive authoring.
+
+### Declaring evaluators
+
+List evaluator notes in the definition's `notor-evaluators`; they live under `{circuit-name}/evals/`:
+
+```
+{notor_dir}/circuits/{circuit-name}/
+  definition.md        # notor-evaluators: ["[[report-quality]]", "[[shape]]"]
+  evals/
+    report-quality.md  # an LLM judge (notor-eval-mode: conversation)
+    _rubric.md         # a plain rubric note the judge reads
+    shape.md           # a code evaluator (notor-eval-mode: code)
+```
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `notor-type` | `circuit-evaluator` | yes | — | Discriminator (no legacy spelling). |
+| `notor-eval-name` | string | yes | — | Display name; slugified into the report's score keys. |
+| `notor-eval-description` | string | no | `""` | Short description. |
+| `notor-eval-mode` | `conversation` \| `code` | no | `conversation` | An LLM judge, or a deterministic TypeScript snippet. |
+| `notor-eval-persona` | string \| null | no | `null` | **Conversation:** the judge persona (system prompt, tools, model). |
+| `notor-eval-subagent` | string \| null | no | `null` | **Conversation:** a sub-agent profile as the judge instead. Set at most one of persona / subagent; neither = the active provider and model. |
+| `notor-eval-model` | string \| null | no | `null` | **Conversation:** raw model id override (like `notor-step-model`). |
+| `notor-eval-rubric` | wikilink \| null | no | `null` | A rubric note under `evals/`; its body is shown to the judge. |
+| `notor-eval-dimensions` | list | yes | — | The scored dimensions. A bare name means numeric 1–5; a map `{ name, type: numeric \| boolean, min?, max?, description? }` sets the type and range. |
+| `notor-eval-timeout-seconds` | number \| null | no | `null` (→ 300) | **Code evaluators only.** |
+| `notor-eval-include-note-contents` | boolean | no | `true` | **Conversation:** show the judge the current contents of the notes the run edited. |
+
+An invalid evaluator (unresolvable link, unknown mode, both persona and subagent set, no dimensions, a code evaluator without a fence, an unresolvable rubric) is dropped with a warning; the circuit itself still loads and runs.
+
+### What an evaluator sees
+
+The circuit objective, the run's terminal status and topic, its closing text and **structured return**, and the vault paths of the notes the run's steps edited (reconstructed from the persisted step tool calls — notes written by a code step directly through `utils`, or deleted since, are not listed). Step transcripts are never included. An LLM judge also receives the edited notes' **current** contents, size-capped and flagged when a note changed after the run finished. Sessions recorded before `run.result` existed still evaluate, with the closing text taken from the terminal event and no structured return.
+
+### LLM judges and `submit_score`
+
+A `conversation` evaluator's body is the judging instructions (it may use `<include_note>`); the rubric note is appended, then the dimensions, objective, outcome, and edited notes. The judge runs in **Plan mode with read-only tools**: `emit_event`, the task tools, `run_circuit`, `invoke_workflow`, `use_subagent`, `ask_user`, and `capture_memory` are disabled regardless of the persona's config, and every allowed read is approved automatically, so a manual or scheduled pass never blocks on an approval dialog. The judge reports by calling **`submit_score`** once, with every declared dimension in `scores` and a `rationale` (optionally an `overall`). The tool validates the submission against the dimensions and tells the model what to fix. A judge that ends without calling it is re-run once with a reminder, then recorded as failed with reason `no_score`.
+
+### Code evaluators
+
+A `code` evaluator's first `ts`/`typescript`/`js`/`javascript` fence runs with the arg signature
+
+```
+[app, obsidian, utils, libs, input, evaluation]
+```
+
+- `input` — the bundle above: `input.objective`, `input.outcome` (`status`, `terminalTopic`, `text`, `structured`, `costUsd`, `iterations`, `source`), `input.notesEdited`, `input.session` (`sessionId`, `startedAt`, `origin`, `sessionDir`), `input.evaluator.dimensions`.
+- `evaluation` — `{ dimensions, callTool(name, params), callMcpTool(server, tool, params), session: { id, dir, scratchpad: { read, list, exists }, readLog() }, log }`. Tool calls dispatch in Plan mode (read tools only); the scratchpad is read-only; `readLog()` returns the session's parsed `session-log.jsonl`.
+- It must `return { scores: { dimension: value, … }, rationale, overall? }`. Scores are validated against the dimensions; a bad return is recorded as `invalid_score`, a throw as `error`, a timeout as `timeout`.
+
+A code evaluator is deterministic, costs nothing, and is not budget-gated. Use one for every check that can be computed: tests pass, a file exists, a word count is in range, the structured return has the expected shape.
+
+### Triggers
+
+- **Manual (the main path).** Command palette → **Notor: Evaluate circuit sessions**. Pick a circuit that declares evaluators, then multi-select its finished root sessions. Sessions the current evaluator set has already scored are marked **evaluated** (re-scoring records a new pass); sessions scored by an older evaluator set are marked **older evaluators**. The footer shows how many LLM judge runs the pass will start and its cost ceiling. A progress Notice follows the pass; the summary Notice names the report folder, and a single report opens automatically.
+- **Automatic (opt-in).** `notor-eval-auto: complete | error | both` evaluates a finished **root** run with that status right after it finishes. Children of `run_circuit` and cancelled runs are never auto-evaluated. The pass runs in the background and never changes the run's status.
+- **Scheduled (opt-in).** `notor-eval-schedule` (5-field cron) periodically evaluates finished root sessions the current evaluator set has not scored yet, newest first, at most 20 per tick. It appears under **Settings → Automations → Scheduled** as its own "circuit eval" row, with a status dot and a toggle independent of the circuit's run schedule.
+
+Editing an evaluator or its rubric changes the evaluator-set **fingerprint**, so earlier passes show as stale and the next manual or scheduled evaluation scores every session again as a new, comparable pass.
+
+### Budget
+
+Each pass gets a **fresh** cost ceiling: `notor-eval-max-cost-usd`, or the circuit's `notor-max-cost-usd` when unset. LLM judges draw it down; once it is spent, the remaining judges in the pass are recorded as failed with reason `budget`. Evaluation spend never touches the run's own budget record or status.
+
+### Where results land
+
+- **`{data root}/sessions/{session-id}/evals.jsonl`** — append-only, beside the run's log, which stays untouched: `eval.pass_start` (circuit, trigger, evaluators, fingerprint, ceiling), one `eval.scored` (scores, rationale, overall, judge model, cost) or `eval.failed` (reason, detail) per evaluator, then `eval.pass_complete`. Every entry carries the `pass_id`.
+- **`{data root}/evals/{circuit-slug}-{session-id}-{pass-id}.md`** — one report note per evaluated session per pass, written when **Write evaluation reports** ([Settings → Notor → Circuits](notor-settings://Circuits), on by default) is enabled. Its **flat frontmatter** carries `notor-type: circuit-eval-report`, the circuit, session, pass, trigger, and fingerprint, the run's status, origin, start time, iterations, and cost, the judge models and evaluation cost, the evaluators that failed, and one `notor-score-{evaluator-slug}-{dimension-slug}` key per score (plus `notor-overall-{evaluator-slug}` when given) — so Dataview or Bases can compare runs with no extra tooling. The body repeats the scores as a table and adds the objective, run outcome, rationales, failures, and raw-data pointers. Circuit discovery ignores these notes.
+
+### Reviewing results with Notor
+
+The built-in **`circuit-eval-reviewer`** persona reads the report notes for a circuit, groups them by fingerprint so only comparable passes are compared, ranks sessions per dimension, drills into rationales and outcomes, and recommends which run came out best and which rubric or circuit edits would help. It is read-only.
+
+The reference circuits ship working examples: `research` has an LLM judge with a rubric (`evals/report-quality.md`, `evals/_rubric.md`); `code-assist` has a code evaluator over its structured return (`evals/structured-summary.md`). An install that enabled circuits before evaluators existed gets the `evals/` notes backfilled on the next enable; add `notor-evaluators` to the edited `definition.md` yourself.
 
 ## Running a circuit
 
@@ -233,8 +316,8 @@ The built-in **`circuit-creator`** persona (Settings → Notor → Personas) int
 
 Enabling the feature group materializes three first-party reference circuits under `{notor_dir}/circuits/` (your edits are preserved on re-enable):
 
-- **`code-assist`** — a TDD build loop (planner → builder → a code-step test verifier → critic → finalizer) that returns a structured summary. Invocable.
-- **`research`** — a multi-phase research loop ending in a code step that returns a **structured** report. Invocable.
+- **`code-assist`** — a TDD build loop (planner → builder → a code-step test verifier → critic → finalizer) that returns a structured summary. Invocable. Ships a **code evaluator** that checks the structured return.
+- **`research`** — a multi-phase research loop ending in a code step that returns a **structured** report. Invocable. Ships an **LLM judge** with a rubric that scores the report.
 - **`review`** — a composition demo: a code step invokes `code-assist` via `run_circuit`, then a report step composes the result.
 
 ## See also
@@ -265,6 +348,7 @@ Everything below keeps working indefinitely, with no warnings. Write new circuit
 | Hook action `run_circuit` with `circuit` | `run_orchestration` with `orchestration_flow` | Migrated on load; legacy values are still read. |
 | Persona `circuit-creator` | `orchestration-creator` | |
 | Task notes `notor-type: circuit-task`, failure reports `notor-type: circuit-failure-report` | `orchestration-task`, `orchestration-failure-report` | Written by Notor, never read back. Notes created before the rename keep the old value; update any Dataview or Bases queries to match both. |
+| Evaluator notes `notor-type: circuit-evaluator`, evaluation reports `notor-type: circuit-eval-report`, keys `notor-evaluators` / `notor-eval-*`, tool `submit_score`, setting `circuits_write_eval_reports` | — | Evaluation is newer than the rename and has no legacy spelling. |
 | Settings link `notor-settings://Circuits` | `notor-settings://Orchestration` | |
 
-The command IDs (`notor:run-orchestration`, `notor:stop-orchestration`) are unchanged, so existing hotkeys keep working; the commands are now named **Run circuit** and **Stop circuit**.
+The command IDs (`notor:run-orchestration`, `notor:stop-orchestration`) are unchanged, so existing hotkeys keep working; the commands are now named **Run circuit** and **Stop circuit**. The newer **Evaluate circuit sessions** command has a circuit-native id, `notor:evaluate-circuit-sessions`.

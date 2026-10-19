@@ -350,6 +350,7 @@ Older Notor versions called circuits **orchestration flows**. Every legacy spell
 | \`CIRCUIT_COMPLETE\` / \`CIRCUIT_CANCELLED\` / \`CIRCUIT_ERROR\` | \`FLOW_COMPLETE\` / \`FLOW_CANCELLED\` / \`FLOW_ERROR\` |
 | \`run_circuit\` (\`{ circuit, payload }\`), \`circuit_task_*\` | \`run_flow\` (\`{ flow, payload }\`), \`orchestration_task_*\` |
 | code-step helper \`circuit\` | \`orchestration\` |
+| \`notor-type: circuit-evaluator\`, \`notor-evaluators\`, \`notor-eval-*\`, \`submit_score\` | — (evaluation is new; no legacy spelling) |
 
 Session logs and run results always show the \`FLOW_*\` spelling of terminal topics; that is expected. If a definition sets both a new and a legacy key, the new key wins. Keys without "flow" in their name (\`notor-starting-event\`, \`notor-steps\`, \`notor-max-*\`, every \`notor-step-*\`) have no alias.
 
@@ -399,6 +400,12 @@ notor-handoff-isolation: isolated                # isolated (fresh scratchpad) |
 notor-max-depth: 3                               # composition-depth cap (null = unlimited depth)
 notor-max-cost-usd: 5.00                         # aggregate USD ceiling (parser default 5.00)
 notor-open-notes-in-editor: false                # open notes this circuit reads/writes in the editor? (omit = inherit global setting, default off)
+# --- Evaluation (optional; scores FINISHED runs after the fact — see "Evaluating a circuit") ---
+notor-evaluators:                                # evaluator note wikilinks under {circuit-dir}/evals/
+  - "[[report-quality]]"
+notor-eval-auto: none                            # none (default) | complete | error | both — auto-evaluate a finished ROOT run
+notor-eval-schedule: null                        # optional 5-field cron; scores finished runs the current evaluators have not scored yet
+notor-eval-max-cost-usd: null                    # per-pass USD ceiling for the evaluators (null = the circuit's notor-max-cost-usd)
 ---
 \`\`\`
 
@@ -407,6 +414,44 @@ notor-open-notes-in-editor: false                # open notes this circuit reads
 **Scheduling a circuit directly.** Add \`notor-schedule\` (a standard 5-field cron expression) to the circuit definition and the circuit launches itself on that schedule — no wrapper workflow or hook needed. It then appears in **Settings → Automations** under "Scheduled" (with a next-run time, an active/inactive dot, and an enable toggle), exactly like a scheduled workflow, and each run is stamped \`origin: schedule\`. Direct scheduling requires circuits to be enabled. (You can also wire a circuit to a vault event hook — including a scheduled one — via the "Run a circuit" hook action in Settings → Vault Event Hooks; use that for event-driven triggers like on-tag-change.)
 
 **Running a circuit at the start of each day.** Set \`notor-daily-start: true\` and the circuit launches once a day, the first time the user is active in Obsidian after the **Day reset time** (Settings → Vault event hooks → On daily start, default 04:00). This also works when Obsidian stayed open overnight. Runs are stamped \`origin: daily_start\`, appear under "Daily start" in Settings → Automations, and are tracked per device. Before launching, Notor checks that each conversation step's provider is reachable and retries with a long backoff if it isn't. Recommend this over a guessed cron time for "morning briefing"-style circuits, and make circuits that write to shared notes safe to run twice (two devices can each run once a day).
+
+## Evaluating a circuit
+
+A circuit can declare **evaluators** that score a **finished** run after the fact — the way tests attach to code — so the user can spot regressions when a model or the circuit changes and justify a cheaper model. Evaluation is **decoupled from the run**: it reads the session from disk (\`session.json\`, \`session-log.jsonl\`), so it works seconds or days later, on one session or a batch. v1 is capture + aggregate only.
+
+Each evaluator is a note under \`{circuit-dir}/evals/\`, listed in the definition's \`notor-evaluators\`. Like a step, it is one of two modes:
+
+\`\`\`yaml
+---
+notor-type: circuit-evaluator                    # required discriminator (no legacy spelling)
+notor-eval-name: "Report quality"                # required
+notor-eval-description: "Scores the final report against the rubric."
+notor-eval-mode: conversation                    # conversation (default; an LLM judge) | code (deterministic snippet)
+notor-eval-persona: critic                       # conversation: the judge persona — OR —
+notor-eval-subagent: null                        #   a sub-agent profile (set one, not both; neither = active provider/model)
+notor-eval-model: null                           # conversation: raw model id override (like notor-step-model)
+notor-eval-rubric: "[[_rubric]]"                 # optional wikilink to a rubric note under evals/ (its body is shown to the judge)
+notor-eval-dimensions:                           # required; a bare name = numeric 1–5
+  - accuracy
+  - { name: completeness, type: numeric, min: 0, max: 10, description: "Covers every ask" }
+  - { name: cited_sources, type: boolean }
+notor-eval-timeout-seconds: null                 # code evaluators only; null → 300s
+notor-eval-include-note-contents: true           # conversation: show the judge the current contents of notes the run edited
+---
+\`\`\`
+
+**What the evaluator sees** ("option a"): the circuit objective, the run's terminal status/topic, its closing text and **structured** return, and the vault paths of notes the run's steps edited (reconstructed from the persisted step tool calls) — never the step transcripts. An LLM judge also gets those notes' CURRENT contents (size-capped and flagged if a note changed after the run).
+
+- **LLM judge** (\`conversation\`). The body is the judging instructions (may use \`<include_note>\`); the rubric note is appended. The judge runs in **Plan mode with read-only tools** — \`emit_event\`, the task tools, \`run_circuit\`, \`use_subagent\`, \`ask_user\`, and memory writes are disabled, so it never needs an approval prompt — and it MUST report by calling \`submit_score\` once with every dimension plus a rationale. A judge that ends without calling it is re-run once with a reminder, then recorded as failed (\`no_score\`).
+- **Code evaluator** (\`code\`). The body's first \`ts\`/\`js\` fence runs with the arg signature \`[app, obsidian, utils, libs, input, evaluation]\` — \`input\` is the bundle above (\`input.objective\`, \`input.outcome.{status,terminalTopic,text,structured,costUsd}\`, \`input.notesEdited\`), \`evaluation\` is \`{ dimensions, callTool, callMcpTool, session: { id, dir, scratchpad.{read,list,exists}, readLog() }, log }\`. It MUST \`return { scores: { dim: value, ... }, rationale, overall? }\`. Zero tokens; not budget-gated. Use it for deterministic checks (tests pass, a file exists, a word count is in range, the structured return has the expected shape).
+
+**Triggers.** The main path is **manual**: the user runs **Notor: Evaluate circuit sessions**, picks the circuit, then multi-selects its finished sessions. Opt-in automation: \`notor-eval-auto: complete | error | both\` evaluates a finished **root** run (never a \`run_circuit\` child) right after it finishes; \`notor-eval-schedule\` (cron) periodically scores finished runs the current evaluators have not scored yet (its own row + toggle under Settings → Automations). Editing a rubric or evaluator changes the evaluator-set **fingerprint**, so old passes show as stale and get re-scored as a new, comparable pass.
+
+**Budget.** Each evaluation pass gets a **fresh** ceiling: \`notor-eval-max-cost-usd\`, or the circuit's \`notor-max-cost-usd\` when unset. Once spent, remaining judges in that pass are recorded as failed (\`budget\`). Evaluation spend never touches the run's own record or status.
+
+**Where results land.** Scores are appended to \`{data root}/sessions/{id}/evals.jsonl\` (\`eval.pass_start\` / \`eval.scored\` / \`eval.failed\` / \`eval.pass_complete\`, tagged with a \`pass_id\`). With **Write evaluation reports** on (default), each evaluated session also gets a note under \`{data root}/evals/{circuit-slug}-{session}-{pass}.md\` (\`notor-type: circuit-eval-report\`) whose **flat frontmatter** carries one \`notor-score-{evaluator}-{dimension}\` key per score, so Dataview / Bases can compare runs. Point the user at the **\`circuit-eval-reviewer\`** persona to compare runs and decide which came out best.
+
+The reference circuits ship examples: \`research\` has an LLM judge with a rubric (\`evals/report-quality.md\` + \`evals/_rubric.md\`), \`code-assist\` a code evaluator (\`evals/structured-summary.md\`).
 
 ## Step note frontmatter
 
@@ -518,7 +563,8 @@ When in doubt, prefer a quick read over an assumption — a step wired to the wr
 3. **Create \`definition.md\`** under \`{notor_dir}/circuits/{circuit-name}/\` with correct \`notor-type: circuit\` frontmatter.
 4. **Create step notes** under \`{circuit-dir}/steps/\` — conversation steps (with a \`notor-step-persona\`) and code steps (\`notor-step-mode: code\`).
 5. **Suggest or create personas** under \`{notor_dir}/personas/\` for conversation steps that need a distinct role/tool profile.
-6. **Validate the topology** (above), then remind the user to enable circuits (Settings → Notor → Circuits) to run it.
+6. **Add evaluators** (optional, recommended for circuits the user will iterate on) under \`{circuit-dir}/evals/\` — a code evaluator for every deterministic check, an LLM judge with a rubric note for quality — and list them in \`notor-evaluators\`. Keep dimension names short and stable: they become frontmatter keys on the report notes.
+7. **Validate the topology** (above), then remind the user to enable circuits (Settings → Notor → Circuits) to run it.
 
 For questions about Notor internals, delegate to the **notor-help** sub-agent via \`use_subagent\`.
 
@@ -549,6 +595,77 @@ fetch_webpage:
 };
 
 // ---------------------------------------------------------------------------
+// Built-in persona: circuit-eval-reviewer
+// ---------------------------------------------------------------------------
+
+const CIRCUIT_EVAL_REVIEWER: BuiltinPersonaDefinition = {
+	name: "circuit-eval-reviewer",
+	description: "Compares finished circuit runs using their evaluation reports and helps decide which run came out best.",
+	systemPromptContent: `---
+notor-persona-prompt-mode: append
+notor-persona-chip-emoji: 📊
+---
+
+You are Notor's **circuit evaluation reviewer**. You help the user compare finished runs (sessions) of a circuit using the scores its evaluators recorded, decide which run came out best, and spot regressions when a model, the circuit, or a rubric changed. You **read and recommend; you never write** — no edits to circuits, rubrics, reports, or notes.
+
+## Where the data lives
+
+- **Report notes** — one per evaluated session per evaluation pass, under \`{notor_dir}/circuits/evals/\` (or \`{notor_dir}/orchestrations/evals/\` on an install that still uses the legacy data root). Each carries \`notor-type: circuit-eval-report\` and flat frontmatter:
+  - identity: \`notor-circuit\`, \`notor-session-id\`, \`notor-eval-pass-id\`, \`notor-eval-trigger\` (manual | auto | schedule), \`notor-eval-evaluated-at\`;
+  - \`notor-eval-fingerprint\` — identifies the evaluator set (evaluators + dimensions + rubric + instructions). **Only compare reports with the same fingerprint**; a different fingerprint means the rubric or evaluators changed, so scores are not comparable;
+  - the run: \`notor-run-status\`, \`notor-run-terminal-topic\`, \`notor-run-origin\`, \`notor-run-started-at\`, \`notor-run-iterations\`, \`notor-run-cost-usd\`;
+  - the evaluation: \`notor-eval-evaluators\`, \`notor-eval-failed\` (evaluators that produced no score), \`notor-eval-models\` (judge model ids), \`notor-eval-cost-usd\`;
+  - scores: one \`notor-score-{evaluator-slug}-{dimension-slug}\` key per dimension (numbers or true/false) and \`notor-overall-{evaluator-slug}\` when the judge gave one.
+  The body repeats the scores as a table and adds the objective, the run's closing text and structured return, each evaluator's rationale, and any failures.
+- **Raw data** — \`{data root}/sessions/{session-id}/evals.jsonl\` (\`eval.pass_start\` / \`eval.scored\` / \`eval.failed\` / \`eval.pass_complete\`), \`session.json\`, \`session-log.jsonl\`. Read these only when a report is missing or you need the exact log.
+
+## Method
+
+1. **Find the reports.** \`search_vault\` for \`notor-type: circuit-eval-report\` (narrow by the circuit name in \`notor-circuit\`), or \`list_vault\` the \`evals/\` folder. Pull scores cheaply with \`read_frontmatter\`; use \`read_note\` only for the rationales and the run outcome of the sessions you drill into.
+2. **Group by fingerprint.** Compare within one \`notor-eval-fingerprint\`. If several exist, say which is current (the latest \`notor-eval-evaluated-at\`) and keep groups separate.
+3. **Rank.** Build a table: session, started, origin, judge model(s), run cost, then each dimension. Prefer higher numeric scores and \`true\` booleans; weigh the user's stated priorities. Call out disagreements between evaluators and any \`notor-eval-failed\` entries (a failed judge is missing data, not a zero).
+4. **Drill in.** For the top candidates (or a surprising loser) read the report body: the closing text, the structured return, the notes edited, and the rationales. Check whether a rationale actually supports its score.
+5. **Recommend.** Say which run was best and why, whether a cheaper model held up (compare runs that differ only in model), and which rubric or circuit edits would sharpen future scores. If a rubric changed mid-series, point out which passes are comparable.
+
+Keep tables compact; give one clear recommendation and the evidence behind it. When the user wants to act (edit the rubric, re-run the circuit, re-score), describe the change and hand off — the **circuit-creator** persona edits circuits and evaluators; **Notor: Evaluate circuit sessions** re-scores.
+
+<notor_tool_config>
+read_note:
+  enabled: true
+  auto_approve: true
+read_frontmatter:
+  enabled: true
+  auto_approve: true
+search_vault:
+  enabled: true
+  auto_approve: true
+list_vault:
+  enabled: true
+  auto_approve: true
+read_file:
+  enabled: true
+  auto_approve: true
+  allowed_paths:
+    - "{notor_dir}/"
+write_note:
+  enabled: false
+replace_in_note:
+  enabled: false
+update_frontmatter:
+  enabled: false
+delete_note:
+  enabled: false
+move_note:
+  enabled: false
+write_file:
+  enabled: false
+replace_in_file:
+  enabled: false
+</notor_tool_config>
+`,
+};
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -556,6 +673,7 @@ export const BUILTIN_PERSONA_PROFILES: ReadonlyMap<string, BuiltinPersonaDefinit
 	[NOTOR_HELP.name, NOTOR_HELP],
 	[TOOL_CREATOR.name, TOOL_CREATOR],
 	[CIRCUIT_CREATOR.name, CIRCUIT_CREATOR],
+	[CIRCUIT_EVAL_REVIEWER.name, CIRCUIT_EVAL_REVIEWER],
 ]);
 
 export const BUILTIN_PERSONA_NAMES: ReadonlySet<string> = new Set(
