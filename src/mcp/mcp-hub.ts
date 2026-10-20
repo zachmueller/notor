@@ -22,6 +22,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { FetchLike, Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import type { NotorSettings } from "../settings";
 import type { ToolResult } from "../types";
@@ -35,6 +36,9 @@ import type {
 	McpSecretResolver,
 } from "./mcp-types";
 import type { TaskLaneQueue } from "../queue/task-lane-queue";
+import { McpConfigError, runHeadersHelper, type HeadersHelperContext } from "./headers-helper";
+import { nodeFetch } from "./node-fetch";
+import { createAuthRefreshFetch } from "./auth-refresh-fetch";
 import { logger } from "../utils/logger";
 import { sanitizeInputSchemaForBedrock } from "../utils/json-schema-sanitizer";
 import type { SleepWakeDetector } from "../utils/sleep-wake-detector";
@@ -248,7 +252,7 @@ export class McpHub {
 		try {
 			// 1. Create transport
 			log.debug("Creating transport", { serverName, type: config.type });
-			const transport = await this.createTransport(config);
+			const transport = await this.createTransport(serverName, config);
 			log.debug("Transport created", { serverName, type: config.type });
 
 			// 2. Create MCP Client
@@ -322,8 +326,9 @@ export class McpHub {
 
 			this.setStatus(connection, "error", fullError);
 
-			// Schedule auto-reconnect for HTTP transports
-			if (config.type === "sse" || config.type === "streamableHttp") {
+			// Schedule auto-reconnect for HTTP transports — unless the failure is
+			// a configuration problem that retrying cannot fix.
+			if ((config.type === "sse" || config.type === "streamableHttp") && !(e instanceof McpConfigError)) {
 				this.scheduleReconnect(serverName);
 			}
 		}
@@ -719,14 +724,14 @@ export class McpHub {
 	/**
 	 * Create the appropriate transport based on server config type.
 	 */
-	private async createTransport(config: McpServerConfig): Promise<import("@modelcontextprotocol/sdk/shared/transport.js").Transport> {
+	private async createTransport(serverName: string, config: McpServerConfig): Promise<Transport> {
 		switch (config.type) {
 			case "stdio":
 				return this.createStdioTransport(config);
 			case "sse":
-				return this.createStreamableHttpTransport(config);
+				return this.createStreamableHttpTransport(serverName, config);
 			case "streamableHttp":
-				return this.createStreamableHttpTransport(config);
+				return this.createStreamableHttpTransport(serverName, config);
 			default:
 				throw new Error(`Unsupported transport type: ${config.type as string}`);
 		}
@@ -797,26 +802,76 @@ export class McpHub {
 	/**
 	 * Create a Streamable HTTP transport.
 	 *
-	 * Includes Cline's 404→405 compatibility shim for servers that
-	 * incorrectly return 404 instead of 405 when they don't support
-	 * SSE streaming on the GET endpoint.
+	 * With a `headersHelper`, the helper runs here — so on every connect and
+	 * reconnect — and its headers are layered over the fixed ones by an
+	 * auth-refreshing fetch that re-runs it when the session expires. Servers
+	 * that need a `Cookie` header use the Node-side fetch, because the
+	 * renderer's fetch silently drops it.
+	 *
+	 * @see specs/04d-mcp-headers-helper/spec.md
 	 */
-	private async createStreamableHttpTransport(config: McpServerConfig): Promise<StreamableHTTPClientTransport> {
+	private async createStreamableHttpTransport(serverName: string, config: McpServerConfig): Promise<StreamableHTTPClientTransport> {
 		if (!config.url) {
 			throw new Error("Streamable HTTP transport requires a URL.");
 		}
 
 		const headers = this.resolveHeaders(config);
+		const helperCommand = config.headersHelper?.trim();
+		const helperCtx: HeadersHelperContext = { serverName, url: config.url, cwd: this.vaultRootPath };
+		const helperHeaders = helperCommand ? await runHeadersHelper(helperCommand, helperCtx) : {};
+		const useNodeFetch = Platform.isDesktopApp &&
+			(!!helperCommand || Object.keys(headers).some((k) => k.toLowerCase() === "cookie"));
 
 		log.debug("Creating streamable HTTP transport", {
-			serverName: config.name,
+			serverName,
 			url: config.url,
 			headerKeys: Object.keys(headers),
+			helperHeaderKeys: Object.keys(helperHeaders),
+			nodeFetch: useNodeFetch,
 		});
 
-		return new StreamableHTTPClientTransport(new URL(config.url), {
+		// Filled in once the transport exists, so a late auth failure from a
+		// replaced transport cannot tear down its successor.
+		let transport: StreamableHTTPClientTransport | null = null;
+		let fetch: FetchLike | undefined = useNodeFetch ? nodeFetch : undefined;
+		if (helperCommand) {
+			fetch = createAuthRefreshFetch({
+				serverName,
+				serverUrl: config.url,
+				baseFetch: nodeFetch,
+				initialHeaders: helperHeaders,
+				runHelper: () => runHeadersHelper(helperCommand, helperCtx),
+				onAuthFailure: (message) => this.handleAuthFailure(serverName, transport, message),
+			});
+		}
+
+		transport = new StreamableHTTPClientTransport(new URL(config.url), {
 			requestInit: { headers },
+			...(fetch ? { fetch } : {}),
 		});
+		return transport;
+	}
+
+	/**
+	 * A connected server kept failing auth after its headers were refreshed:
+	 * mark it errored and hand it to the HTTP reconnect/backoff path, which
+	 * re-runs the helper on every attempt.
+	 *
+	 * During the handshake the failure already surfaces through
+	 * connectServer()'s catch, so only connected servers are handled here.
+	 */
+	private handleAuthFailure(serverName: string, transport: Transport | null, message: string): void {
+		// Deferred so the in-flight request can finish failing first.
+		setTimeout(() => {
+			const connection = this.connections.get(serverName);
+			if (!connection || connection.status !== "connected" || connection.transport !== transport) return;
+
+			log.warn("MCP server authentication failed after refreshing headers — reconnecting", { serverName });
+			// Set the status before closing so the transport's onclose handler
+			// doesn't also schedule a reconnect.
+			this.setStatus(connection, "error", message);
+			void this.cleanupConnection(connection).then(() => this.scheduleReconnect(serverName));
+		}, 0);
 	}
 
 	// -----------------------------------------------------------------------
