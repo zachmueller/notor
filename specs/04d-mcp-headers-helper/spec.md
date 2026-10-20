@@ -66,10 +66,8 @@ Login-proxy sessions are almost always cookies, and an expired session is almost
 
 ### FR-182: Header precedence
 
-- Request headers are built in this order, each layer overriding the one before:
-  1. the SDK's per-request headers (`content-type`, `accept`, `mcp-session-id`, …);
-  2. the fixed `headers` (FR-54, with sensitive values resolved from secret storage);
-  3. the helper's headers.
+- The fixed `headers` (FR-54, with sensitive values resolved from secret storage) are applied exactly as before, through the SDK's `requestInit`.
+- The helper's headers are layered over each finished request, after the SDK and the fixed headers have been applied.
 - On a name clash (case-insensitive), the helper wins.
 
 ### FR-183: When the helper runs
