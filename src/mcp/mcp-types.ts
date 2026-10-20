@@ -97,6 +97,15 @@ export interface McpServerConfig {
 	headers?: McpHeader[];
 
 	/**
+	 * Shell command that prints a JSON object of extra request headers
+	 * (sse / streamableHttp only, desktop only). Run on every connect and
+	 * reconnect; its headers override {@link headers} on a name clash.
+	 * @see src/mcp/headers-helper.ts
+	 * @see specs/04d-mcp-headers-helper/spec.md
+	 */
+	headersHelper?: string;
+
+	/**
 	 * Whether the server is disabled.
 	 * Disabled servers are not connected on plugin load.
 	 * @default false
