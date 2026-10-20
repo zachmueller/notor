@@ -52,6 +52,19 @@ function validateServerName(name: string): string | null {
 	return null;
 }
 
+/** Validate a headers helper command (empty is allowed — it clears the field). */
+function validateHeadersHelper(command: string): string | null {
+	if (/[\r\n\0]/.test(command)) return "Headers helper must be a single-line command.";
+	return null;
+}
+
+/** Description for the headers helper field, shared by the add form and detail view. */
+const HEADERS_HELPER_DESC =
+	"Optional shell command that prints a JSON object of extra headers, e.g. " +
+	'{"Authorization": "Bearer …", "Cookie": "…"}. All values must be strings. ' +
+	"It runs on every connect and when the server rejects the session; its headers override the ones below." +
+	(Platform.isDesktopApp ? "" : " Only runs in the Obsidian desktop app.");
+
 /** Set a Lucide status icon on an element based on connection status. */
 function setStatusIcon(el: HTMLElement, status: McpConnectionStatus | undefined): void {
 	switch (status) {
@@ -328,7 +341,7 @@ function renderServerDetail(
 	if (config.type === "stdio") {
 		renderStdioFields(containerEl, serverName, config, ctx);
 	} else {
-		renderHttpFields(containerEl, serverName, config, ctx);
+		renderHttpFields(containerEl, serverName, config, ctx, mcpHub);
 	}
 
 	// Discovered tools summary (only when connected)
@@ -453,7 +466,8 @@ function renderHttpFields(
 	containerEl: HTMLElement,
 	serverName: string,
 	config: McpServerConfig,
-	ctx: SettingsContext
+	ctx: SettingsContext,
+	mcpHub: McpHub | undefined
 ): void {
 	new Setting(containerEl)
 		.setName("URL")
@@ -468,6 +482,8 @@ function renderHttpFields(
 				})
 		);
 
+	renderHeadersHelperSetting(containerEl, serverName, config, ctx, mcpHub);
+
 	// Headers with sensitive toggle (INT-003)
 	renderSecretKeyValueSection(containerEl, ctx, {
 		kind: "header",
@@ -478,6 +494,67 @@ function renderHttpFields(
 		read: () => config.headers,
 		ensure: () => (config.headers ??= []),
 	});
+}
+
+/**
+ * Headers helper field + **Test helper** button for a saved HTTP server.
+ *
+ * The test shows only the header names the helper printed — never values.
+ *
+ * @see specs/04d-mcp-headers-helper/spec.md — FR-180
+ */
+function renderHeadersHelperSetting(
+	containerEl: HTMLElement,
+	serverName: string,
+	config: McpServerConfig,
+	ctx: SettingsContext,
+	mcpHub: McpHub | undefined
+): void {
+	const setting = new Setting(containerEl)
+		.setName("Headers helper")
+		.setDesc(HEADERS_HELPER_DESC);
+	const errorEl = containerEl.createEl("p", { cls: "notor-mcp-add-error notor-hidden" });
+
+	setting.addText((text) =>
+		text
+			.setPlaceholder("/path/to/headers-helper")
+			.setValue(config.headersHelper ?? "")
+			.onChange(async (value) => {
+				const command = value.trim();
+				const err = validateHeadersHelper(command);
+				errorEl.setText(err ?? "");
+				errorEl.toggleClass("notor-hidden", !err);
+				if (err) return;
+				if (command) config.headersHelper = command;
+				else delete config.headersHelper;
+				await ctx.saveSettings();
+			})
+	);
+
+	setting.addButton((btn) =>
+		btn
+			.setButtonText("Test helper")
+			.setDisabled(!Platform.isDesktopApp || !mcpHub)
+			.onClick(async () => {
+				if (!mcpHub || !config.headersHelper) {
+					new Notice("Enter a headers helper command first.");
+					return;
+				}
+				btn.setDisabled(true);
+				try {
+					const names = await mcpHub.testHeadersHelper(serverName, config);
+					new Notice(
+						names.length === 0
+							? "Headers helper returned no headers."
+							: `Headers helper returned ${names.length} header${names.length === 1 ? "" : "s"}: ${names.join(", ")}`
+					);
+				} catch (e) {
+					new Notice(e instanceof Error ? e.message : String(e), 10_000);
+				} finally {
+					btn.setDisabled(false);
+				}
+			})
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -867,6 +944,7 @@ function renderAddServerForm(
 	// Transport-specific fields container
 	const transportFieldsEl = containerEl.createDiv({ cls: "notor-mcp-add-transport-fields" });
 	let httpUrlInput = "";
+	let httpHeadersHelper = "";
 
 	const updateTransportFields = () => {
 		transportFieldsEl.empty();
@@ -915,6 +993,14 @@ function renderAddServerForm(
 					t.setValue(httpUrlInput);
 					t.onChange((v) => { httpUrlInput = v.trim(); });
 				});
+			new Setting(transportFieldsEl)
+				.setName("Headers helper")
+				.setDesc(HEADERS_HELPER_DESC)
+				.addText((t) => {
+					t.setPlaceholder("/path/to/headers-helper");
+					t.setValue(httpHeadersHelper);
+					t.onChange((v) => { httpHeadersHelper = v.trim(); });
+				});
 			renderDraftKeyValueList(
 				transportFieldsEl,
 				"Headers",
@@ -962,6 +1048,12 @@ function renderAddServerForm(
 					errorEl.removeClass("notor-hidden");
 					return;
 				}
+				const helperErr = selectedType === "stdio" ? null : validateHeadersHelper(httpHeadersHelper);
+				if (helperErr) {
+					errorEl.textContent = helperErr;
+					errorEl.removeClass("notor-hidden");
+					return;
+				}
 
 				// Collect the draft key/value rows for the active transport,
 				// dropping blank keys (they would land as env[""] at spawn time).
@@ -1002,6 +1094,7 @@ function renderAddServerForm(
 					if (stdioCwd) newConfig.cwd = stdioCwd;
 				} else {
 					newConfig.url = httpUrlInput;
+					if (httpHeadersHelper) newConfig.headersHelper = httpHeadersHelper;
 				}
 
 				// Sensitive values go to Obsidian's SecretStorage under an ID scoped

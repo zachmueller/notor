@@ -853,6 +853,22 @@ export class McpHub {
 	}
 
 	/**
+	 * Run a server's `headersHelper` once, as a connect would, and return the
+	 * header names it printed. Values are discarded — this backs the settings
+	 * UI's **Test helper** button, which must never display them.
+	 */
+	async testHeadersHelper(serverName: string, config: McpServerConfig): Promise<string[]> {
+		const command = config.headersHelper?.trim();
+		if (!command) throw new Error("No headers helper configured.");
+		const headers = await runHeadersHelper(command, {
+			serverName,
+			url: config.url ?? "",
+			cwd: this.vaultRootPath,
+		});
+		return Object.keys(headers);
+	}
+
+	/**
 	 * A connected server kept failing auth after its headers were refreshed:
 	 * mark it errored and hand it to the HTTP reconnect/backoff path, which
 	 * re-runs the helper on every attempt.
