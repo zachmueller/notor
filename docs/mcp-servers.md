@@ -16,7 +16,7 @@ Register and manage servers in **Settings → Notor → MCP servers**. Each serv
 
 - **Name** — slug format: `[a-z0-9-]`
 - **Transport type** — stdio, SSE, or Streamable HTTP
-- **Connection parameters** — command/args/working directory/environment variables (stdio) or URL/headers (HTTP)
+- **Connection parameters** — command/args/working directory/environment variables (stdio) or URL/headers/[headers helper](#dynamic-headers-headershelper) (HTTP)
 - **Optional per-tool overrides** — read/write classification and auto-approve per tool
 
 The **Add server** form collects the connection parameters up front, so a server that needs an API key in its environment (or an `Authorization` header) connects on the first attempt instead of failing and needing an edit. Everything remains editable afterwards by expanding the server's entry in the list.
@@ -70,6 +70,45 @@ stdio environment variables and HTTP headers (e.g., `Authorization`) can be indi
 Sensitive values are written to Obsidian's secret storage, the same OS-level encrypted store (macOS Keychain / Windows DPAPI / Linux libsecret) used for provider API keys. You can see the stored entries under **Settings → Keychain**, listed as `notor-mcp-env-…` and `notor-mcp-header-…`. Plugin settings keep only an empty placeholder for the value, so the credential never lands in `data.json` — a sensitive row whose value is already stored shows "Stored in keychain" in place of the masked field. Non-sensitive values are stored as plain text in plugin settings.
 
 Removing a server also removes its stored credentials. Values saved by earlier versions of Notor (which kept them unencrypted in the vault's local storage) are migrated into the encrypted store the first time the server connects, and the plaintext copy is deleted.
+
+## Dynamic headers (`headersHelper`)
+
+Some HTTP servers sit behind a login proxy (an OIDC load balancer, oauth2-proxy, Cloudflare Access, IAP, …). They need a bearer token plus a session cookie that expires after a few hours, which fixed headers can't keep up with. For these, set **Headers helper** on the server, either when adding it or later. It takes a shell command that prints the headers to send. Notor runs it on the desktop app only. The contract matches Claude Code's `headersHelper`, so a helper written for Claude Code works unchanged.
+
+**Output contract** — the command must print exactly one JSON object whose values are all strings:
+
+```json
+{"Authorization": "Bearer test-token", "Cookie": "_proxy_session=test-token"}
+```
+
+Anything else counts as an error: empty output, invalid JSON, an array, or a non-string value. The connection fails with a message that may include an excerpt of the helper's **stderr**. Its stdout, which holds the credentials, is never shown, logged, or saved.
+
+**How it runs**
+
+- In your shell (`$SHELL -c …`) with your login `PATH`, in the vault root, with a 10-second timeout.
+- With these environment variables set, so one script can serve several servers or check it's talking to the right one:
+  - `CLAUDE_CODE_MCP_SERVER_NAME` (also `NOTOR_MCP_SERVER_NAME`): the server's name;
+  - `CLAUDE_CODE_MCP_SERVER_URL` (also `NOTOR_MCP_SERVER_URL`): the server's URL.
+- On every connect and reconnect. Notor doesn't cache the result. Caching or renewing credentials between runs is the helper's job.
+
+**Precedence** — helper headers are added on top of the fixed **Headers** list. When both set the same header name, the helper's value wins.
+
+**Expired sessions** — the server might answer with `401`/`403`, or redirect to a sign-in page on another origin. When that happens, Notor re-runs the helper and retries the request once. If that still fails, the server shows an error and goes into the usual automatic reconnect, which runs the helper again on each attempt.
+
+**Test helper** runs the helper once and lists the header **names** it returned, which is a quick way to check the script without connecting.
+
+Example helper for a server at `https://mcp.example.com/mcp`. Here `my-login-tool` stands in for whatever CLI signs you in to your proxy and prints a fresh cookie:
+
+```sh
+#!/bin/sh
+set -e
+[ "$CLAUDE_CODE_MCP_SERVER_URL" = "https://mcp.example.com/mcp" ] || { echo "unexpected server" >&2; exit 1; }
+token=$(cat "$HOME/.config/example/token")
+cookie=$(my-login-tool session-cookie --host mcp.example.com)
+printf '{"Authorization":"Bearer %s","Cookie":"_proxy_session=%s"}' "$token" "$cookie"
+```
+
+The command string itself is stored in plugin settings like a stdio server's command, so keep secrets out of it: read them from a file or keychain inside the script instead. For servers with a headers helper (or a fixed `Cookie` header), desktop Notor sends requests from its Node runtime rather than the app's web view, because the web view silently drops `Cookie` headers. These requests don't use the system proxy settings or the OS certificate store.
 
 ## Connection lifecycle
 

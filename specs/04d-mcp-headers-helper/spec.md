@@ -1,7 +1,7 @@
 # Phase 4d — Dynamic HTTP Headers for MCP Servers (`headersHelper`)
 
 **Created:** 2026-10-20
-**Status:** Draft
+**Status:** Implemented
 **Branch:** main
 **Extends:** [04-mcp/spec.md](../04-mcp/spec.md) — FR-54, FR-55, FR-61
 

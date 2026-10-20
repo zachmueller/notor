@@ -17,6 +17,8 @@ This specification covers Phase 4.1 of the roadmap:
 - **Plan/Act state signaling**: the current Plan/Act mode is communicated to MCP servers on each tool invocation via the `_meta.notor_mode` field so servers can make their own cooperative decisions about write-type actions.
 - **Trust and safety**: clear warnings are displayed in the settings UI and documentation, communicating that custom tools bypass built-in safety guarantees.
 
+Follow-ups: [Phase 4d — dynamic HTTP headers (`headersHelper`)](../04d-mcp-headers-helper/spec.md) extends FR-54, FR-55 and FR-61.
+
 ## Clarifications
 
 ### Session 2026-09-03
