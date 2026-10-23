@@ -2,7 +2,10 @@
 /**
  * Voice mode e2e — the hands-free loop without a microphone.
  *
- * Replaces the two external programs with fixtures from e2e/fixtures/voice/:
+ * Replaces the three external programs with fixtures from e2e/fixtures/voice/:
+ *   - fake-kws.mjs stands in for the sherpa-onnx keyword-spotter sidecar: it
+ *     answers the ready handshake and reports a wake-word hit whenever
+ *     /tmp/notor-e2e-kws-hit.txt appears;
  *   - fake-whisper-server.mjs answers `POST /inference` with a canned transcript
  *     (read from /tmp/notor-e2e-whisper-text.txt) and logs each request;
  *   - fake-say.sh appends everything it would have spoken to /tmp/notor-e2e-say.log.
@@ -11,7 +14,8 @@
  * and a user message containing "#slow" is answered after a delay.
  *
  * Audio capture is bypassed via VoiceManager.startWithoutCapture(); utterances
- * enter through injectTranscript() (after STT) and injectAudio() (before STT).
+ * enter through injectTranscript() (after STT) and injectAudio() (before STT),
+ * addressed (as if said after the wake word) unless stated otherwise.
  *
  * Run: npm run e2e:voice   (add --skip-build to reuse the last build)
  */
@@ -46,6 +50,13 @@ const FAKE_SAY = path.join(FIXTURES, "fake-say.sh");
 const SAY_LOG = "/tmp/notor-e2e-say.log";
 const WHISPER_LOG = "/tmp/notor-e2e-whisper.log";
 const WHISPER_TEXT = "/tmp/notor-e2e-whisper-text.txt";
+const FAKE_KWS = path.join(FIXTURES, "fake-kws.mjs");
+const KWS_LOG = "/tmp/notor-e2e-kws.log";
+const KWS_HIT = "/tmp/notor-e2e-kws-hit.txt";
+/** Empty stand-ins for the files preflight expects in a keyword-spotting model folder. */
+const KWS_MODEL_DIR = "/tmp/notor-e2e-kws-model";
+const KWS_MODEL_FILES = ["tokens.txt", "bpe.model", "encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx"];
+const LISTEN_TIMEOUT_MS = 1_000;
 
 // ---------------------------------------------------------------------------
 // Scripted mock LLM server
@@ -132,7 +143,12 @@ function readLog(file: string): string {
 }
 
 function resetLogs(): void {
-	for (const f of [SAY_LOG, WHISPER_LOG, WHISPER_TEXT]) fs.rmSync(f, { force: true });
+	for (const f of [SAY_LOG, WHISPER_LOG, WHISPER_TEXT, KWS_LOG, KWS_HIT]) fs.rmSync(f, { force: true });
+}
+
+function writeFakeKwsModel(): void {
+	fs.mkdirSync(KWS_MODEL_DIR, { recursive: true });
+	for (const f of KWS_MODEL_FILES) fs.writeFileSync(path.join(KWS_MODEL_DIR, f), "");
 }
 
 async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs: number, intervalMs = 250): Promise<boolean> {
@@ -152,11 +168,12 @@ async function setSetting(ctx: TestContext, key: string, value: unknown): Promis
 	}, { key, value });
 }
 
+/** Start without the microphone; the wake word comes from the fake keyword-spotter sidecar. */
 async function startVoice(ctx: TestContext): Promise<{ started: boolean; leafId: string | null }> {
 	return ctx.page.evaluate(`(async () => {
 		const plugin = window.app.plugins.plugins["notor"];
 		const orch = plugin.getActiveOrchestrator();
-		const controller = await plugin.getVoiceManager().startWithoutCapture(orch);
+		const controller = await plugin.getVoiceManager().startWithoutCapture(orch, { realWakeDetector: true });
 		return { started: !!controller, leafId: orch.getView()?.leaf.id ?? null };
 	})()`) as Promise<{ started: boolean; leafId: string | null }>;
 }
@@ -175,12 +192,16 @@ async function injectTranscript(ctx: TestContext, leafId: string, text: string):
 	}, { leafId, text });
 }
 
-async function injectAudio(ctx: TestContext, leafId: string): Promise<void> {
-	await ctx.page.evaluate(async (id: string) => {
+async function injectAudio(ctx: TestContext, leafId: string, addressed = true): Promise<void> {
+	await ctx.page.evaluate(async (args: { leafId: string; addressed: boolean }) => {
 		const plugin = (window as any).app.plugins.plugins["notor"];
 		const samples = Array.from({ length: 16_000 }, () => 0.1);
-		await plugin.getVoiceManager().injectAudio(id, samples, 16_000);
-	}, leafId);
+		await plugin.getVoiceManager().injectAudio(args.leafId, samples, 16_000, { addressed: args.addressed });
+	}, { leafId, addressed });
+}
+
+async function noticeTexts(ctx: TestContext): Promise<string[]> {
+	return ctx.page.evaluate(() => Array.from(document.querySelectorAll(".notice")).map((n) => n.textContent ?? ""));
 }
 
 async function userBubbleCount(ctx: TestContext, containing: string): Promise<number> {
@@ -219,7 +240,7 @@ async function tests(ctx: TestContext): Promise<void> {
 		await setSetting(ctx, "voice_whisper_server_path", FAKE_WHISPER);
 
 		// --- Test 2: start ---
-		console.log("\nTest 2: Voice mode starts, becomes ready and announces itself");
+		console.log("\nTest 2: Voice mode starts the wake-word sidecar and arms");
 		const commandRegistered = await ctx.page.evaluate(() =>
 			!!(window as any).app.commands.commands["notor:toggle-voice-mode"]);
 		if (commandRegistered) ctx.pass("Toggle command registered", "notor:toggle-voice-mode");
@@ -230,12 +251,35 @@ async function tests(ctx: TestContext): Promise<void> {
 			ctx.fail("Voice mode started", `started=${started} leafId=${leafId}`, await ctx.screenshot("voice-start-failed"));
 			return;
 		}
-		const listening = await waitFor(async () => (await voiceStatus(ctx, leafId)).state === "listening", 20_000);
+		const armed = await waitFor(async () => (await voiceStatus(ctx, leafId)).state === "armed", 20_000);
 		const status = await voiceStatus(ctx, leafId);
-		if (listening) ctx.pass("Voice mode listening", JSON.stringify(status), await ctx.screenshot("voice-listening"));
-		else ctx.fail("Voice mode listening", JSON.stringify(status), await ctx.screenshot("voice-not-listening"));
-		if (await waitFor(() => readLog(SAY_LOG).includes("Voice mode on."), 10_000)) ctx.pass("Greeting spoken", "fake say received 'Voice mode on.'");
-		else ctx.fail("Greeting spoken", `say log: ${readLog(SAY_LOG).slice(-300)}`);
+		if (armed) ctx.pass("Voice mode armed", JSON.stringify(status), await ctx.screenshot("voice-armed"));
+		else ctx.fail("Voice mode armed", JSON.stringify(status), await ctx.screenshot("voice-not-armed"));
+		const buttonArmed = await ctx.page.evaluate(() => !!document.querySelector(".notor-voice-btn.is-armed"));
+		if (buttonArmed) ctx.pass("Mic button shows armed", ".notor-voice-btn.is-armed");
+		else ctx.fail("Mic button shows armed", "no .notor-voice-btn.is-armed", await ctx.screenshot("voice-button"));
+		const kwsLaunch = readLog(KWS_LOG).trim().split("\n").pop() ?? "";
+		if (kwsLaunch.includes('"keyword":"Hey Notor"') && kwsLaunch.includes("Hey Nota")) {
+			ctx.pass("Keyword spotter launched with the wake word and its spellings", kwsLaunch);
+		} else {
+			ctx.fail("Keyword spotter launched with the wake word and its spellings", `kws log: ${kwsLaunch || "(none)"}`);
+		}
+		const notices = await noticeTexts(ctx);
+		if (notices.some((n) => n.includes("Say “Hey Notor” to talk"))) ctx.pass("Armed notice shown", "names the wake word");
+		else ctx.fail("Armed notice shown", `notices: ${notices.join(" | ") || "(none)"}`);
+		await sleep(500);
+		if (!readLog(SAY_LOG).includes("Voice mode on.")) ctx.pass("No spoken greeting", "a chime replaces 'Voice mode on.'");
+		else ctx.fail("No spoken greeting", "'Voice mode on.' was still spoken");
+
+		// --- Test 2b: wake word from the sidecar, then back to armed ---
+		console.log("\nTest 2b: A wake-word hit addresses Notor and a silent pause disarms it");
+		fs.writeFileSync(KWS_HIT, "hit\n");
+		const addressed = await waitFor(async () => (await voiceStatus(ctx, leafId)).state === "listening", 5_000, 100);
+		if (addressed) ctx.pass("Wake word addresses Notor", "state listening", await ctx.screenshot("voice-addressed"));
+		else ctx.fail("Wake word addresses Notor", JSON.stringify(await voiceStatus(ctx, leafId)));
+		const rearmed = await waitFor(async () => (await voiceStatus(ctx, leafId)).state === "armed", LISTEN_TIMEOUT_MS + 3_000, 100);
+		if (rearmed) ctx.pass("Back to armed after the listen timeout", JSON.stringify(await voiceStatus(ctx, leafId)));
+		else ctx.fail("Back to armed after the listen timeout", JSON.stringify(await voiceStatus(ctx, leafId)));
 
 		// --- Test 3: transcript → chat → spoken summary ---
 		console.log("\nTest 3: An injected transcript is sent and the reply is summarized aloud");
@@ -272,6 +316,33 @@ async function tests(ctx: TestContext): Promise<void> {
 		else ctx.fail("Recognized text sent", `replied=${audioReplied} bubbles=${audioBubble}`, await ctx.screenshot("voice-audio"));
 		fs.rmSync(WHISPER_TEXT, { force: true });
 		await waitFor(() => readLog(SAY_LOG).split(SUMMARY_TEXT).length - 1 >= 2, 15_000);
+
+		// --- Test 4b: unaddressed speech is recognized but never sent ---
+		console.log("\nTest 4b: Speech without the wake word is dropped");
+		fs.writeFileSync(WHISPER_TEXT, "ambient chatter nobody addressed\n");
+		const whisperLinesBefore = readLog(WHISPER_LOG).trim().split("\n").length;
+		await injectAudio(ctx, leafId, false);
+		await waitFor(() => readLog(WHISPER_LOG).trim().split("\n").length > whisperLinesBefore, 10_000);
+		await sleep(1_500);
+		const ambientBubbles = await userBubbleCount(ctx, "ambient chatter");
+		if (ambientBubbles === 0) ctx.pass("Unaddressed speech dropped", "no user bubble");
+		else ctx.fail("Unaddressed speech dropped", `${ambientBubbles} bubble(s)`, await ctx.screenshot("voice-unaddressed"));
+		fs.rmSync(WHISPER_TEXT, { force: true });
+
+		// --- Test 4c: wake-word residue is stripped ---
+		console.log("\nTest 4c: Whisper's spelling of the wake word is not sent");
+		await injectTranscript(ctx, leafId, "Hey Nota, residue check please");
+		const residueReplied = await waitForResponse(ctx.page, 30_000, 500);
+		const residueText = await ctx.page.evaluate(() => {
+			const bubbles = Array.from(document.querySelectorAll(".notor-message-user"));
+			return bubbles[bubbles.length - 1]?.textContent ?? "";
+		});
+		if (residueReplied && residueText.includes("residue check please") && !/hey nota/i.test(residueText)) {
+			ctx.pass("Wake word stripped", residueText.trim());
+		} else {
+			ctx.fail("Wake word stripped", `replied=${residueReplied} bubble="${residueText.trim()}"`);
+		}
+		await waitFor(() => readLog(SAY_LOG).split(SUMMARY_TEXT).length - 1 >= 3, 15_000);
 
 		// --- Test 5: dictation during a turn is queued and sent afterwards ---
 		console.log("\nTest 5: Speech during a running turn is queued and sent after the summary");
@@ -332,6 +403,9 @@ const settings = buildDefaultSettings({
 	voice_tts_command: FAKE_SAY,
 	voice_input_cleanup_enabled: false,
 	voice_progress_verbosity: "needs_me",
+	voice_kws_python_path: FAKE_KWS,
+	voice_kws_model_dir: KWS_MODEL_DIR,
+	voice_wake_listen_timeout_ms: LISTEN_TIMEOUT_MS,
 });
 
 runTest(
@@ -340,6 +414,7 @@ runTest(
 		settings,
 		setupVault: () => {
 			resetLogs();
+			writeFakeKwsModel();
 		},
 	},
 	tests,

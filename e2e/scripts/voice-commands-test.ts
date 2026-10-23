@@ -6,7 +6,9 @@
  * mock LLM). The mock emits a tool call when the user message contains
  * "#call:<tool>:<json>", so a dictated request can produce a write_note
  * approval card or an ask_user prompt, which the built-in voice-commands
- * automation then resolves from injected transcripts.
+ * automation then resolves from injected transcripts. Transcripts are injected
+ * as addressed (said after the wake word, which is injected rather than
+ * spotted) unless a test checks the unaddressed pending-reply shortcut.
  *
  * Run: npm run e2e:voice-commands   (add --skip-build to reuse the last build)
  */
@@ -172,11 +174,11 @@ async function voiceState(ctx: TestContext, leafId: string): Promise<string> {
 	}, leafId);
 }
 
-async function injectTranscript(ctx: TestContext, leafId: string, text: string): Promise<void> {
-	await ctx.page.evaluate(async (args: { leafId: string; text: string }) => {
+async function injectTranscript(ctx: TestContext, leafId: string, text: string, addressed = true): Promise<void> {
+	await ctx.page.evaluate(async (args: { leafId: string; text: string; addressed: boolean }) => {
 		const plugin = (window as any).app.plugins.plugins["notor"];
-		await plugin.getVoiceManager().injectTranscript(args.leafId, args.text);
-	}, { leafId, text });
+		await plugin.getVoiceManager().injectTranscript(args.leafId, args.text, { addressed: args.addressed });
+	}, { leafId, text, addressed });
 }
 
 async function count(ctx: TestContext, selector: string): Promise<number> {
@@ -218,15 +220,14 @@ async function tests(ctx: TestContext): Promise<void> {
 			ctx.fail("Voice mode started", `started=${started} leafId=${leafId}`, await ctx.screenshot("vc-start-failed"));
 			return;
 		}
-		if (!(await waitFor(async () => (await voiceState(ctx, leafId)) === "listening", 20_000))) {
-			ctx.fail("Voice mode listening", await voiceState(ctx, leafId), await ctx.screenshot("vc-not-listening"));
+		if (!(await waitFor(async () => (await voiceState(ctx, leafId)) === "armed", 20_000))) {
+			ctx.fail("Voice mode armed", await voiceState(ctx, leafId), await ctx.screenshot("vc-not-armed"));
 			return;
 		}
-		ctx.pass("Voice mode listening", leafId);
-		await waitFor(() => sayLogHas("Voice mode on."), 10_000);
+		ctx.pass("Voice mode armed", leafId);
 
 		// --- Test 1: approve a tool call by voice ---
-		console.log("\nTest 1: 'voice command approve' settles a pending write_note approval");
+		console.log("\nTest 1: 'Hey Notor, approve' settles a pending write_note approval");
 		const noteA = `${OUT_DIR}/approved-by-voice.md`;
 		await injectTranscript(ctx, leafId, writeCall(noteA));
 		const approvalShown = await waitFor(async () => (await count(ctx, ".notor-approve-btn")) > 0, 20_000);
@@ -235,7 +236,7 @@ async function tests(ctx: TestContext): Promise<void> {
 		if (await waitFor(() => sayLogHas("Approval needed"), 10_000)) ctx.pass("Approval announced", "fake say received the announcement");
 		else ctx.fail("Approval announced", `say log: ${readLog(SAY_LOG).slice(-300)}`);
 
-		await injectTranscript(ctx, leafId, "voice command approve");
+		await injectTranscript(ctx, leafId, "Hey Notor, approve");
 		const approvedTurnDone = await waitForResponse(ctx.page, 30_000, 500);
 		const approveButtonsLeft = await count(ctx, ".notor-approve-btn");
 		if (approvedTurnDone && noteExists(ctx, noteA)) ctx.pass("Approved by voice", `${noteA} written`, await ctx.screenshot("vc-approved"));
@@ -247,11 +248,11 @@ async function tests(ctx: TestContext): Promise<void> {
 		else ctx.fail("Approval confirmed aloud", `say log: ${readLog(SAY_LOG).slice(-300)}`);
 
 		// --- Test 2: a bare "no" rejects while an approval is pending ---
-		console.log("\nTest 2: A bare 'no' rejects the pending approval without the trigger phrase");
+		console.log("\nTest 2: A bare 'no' rejects the pending approval without the wake word");
 		const noteB = `${OUT_DIR}/rejected-by-voice.md`;
 		await injectTranscript(ctx, leafId, writeCall(noteB));
 		await waitFor(async () => (await count(ctx, ".notor-approve-btn")) > 0, 20_000);
-		await injectTranscript(ctx, leafId, "no");
+		await injectTranscript(ctx, leafId, "no", false);
 		const rejectedTurnDone = await waitForResponse(ctx.page, 30_000, 500);
 		if (rejectedTurnDone && !noteExists(ctx, noteB)) ctx.pass("Rejected by a bare no", `${noteB} not written`);
 		else ctx.fail("Rejected by a bare no", `done=${rejectedTurnDone} exists=${noteExists(ctx, noteB)}`, await ctx.screenshot("vc-reject-failed"));
@@ -259,7 +260,7 @@ async function tests(ctx: TestContext): Promise<void> {
 		else ctx.fail("Rejection confirmed aloud", `say log: ${readLog(SAY_LOG).slice(-300)}`);
 
 		// --- Test 3: answer a follow-up question by voice ---
-		console.log("\nTest 3: 'voice command answer …' resolves an ask_user prompt");
+		console.log("\nTest 3: 'Hey Notor, answer …' resolves an ask_user prompt");
 		await injectTranscript(ctx, leafId, askCall("Which folder?", ["Inbox", "Archive"]));
 		const promptShown = await waitFor(async () => (await count(ctx, ".notor-interaction-prompt")) > 0, 20_000);
 		if (promptShown) ctx.pass("Question prompt rendered", "ask_user awaiting an answer");
@@ -267,7 +268,7 @@ async function tests(ctx: TestContext): Promise<void> {
 		if (await waitFor(() => sayLogHas("Which folder?"), 10_000)) ctx.pass("Question announced", "question text spoken with options");
 		else ctx.fail("Question announced", `say log: ${readLog(SAY_LOG).slice(-300)}`);
 
-		await injectTranscript(ctx, leafId, "voice command answer the Inbox");
+		await injectTranscript(ctx, leafId, "Hey Notor, answer the Inbox");
 		const answeredTurnDone = await waitForResponse(ctx.page, 30_000, 500);
 		const lastToolResult = toolResults[toolResults.length - 1] ?? "";
 		if (answeredTurnDone && lastToolResult.includes("Inbox")) ctx.pass("Answered by voice", `tool result: ${lastToolResult.slice(0, 120)}`);
@@ -276,36 +277,47 @@ async function tests(ctx: TestContext): Promise<void> {
 		if (promptsLeft === 0) ctx.pass("Question prompt dismissed", "no .notor-interaction-prompt remains");
 		else ctx.fail("Question prompt dismissed", `${promptsLeft} prompt(s) remain`);
 
-		// --- Test 4: unknown trigger-phrase commands never reach the conversation ---
-		console.log("\nTest 4: An unknown command is answered aloud and not sent as a message");
+		// --- Test 4: an addressed prompt that is not a command reaches the conversation ---
+		console.log("\nTest 4: 'Hey Notor, make me some tea' is sent as a message");
+		await waitFor(async () => (await voiceState(ctx, leafId)) === "armed", 15_000);
 		const bubblesBefore = await userBubbleCount(ctx);
-		await injectTranscript(ctx, leafId, "voice command make me some tea");
-		const unknownSpoken = await waitFor(() => sayLogHas("Unknown voice command: make me some tea"), 10_000);
-		await sleep(500);
+		await injectTranscript(ctx, leafId, "Hey Notor, make me some tea");
+		const promptDone = await waitForResponse(ctx.page, 30_000, 500);
 		const bubblesAfter = await userBubbleCount(ctx);
-		if (unknownSpoken && bubblesAfter === bubblesBefore) ctx.pass("Unknown command handled", "spoken, nothing sent");
-		else ctx.fail("Unknown command handled", `spoken=${unknownSpoken} bubbles ${bubblesBefore}→${bubblesAfter}`);
+		const spokeUnknown = sayLogHas("Unknown voice command");
+		if (promptDone && bubblesAfter === bubblesBefore + 1 && !spokeUnknown) ctx.pass("Prompt sent to the conversation", "one new user bubble");
+		else ctx.fail("Prompt sent to the conversation", `done=${promptDone} bubbles ${bubblesBefore}→${bubblesAfter} unknownSpoken=${spokeUnknown}`,
+			await ctx.screenshot("vc-prompt"));
+		await waitFor(async () => (await voiceState(ctx, leafId)) === "armed", 15_000);
+
+		// --- Test 4b: unaddressed speech with nothing pending is dropped ---
+		console.log("\nTest 4b: A bare 'yes' with nothing pending is ignored");
+		const beforeBare = await userBubbleCount(ctx);
+		await injectTranscript(ctx, leafId, "yes", false);
+		await sleep(1_000);
+		if ((await userBubbleCount(ctx)) === beforeBare) ctx.pass("Unaddressed speech dropped", "no message sent");
+		else ctx.fail("Unaddressed speech dropped", "a user bubble appeared");
 
 		// --- Test 5: status ---
-		console.log("\nTest 5: 'voice command status' describes the state");
-		await injectTranscript(ctx, leafId, "voice command status");
-		if (await waitFor(() => sayLogHas("Idle and listening."), 10_000)) ctx.pass("Status spoken", "'Idle and listening.'");
+		console.log("\nTest 5: 'Hey Notor, status' describes the state");
+		await injectTranscript(ctx, leafId, "Hey Notor, status");
+		if (await waitFor(() => sayLogHas("Idle. Say Hey Notor to talk."), 10_000)) ctx.pass("Status spoken", "'Idle. Say Hey Notor to talk.'");
 		else ctx.fail("Status spoken", `say log: ${readLog(SAY_LOG).slice(-300)}`);
 
 		// --- Test 6: cancel a running turn ---
-		console.log("\nTest 6: 'voice command cancel' aborts the running turn");
+		console.log("\nTest 6: 'Hey Notor, cancel' aborts the running turn");
 		await injectTranscript(ctx, leafId, "think about this for a while #slow");
 		await sleep(800);
 		const startedAt = Date.now();
-		await injectTranscript(ctx, leafId, "voice command cancel");
+		await injectTranscript(ctx, leafId, "Hey Notor, cancel");
 		const idleSoon = await waitFor(() => isPanelIdle(ctx.page), 4_000);
 		const elapsed = Date.now() - startedAt;
 		if (idleSoon && elapsed < SLOW_DELAY_MS) ctx.pass("Turn cancelled by voice", `panel idle after ${elapsed} ms`);
 		else ctx.fail("Turn cancelled by voice", `idle=${idleSoon} after ${elapsed} ms`, await ctx.screenshot("vc-cancel"));
 		if (await waitFor(() => sayLogHas("Cancelled."), 5_000)) ctx.pass("Cancellation spoken", "'Cancelled.'");
 		else ctx.fail("Cancellation spoken", `say log: ${readLog(SAY_LOG).slice(-300)}`);
-		if (await waitFor(async () => (await voiceState(ctx, leafId)) === "listening", 5_000)) ctx.pass("Still listening after cancel", "voice mode stays on");
-		else ctx.fail("Still listening after cancel", await voiceState(ctx, leafId));
+		if (await waitFor(async () => (await voiceState(ctx, leafId)) === "armed", 5_000)) ctx.pass("Still armed after cancel", "voice mode stays on");
+		else ctx.fail("Still armed after cancel", await voiceState(ctx, leafId));
 	} finally {
 		srv.close();
 		resetLogs();
