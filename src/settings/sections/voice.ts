@@ -8,7 +8,7 @@ import { Notice, Platform, Setting } from "obsidian";
 import type { SettingsContext } from "./context";
 import { markSubsection } from "../helpers";
 import type { VoiceProgressVerbosity } from "../types";
-import { VOICE_VERBOSITY_LABELS, VOICE_VERBOSITY_LEVELS } from "../../voice/voice-settings";
+import { DEFAULT_WAKE_WORD, VOICE_VERBOSITY_LABELS, VOICE_VERBOSITY_LEVELS } from "../../voice/voice-settings";
 import type { PromptOverrideFile } from "../../chat/prompt-override-file";
 import { logger } from "../../utils/logger";
 
@@ -100,13 +100,28 @@ function addCustomizePromptButton(
 		);
 }
 
+/**
+ * Advice for a wake word that will wake Notor too easily, or "" when it looks
+ * fine. Short and single-word phrases are spotted in ordinary speech more often.
+ */
+export function wakeWordAdvice(wakeWord: string): string {
+	const words = wakeWord.trim().split(/\s+/).filter(Boolean);
+	if (words.length === 0) return `No wake word set; "${DEFAULT_WAKE_WORD}" is used.`;
+	const syllables = words.reduce((n, w) => n + Math.max(1, (w.toLowerCase().match(/[aeiouy]+/g) ?? []).length), 0);
+	if (words.length < 2 || syllables < 3) {
+		return "Short or single-word wake words wake Notor by mistake more often. Two to four syllables work best.";
+	}
+	return "";
+}
+
 /** Render the "Voice" settings group body. */
 export function renderVoiceSection(containerEl: HTMLElement, ctx: SettingsContext): void {
 	containerEl.createEl("p", {
 		text:
-			"Talk to Notor hands-free: speech is transcribed locally with whisper.cpp, sent to the " +
-			"conversation, and the reply is summarized and read aloud. Requires whisper.cpp " +
-			"(brew install whisper-cpp) and a downloaded ggml model. Headphones are recommended.",
+			"Talk to Notor hands-free: say the wake word, then your request. Notor transcribes it locally " +
+			"with whisper.cpp, sends it to the conversation, and reads a summary of the reply aloud. Until it " +
+			"hears the wake word, nothing you say is transcribed. Requires whisper.cpp (brew install whisper-cpp) " +
+			"with a ggml model, and sherpa-onnx (pip install sherpa-onnx sentencepiece) with a keyword-spotting model.",
 		cls: "setting-item-description",
 	});
 
@@ -120,7 +135,7 @@ export function renderVoiceSection(containerEl: HTMLElement, ctx: SettingsContex
 
 	new Setting(containerEl)
 		.setName("Enable voice mode")
-		.setDesc("Shows the microphone button in chat panels and adds a command to toggle voice mode.")
+		.setDesc("Shows the microphone button in chat panels and adds a command to turn voice mode on and off.")
 		.addToggle((toggle) =>
 			toggle.setValue(ctx.settings.voice_enabled).onChange(async (value) => {
 				ctx.settings.voice_enabled = value;
@@ -137,11 +152,69 @@ export function renderVoiceSection(containerEl: HTMLElement, ctx: SettingsContex
 		preflightEl.setText(
 			problems.length > 0
 				? problems.map((p) => p.message).join(" ")
-				: "Speech recognition is configured: the whisper server binary and the model file were found.",
+				: "Voice mode is configured: whisper, Python and both model files were found.",
 		);
 		preflightEl.toggleClass("notor-voice-preflight-error", problems.length > 0);
 	};
 	refreshPreflight();
+
+	const applyWakeChange = () => {
+		refreshPreflight();
+		ctx.plugin.getVoiceManager().applyWakeConfigChange();
+	};
+
+	// --- Wake word ---
+	markSubsection(new Setting(containerEl).setHeading().setName("Wake word"), "Wake word");
+	const wakeWordSetting = new Setting(containerEl)
+		.setName("Wake word")
+		.setDesc("Say this to address Notor, then your request in the same breath or after the chime. Nothing is sent until it is heard.");
+	const adviceEl = wakeWordSetting.descEl.createDiv({ cls: "notor-voice-preflight-error" });
+	const refreshAdvice = () => adviceEl.setText(wakeWordAdvice(ctx.settings.voice_wake_word));
+	wakeWordSetting.addText((text) =>
+		text
+			.setPlaceholder(DEFAULT_WAKE_WORD)
+			.setValue(ctx.settings.voice_wake_word)
+			.onChange(async (value) => {
+				ctx.settings.voice_wake_word = value.trim();
+				await ctx.saveSettings();
+				refreshAdvice();
+				applyWakeChange();
+			}),
+	);
+	refreshAdvice();
+	addTextSetting(containerEl, ctx, "voice_wake_word_variants", "Alternative spellings",
+		"Comma-separated spellings the detector also listens for. Made-up words like \"Notor\" need a few, " +
+		"because the model only knows English spellings. They are also stripped from what is sent.",
+		"Hey Nota, Hey Noter", applyWakeChange);
+	addNumberSetting(containerEl, ctx, "voice_wake_listen_timeout_ms", "Listen after wake word (ms)",
+		"After a bare wake word, how long Notor waits for you to start talking before going back to waiting.",
+		{ min: 1_000, max: 30_000, integer: true });
+	new Setting(containerEl)
+		.setName("Wake chime")
+		.setDesc("Play a short chime when the wake word is heard, and when voice mode turns on or off.")
+		.addToggle((toggle) =>
+			toggle.setValue(ctx.settings.voice_wake_earcon_enabled).onChange(async (value) => {
+				ctx.settings.voice_wake_earcon_enabled = value;
+				await ctx.saveSettings();
+			}),
+		);
+
+	// --- Wake-word detection ---
+	markSubsection(new Setting(containerEl).setHeading().setName("Wake-word detection"), "Wake-word detection");
+	addTextSetting(containerEl, ctx, "voice_kws_python_path", "Python interpreter",
+		"Python 3 with sherpa-onnx and sentencepiece installed: a name on your login-shell PATH, or an absolute path (for example a virtual environment's bin/python).",
+		"python3", applyWakeChange);
+	addTextSetting(containerEl, ctx, "voice_kws_model_dir", "Keyword-spotting model folder",
+		"Absolute path to an unpacked sherpa-onnx keyword-spotting model, such as sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.",
+		"/Users/you/.local/share/sherpa-onnx/kws-gigaspeech", applyWakeChange);
+	addNumberSetting(containerEl, ctx, "voice_kws_threshold", "Detection threshold",
+		"0–1. Lower wakes more easily (and by mistake more often); raise it if Notor wakes when you did not call it.",
+		{ min: 0.01, max: 1 }, applyWakeChange);
+	addNumberSetting(containerEl, ctx, "voice_kws_score", "Wake word boost",
+		"How strongly the detector favours the wake word. Raise it if Notor misses the wake word.",
+		{ min: 0, max: 10 }, applyWakeChange);
+	addNumberSetting(containerEl, ctx, "voice_kws_num_threads", "Detector threads",
+		"CPU threads for wake-word detection. One is plenty.", { min: 1, max: 8, integer: true }, applyWakeChange);
 
 	// --- Speech recognition ---
 	markSubsection(new Setting(containerEl).setHeading().setName("Speech recognition"), "Speech recognition");
@@ -181,11 +254,11 @@ export function renderVoiceSection(containerEl: HTMLElement, ctx: SettingsContex
 		{ min: 0.001, max: 1 });
 	addNumberSetting(containerEl, ctx, "voice_min_utterance_ms", "Minimum utterance (ms)",
 		"Shorter sounds are ignored as noise.", { min: 0, max: 10_000, integer: true });
-	addNumberSetting(containerEl, ctx, "voice_stop_on_silence_ms", "Stop listening after silence (ms)",
-		"Turn voice mode off after this much continuous silence. 0 keeps it on indefinitely (default).",
+	addNumberSetting(containerEl, ctx, "voice_stop_on_silence_ms", "Turn off when idle (ms)",
+		"Turn voice mode off when the wake word has not been heard for this long and nothing is running. 0 keeps it on indefinitely (default).",
 		{ min: 0, max: 3_600_000, integer: true });
-	addNumberSetting(containerEl, ctx, "voice_barge_in_threshold_multiplier", "Barge-in sensitivity",
-		"While Notor is speaking, your voice must exceed the speech threshold times this value to interrupt it.",
+	addNumberSetting(containerEl, ctx, "voice_barge_in_threshold_multiplier", "Reply-while-speaking sensitivity",
+		"While Notor reads out an approval or question, a reply without the wake word must exceed the speech threshold times this value. (Say the wake word to interrupt.)",
 		{ min: 1, max: 20 });
 
 	// --- Spoken output ---
