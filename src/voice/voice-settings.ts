@@ -29,6 +29,16 @@ export interface VoiceConfig {
 	whisperLanguage: string;
 	whisperVocabulary: string;
 	whisperExtraArgs: string;
+	wakeWord: string;
+	/** Wake word first, then the alternative spellings (deduplicated, never empty). */
+	wakeWordSpellings: string[];
+	wakeListenTimeoutMs: number;
+	wakeEarconEnabled: boolean;
+	kwsPythonPath: string;
+	kwsModelDir: string;
+	kwsThreshold: number;
+	kwsScore: number;
+	kwsNumThreads: number;
 	endOfTurnPauseMs: number;
 	silenceThreshold: number;
 	bargeInMultiplier: number;
@@ -39,7 +49,6 @@ export interface VoiceConfig {
 	shapingPreset: string;
 	inputCleanupEnabled: boolean;
 	summaryMaxChars: number;
-	triggerPhrase: string;
 	ttsCommand: string;
 	ttsVoice: string;
 	ttsRate: number;
@@ -55,8 +64,25 @@ function str(value: unknown, fallback: string): string {
 	return typeof value === "string" ? value : fallback;
 }
 
+export const DEFAULT_WAKE_WORD = "Hey Notor";
+
+/** Split the comma-separated variants setting and put the wake word first, without duplicates. */
+export function wakeWordSpellings(wakeWord: string, variants: string): string[] {
+	const seen = new Set<string>();
+	const spellings: string[] = [];
+	for (const raw of [wakeWord, ...variants.split(",")]) {
+		const spelling = raw.trim().replace(/\s+/g, " ");
+		const key = spelling.toLowerCase();
+		if (!spelling || seen.has(key)) continue;
+		seen.add(key);
+		spellings.push(spelling);
+	}
+	return spellings;
+}
+
 /** Read the voice settings with defaults and ranges applied. */
 export function readVoiceConfig(settings: NotorSettings): VoiceConfig {
+	const wakeWord = str(settings.voice_wake_word, DEFAULT_WAKE_WORD).trim().replace(/\s+/g, " ") || DEFAULT_WAKE_WORD;
 	const verbosity = VOICE_VERBOSITY_LEVELS.includes(settings.voice_progress_verbosity)
 		? settings.voice_progress_verbosity
 		: "needs_me";
@@ -68,7 +94,16 @@ export function readVoiceConfig(settings: NotorSettings): VoiceConfig {
 		whisperLanguage: str(settings.voice_whisper_language, "en").trim() || "en",
 		whisperVocabulary: str(settings.voice_whisper_vocabulary, "").trim(),
 		whisperExtraArgs: str(settings.voice_whisper_extra_args, ""),
-		endOfTurnPauseMs: num(settings.voice_end_of_turn_pause_ms, 300, 30_000, 2500),
+		wakeWord,
+		wakeWordSpellings: wakeWordSpellings(wakeWord, str(settings.voice_wake_word_variants, "")),
+		wakeListenTimeoutMs: num(settings.voice_wake_listen_timeout_ms, 1_000, 30_000, 5_000),
+		wakeEarconEnabled: settings.voice_wake_earcon_enabled !== false,
+		kwsPythonPath: str(settings.voice_kws_python_path, "python3").trim() || "python3",
+		kwsModelDir: str(settings.voice_kws_model_dir, "").trim(),
+		kwsThreshold: num(settings.voice_kws_threshold, 0.01, 1, 0.15),
+		kwsScore: num(settings.voice_kws_score, 0, 10, 2),
+		kwsNumThreads: Math.round(num(settings.voice_kws_num_threads, 1, 8, 1)),
+		endOfTurnPauseMs: num(settings.voice_end_of_turn_pause_ms, 300, 30_000, 600),
 		silenceThreshold: num(settings.voice_silence_threshold, 0.001, 1, 0.02),
 		bargeInMultiplier: num(settings.voice_barge_in_threshold_multiplier, 1, 20, 3),
 		minUtteranceMs: num(settings.voice_min_utterance_ms, 0, 10_000, 600),
@@ -78,15 +113,17 @@ export function readVoiceConfig(settings: NotorSettings): VoiceConfig {
 		shapingPreset: str(settings.voice_shaping_preset, "").trim(),
 		inputCleanupEnabled: settings.voice_input_cleanup_enabled !== false,
 		summaryMaxChars: Math.round(num(settings.voice_speech_summary_max_chars, 100, 5_000, 600)),
-		triggerPhrase: str(settings.voice_command_trigger_phrase, "voice command").trim() || "voice command",
 		ttsCommand: str(settings.voice_tts_command, "say").trim() || "say",
 		ttsVoice: str(settings.voice_tts_voice, "").trim(),
 		ttsRate: Math.round(num(settings.voice_tts_rate, 0, 1_000, 0)),
 	};
 }
 
-/** The launch-time vocabulary prompt for whisper: trigger phrase first, then user jargon. */
+/**
+ * Whisper's vocabulary prompt: the wake word first (so its residue in a
+ * transcript is spelled consistently and easy to strip), then user jargon.
+ */
 export function buildWhisperInitialPrompt(config: VoiceConfig): string {
-	const parts = [config.triggerPhrase, config.whisperVocabulary].map((p) => p.trim()).filter(Boolean);
+	const parts = [config.wakeWord, config.whisperVocabulary].map((p) => p.trim()).filter(Boolean);
 	return parts.join(". ");
 }

@@ -28,14 +28,14 @@ function fakeVoice() {
 		answerPending: vi.fn(() => true),
 		sendQueued: vi.fn(async () => true),
 		clearQueued: vi.fn(),
-		describeState: vi.fn(() => "Idle and listening."),
+		describeState: vi.fn(() => "Idle. Say Hey Notor to talk."),
 		getState: vi.fn(),
 	};
 }
 
 interface RunOpts {
 	transcript: string;
-	hasTriggerPhrase?: boolean;
+	addressed?: boolean;
 	pendingApproval?: boolean;
 	pendingInteraction?: boolean;
 	voice?: ReturnType<typeof fakeVoice> | null;
@@ -49,7 +49,8 @@ async function run(opts: RunOpts) {
 		conversationId: "c1",
 		transcript: opts.transcript,
 		rawTranscript: opts.transcript,
-		hasTriggerPhrase: opts.hasTriggerPhrase ?? true,
+		addressed: opts.addressed ?? true,
+		wakeWord: "Hey Notor",
 		isTurnRunning: false,
 		isSpeaking: false,
 		queuedText: "",
@@ -63,6 +64,7 @@ async function run(opts: RunOpts) {
 describe("voice-commands scaffold", () => {
 	it("compiles and declares the right trigger and feature group", () => {
 		expect(VOICE_COMMANDS.trigger).toBe("on_voice_command");
+		expect(VOICE_COMMANDS.featureGroup).toBe("voice");
 		expect(VOICE_COMMANDS.scaffoldContent).toContain("notor-feature-group: voice");
 		expect(() => compileScaffold()).not.toThrow();
 	});
@@ -72,7 +74,7 @@ describe("voice-commands scaffold", () => {
 		expect(handled).toBe(false);
 	});
 
-	it("approves, rejects and answers with the trigger phrase", async () => {
+	it("approves, rejects and answers when addressed", async () => {
 		const approve = await run({ transcript: "Approve." });
 		expect(approve.handled).toBe(true);
 		expect(approve.voice!.approvePending).toHaveBeenCalledWith();
@@ -85,29 +87,29 @@ describe("voice-commands scaffold", () => {
 		const reject = await run({ transcript: "no" });
 		expect(reject.voice!.rejectPending).toHaveBeenCalledWith();
 
-		const answer = await run({ transcript: "answer Put it in the Inbox, please" });
+		const answer = await run({ transcript: "answer Put it in the Inbox, please", pendingInteraction: true });
 		expect(answer.voice!.answerPending).toHaveBeenCalledWith(["Put it in the Inbox, please"]);
 		expect(answer.voice!.speak).toHaveBeenCalledWith("Answered.");
 	});
 
 	it("accepts bare confirmations only while something is pending", async () => {
-		const waiting = await run({ transcript: "yes", hasTriggerPhrase: false, pendingApproval: true });
+		const waiting = await run({ transcript: "yes", addressed: false, pendingApproval: true });
 		expect(waiting.handled).toBe(true);
 		expect(waiting.voice!.approvePending).toHaveBeenCalled();
 
-		const asking = await run({ transcript: "answer the Inbox", hasTriggerPhrase: false, pendingInteraction: true });
+		const asking = await run({ transcript: "answer the Inbox", addressed: false, pendingInteraction: true });
 		expect(asking.handled).toBe(true);
 		expect(asking.voice!.answerPending).toHaveBeenCalledWith(["the Inbox"]);
 
-		const idle = await run({ transcript: "yes", hasTriggerPhrase: false });
+		const idle = await run({ transcript: "yes", addressed: false });
 		expect(idle.handled).toBe(false);
 		expect(idle.voice!.approvePending).not.toHaveBeenCalled();
 
-		const long = await run({ transcript: "yes but first check the other note", hasTriggerPhrase: false, pendingApproval: true });
+		const long = await run({ transcript: "yes but first check the other note", addressed: false, pendingApproval: true });
 		expect(long.handled).toBe(false);
 	});
 
-	it("needs the trigger phrase for control commands", async () => {
+	it("needs the wake word for control commands", async () => {
 		const cancel = await run({ transcript: "cancel" });
 		expect(cancel.voice!.cancelTurn).toHaveBeenCalled();
 		expect(cancel.voice!.speak).toHaveBeenCalledWith("Cancelled.");
@@ -127,15 +129,42 @@ describe("voice-commands scaffold", () => {
 		expect(clear.voice!.clearQueued).toHaveBeenCalled();
 
 		const status = await run({ transcript: "status" });
-		expect(status.voice!.speak).toHaveBeenCalledWith("Idle and listening.");
+		expect(status.voice!.speak).toHaveBeenCalledWith("Idle. Say Hey Notor to talk.");
 
-		const bare = await run({ transcript: "cancel", hasTriggerPhrase: false, pendingApproval: true });
+		const polite = await run({ transcript: "Status, please." });
+		expect(polite.handled).toBe(true);
+
+		const bare = await run({ transcript: "cancel", addressed: false, pendingApproval: true });
 		expect(bare.handled).toBe(false);
 	});
 
-	it("answers unknown trigger-phrase commands aloud and consumes them", async () => {
-		const { handled, voice } = await run({ transcript: "make me a sandwich" });
-		expect(handled).toBe(true);
-		expect(voice!.speak).toHaveBeenCalledWith("Unknown voice command: make me a sandwich");
+	it("lets addressed prompts through, even when they start with a command word", async () => {
+		for (const transcript of [
+			"make me a sandwich",
+			"send me a summary of my inbox",
+			"go ahead and draft the weekly review",
+			"clear my afternoon in the calendar note",
+			"status of the quarterly plan",
+			"okay so here's the thing",
+			"answer this email for me",
+		]) {
+			const { handled, voice } = await run({ transcript });
+			expect(handled, transcript).toBe(false);
+			expect(voice!.speak, transcript).not.toHaveBeenCalled();
+		}
+	});
+
+	it("keeps prefix confirmations while something is pending", async () => {
+		const yes = await run({ transcript: "yes go ahead", addressed: false, pendingApproval: true });
+		expect(yes.handled).toBe(true);
+		expect(yes.voice!.approvePending).toHaveBeenCalled();
+
+		const addressedYes = await run({ transcript: "okay go ahead with that change", pendingApproval: true });
+		expect(addressedYes.voice!.approvePending).toHaveBeenCalled();
+	});
+
+	it("names the wake word in the help line", async () => {
+		const { voice } = await run({ transcript: "help" });
+		expect(voice!.speak).toHaveBeenCalledWith(expect.stringContaining("Say Hey Notor, then approve"));
 	});
 });

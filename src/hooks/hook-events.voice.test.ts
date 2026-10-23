@@ -15,9 +15,10 @@ import type { UserAutomationDefinition } from "../extensions/types";
 const context: VoiceCommandContext = {
 	conversationId: "c1",
 	timestamp: "2026-10-18T00:00:00.000Z",
-	rawTranscript: "voice command approve",
+	rawTranscript: "Hey Notor, approve",
 	transcript: "approve",
-	hasTriggerPhrase: true,
+	addressed: true,
+	wakeWord: "Hey Notor",
 	isTurnRunning: true,
 	isSpeaking: false,
 	queuedText: "",
@@ -43,7 +44,7 @@ describe("dispatchOnVoiceCommand", () => {
 			getForTrigger: () => [automation("first"), automation("second"), automation("third")],
 			execute: vi.fn(async (a: UserAutomationDefinition, ctx: Record<string, unknown>) => {
 				calls.push(a.displayName!);
-				expect(ctx).toMatchObject({ hookEvent: "on_voice_command", transcript: "approve", hasTriggerPhrase: true });
+				expect(ctx).toMatchObject({ hookEvent: "on_voice_command", transcript: "approve", addressed: true, wakeWord: "Hey Notor" });
 				return a.displayName === "second" ? { handled: true } : { handled: false };
 			}),
 		};

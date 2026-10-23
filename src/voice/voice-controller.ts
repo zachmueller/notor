@@ -68,6 +68,8 @@ export interface VoiceStatus {
 export interface VoiceUtteranceContext {
 	conversationId: string;
 	rawTranscript: string;
+	/** True after the wake word; false for unaddressed replies while something is pending. */
+	addressed: boolean;
 	isTurnRunning: boolean;
 	isSpeaking: boolean;
 	pendingApproval: { toolName: string; parameters: Record<string, unknown>; count: number } | null;
@@ -444,7 +446,7 @@ export class VoiceController {
 	}
 
 	/** Build the context handed to voice-command handlers (Milestone B). */
-	buildUtteranceContext(rawTranscript: string): VoiceUtteranceContext {
+	buildUtteranceContext(rawTranscript: string, addressed = true): VoiceUtteranceContext {
 		const approvals = this.getPendingApprovals();
 		const interactions = this.getPendingInteractions();
 		let pendingInteraction: VoiceUtteranceContext["pendingInteraction"] = null;
@@ -457,6 +459,7 @@ export class VoiceController {
 		return {
 			conversationId: this.deps.conversationId,
 			rawTranscript,
+			addressed,
 			isTurnRunning: this.isTurnRunning,
 			isSpeaking: this.speech.isSpeaking,
 			pendingApproval: approvals[0]

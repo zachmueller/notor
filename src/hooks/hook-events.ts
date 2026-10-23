@@ -1187,10 +1187,16 @@ export interface VoiceCommandContext {
 	timestamp: string;
 	/** Exactly what was recognized. */
 	rawTranscript: string;
-	/** The text after the trigger phrase when `hasTriggerPhrase`; otherwise the raw transcript. */
+	/** The transcript with any leading wake word removed. */
 	transcript: string;
-	/** True when the utterance started with the configured trigger phrase. */
-	hasTriggerPhrase: boolean;
+	/**
+	 * True when the user addressed Notor with the wake word. False only for the
+	 * short replies voice mode accepts without it while an approval or question
+	 * is pending.
+	 */
+	addressed: boolean;
+	/** The configured wake word (e.g. "Hey Notor"), for spoken help. */
+	wakeWord: string;
 	isTurnRunning: boolean;
 	isSpeaking: boolean;
 	/** Dictated text waiting to be sent after the current turn. */
@@ -1236,7 +1242,7 @@ export async function dispatchOnVoiceCommand(
 		try {
 			const result = await extensionAutomations.execute(automation, automationCtx);
 			if (isVoiceCommandHandled(result)) {
-				log.info("Voice command handled", { automation: displayName, hasTriggerPhrase: context.hasTriggerPhrase });
+				log.info("Voice command handled", { automation: displayName, addressed: context.addressed });
 				return { handled: true, handledBy: displayName };
 			}
 		} catch (e) {

@@ -13,7 +13,7 @@ import type { ChatOrchestrator } from "../chat/orchestrator";
 import { logger } from "../utils/logger";
 import { getPlanReviewController } from "../plans/plan-review-controller";
 import { dispatchOnVoiceCommand } from "../hooks/hook-events";
-import { matchVoiceCommand } from "./command-matcher";
+import { stripWakeWord } from "./command-matcher";
 import { VoiceController, type VoiceStatus, type VoiceUtteranceContext } from "./voice-controller";
 import { WhisperServerBackend } from "./stt/whisper-server-backend";
 import type { VoiceConfigProblem } from "./stt/types";
@@ -280,23 +280,23 @@ export class VoiceManager {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Default command handler: match the trigger phrase, run `on_voice_command`
-	 * automations in order, and never let a trigger-phrase utterance reach the
-	 * conversation even when no automation claims it.
+	 * Default command handler: strip the wake word and run `on_voice_command`
+	 * automations in order. Whatever no automation claims continues as a prompt
+	 * (addressed) or is dropped (unaddressed).
 	 */
 	private async dispatchVoiceCommand(ctx: VoiceUtteranceContext): Promise<boolean> {
 		const controller = this.getControllerForConversation(ctx.conversationId);
 		if (!controller) return false;
 		const config = readVoiceConfig(this.plugin.settings);
-		const match = matchVoiceCommand(ctx.rawTranscript, config.triggerPhrase);
 		const extensions = this.plugin.getExtensionManager();
 		const result = await dispatchOnVoiceCommand(
 			{
 				conversationId: ctx.conversationId,
 				timestamp: new Date().toISOString(),
 				rawTranscript: ctx.rawTranscript,
-				transcript: match ? match.command : ctx.rawTranscript,
-				hasTriggerPhrase: match !== null,
+				transcript: stripWakeWord(ctx.rawTranscript, config.wakeWordSpellings),
+				addressed: ctx.addressed,
+				wakeWord: config.wakeWord,
 				isTurnRunning: ctx.isTurnRunning,
 				isSpeaking: ctx.isSpeaking,
 				queuedText: ctx.queuedText,
@@ -308,13 +308,7 @@ export class VoiceManager {
 				execute: (automation, context) => extensions.executeAutomation(automation, context),
 			},
 		);
-		if (result.handled) return true;
-		if (match) {
-			log.info("Voice command not handled by any automation", { command: match.command });
-			controller.speak(`Unknown voice command: ${match.command || "nothing"}.`);
-			return true;
-		}
-		return false;
+		return result.handled;
 	}
 
 	private createStt(): WhisperServerBackend {

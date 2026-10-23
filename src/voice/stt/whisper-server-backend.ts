@@ -27,7 +27,7 @@ export interface WhisperServerConfig {
 	modelPath: string;
 	port: number;
 	language: string;
-	/** Launch-time vocabulary prompt (trigger phrase + user jargon); may be empty. */
+	/** Launch-time vocabulary prompt (wake word + user jargon); may be empty. */
 	initialPrompt: string;
 	/** Extra shell-style arguments appended to the launch command. */
 	extraArgs: string;

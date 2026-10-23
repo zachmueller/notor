@@ -664,11 +664,29 @@ export interface NotorSettings {
 	voice_whisper_server_port: number;
 	/** Whisper language code (`-l`). */
 	voice_whisper_language: string;
-	/** Extra vocabulary (names, jargon) added to whisper's initial prompt after the trigger phrase. */
+	/** Extra vocabulary (names, jargon) added to whisper's initial prompt after the wake word. */
 	voice_whisper_vocabulary: string;
 	/** Additional whisper-server arguments (shell-style string). */
 	voice_whisper_extra_args: string;
-	/** Silence after speech that ends an utterance and submits it; listening stays on. */
+	/** Phrase that addresses Notor; nothing is sent until it is heard. */
+	voice_wake_word: string;
+	/** Comma-separated alternative spellings of the wake word for the keyword spotter. */
+	voice_wake_word_variants: string;
+	/** How long to wait for speech to start after a bare wake word. */
+	voice_wake_listen_timeout_ms: number;
+	/** Play a short chime when the wake word is heard. */
+	voice_wake_earcon_enabled: boolean;
+	/** Python interpreter that runs the sherpa-onnx keyword spotter — a bare name on the login-shell PATH, or an absolute path. */
+	voice_kws_python_path: string;
+	/** Directory of the sherpa-onnx keyword-spotting model (tokens.txt, bpe.model, encoder/decoder/joiner .onnx). */
+	voice_kws_model_dir: string;
+	/** Keyword-spotter trigger threshold (0–1); lower wakes more easily. */
+	voice_kws_threshold: number;
+	/** Keyword-spotter boosting score; higher favours the wake word. */
+	voice_kws_score: number;
+	/** Threads used by the keyword spotter. */
+	voice_kws_num_threads: number;
+	/** Silence after speech that ends what was said after the wake word. */
 	voice_end_of_turn_pause_ms: number;
 	/** RMS level (0–1) at or above which audio counts as speech. */
 	voice_silence_threshold: number;
@@ -688,8 +706,6 @@ export interface NotorSettings {
 	voice_input_cleanup_enabled: boolean;
 	/** Target length of the spoken summary, in characters. */
 	voice_speech_summary_max_chars: number;
-	/** Prefix that marks an utterance as a voice command. */
-	voice_command_trigger_phrase: string;
 	/** Text-to-speech command; it reads the text to speak from stdin. */
 	voice_tts_command: string;
 	/** Voice name passed to the TTS command (`say -v`); "" = system default. */

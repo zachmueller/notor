@@ -158,7 +158,7 @@ export function renderVoiceSection(containerEl: HTMLElement, ctx: SettingsContex
 		"Whisper language code, such as en, de, or auto.", "en");
 	new Setting(containerEl)
 		.setName("Vocabulary")
-		.setDesc("Names and jargon to help recognition. Added to whisper's prompt after the trigger phrase.")
+		.setDesc("Names and jargon to help recognition. Added to whisper's prompt after the wake word.")
 		.addTextArea((text) =>
 			text
 				.setPlaceholder("Project names, people, jargon…")
@@ -174,7 +174,7 @@ export function renderVoiceSection(containerEl: HTMLElement, ctx: SettingsContex
 	// --- Listening ---
 	markSubsection(new Setting(containerEl).setHeading().setName("Listening"), "Listening");
 	addNumberSetting(containerEl, ctx, "voice_end_of_turn_pause_ms", "End-of-turn pause (ms)",
-		"Silence after you stop talking before the utterance is sent. Listening stays on.",
+		"Silence after you stop talking that ends what you said after the wake word.",
 		{ min: 300, max: 30_000, integer: true });
 	addNumberSetting(containerEl, ctx, "voice_silence_threshold", "Speech threshold",
 		"Microphone level (0–1) above which audio counts as speech. Raise it in noisy rooms.",
@@ -250,9 +250,4 @@ export function renderVoiceSection(containerEl: HTMLElement, ctx: SettingsContex
 		"Export the default spoken-summary prompt to a note for editing. If it already exists, opens it.",
 		prompts.speechSummary);
 
-	// --- Voice commands ---
-	markSubsection(new Setting(containerEl).setHeading().setName("Voice commands"), "Voice commands");
-	addTextSetting(containerEl, ctx, "voice_command_trigger_phrase", "Trigger phrase",
-		"Say this before a command (for example \"voice command approve\") so it is not sent as a message.",
-		"voice command");
 }
