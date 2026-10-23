@@ -265,7 +265,7 @@ Return a string for success, or throw an Error for failure.
 - \`utils.memoryApprovalMode\` — current memory approval mode: \`"auto"\` | \`"bulk"\` | \`"bulk_and_inline"\` (\`null\` when memory is disabled)
 - \`utils.webview\` — Web Viewer browser facade (\`getConversationWebview\`, \`getActiveWebview\`, \`waitForReady\`, \`getConversationId\`, \`persistUrl\`, \`readPersistedUrl\`); \`null\` off-desktop (Electron required). On desktop, present only when the webview tool is enabled in Settings → Tools (default off); otherwise its methods throw
 - \`utils.tempOutputSpiller\` — spill truncated tool output to disk; \`undefined\` when disabled or on mobile
-- \`utils.voice\` — voice-mode controls (\`speak\`, \`stopSpeaking\`, \`repeatLast\`, \`stopListening\`, \`cancelTurn\`, \`approvePending\`, \`rejectPending\`, \`answerPending\`, \`sendQueued\`, \`clearQueued\`, \`describeState\`, \`getState\`); \`null\` unless voice mode is on for this conversation. Used by \`on_voice_command\` automations (see docs/voice.md)
+- \`utils.voice\` — voice-mode controls (\`speak\`, \`stopSpeaking\`, \`repeatLast\`, \`stopListening\`, \`cancelTurn\`, \`approvePending\`, \`rejectPending\`, \`answerPending\`, \`sendQueued\`, \`clearQueued\`, \`describeState\`, \`getState\` — includes \`addressed\`); \`null\` unless voice mode is on for this conversation. Used by \`on_voice_command\` automations, whose context has \`transcript\` (wake word stripped), \`addressed\` and \`wakeWord\` (see docs/voice.md)
 
 ### Common patterns
 

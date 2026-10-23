@@ -181,7 +181,7 @@ return { success: true, result: content };
 | `on_schedule` | Scheduled | A cron schedule fires (while Obsidian is running). |
 | `on_daily_start` | Scheduled | The first time you use Obsidian each day, after the day reset time ([details](hooks.md#daily-start)). Runs right away, with no provider check. |
 | `on_conversation_start` | LLM lifecycle | After the first user message in a new conversation, before the LLM call. **Non-blocking.** Fires once per conversation. Not available as a shell hook — automation-only. |
-| `on_voice_command` | Voice mode | Every utterance recognized while [voice mode](voice.md) is on, before it is sent as a message. **Awaited** — automations run in order and the first that returns `{ handled: true }` consumes the utterance. Automation-only. |
+| `on_voice_command` | Voice mode | Every utterance said after the [voice mode](voice.md) wake word, before it is sent as a message — plus short replies said without it while an approval or question is pending. **Awaited** — automations run in order and the first that returns `{ handled: true }` consumes the utterance. Automation-only. |
 
 ### Context object
 
@@ -218,8 +218,9 @@ Automation code receives a `context` object with event-specific data.
 |---|---|---|
 | `context.conversationId` | `string` | Conversation the voice loop is bound to |
 | `context.rawTranscript` | `string` | Exactly what was recognized |
-| `context.transcript` | `string` | Text after the trigger phrase when `hasTriggerPhrase`; otherwise the raw transcript |
-| `context.hasTriggerPhrase` | `boolean` | Whether the utterance started with the configured trigger phrase |
+| `context.transcript` | `string` | The transcript with any leading wake word removed |
+| `context.addressed` | `boolean` | `true` when said after the wake word; `false` for a reply said without it while something is pending |
+| `context.wakeWord` | `string` | The configured wake word (e.g. `Hey Notor`), for spoken help |
 | `context.isTurnRunning` | `boolean` | Whether the assistant is mid-turn |
 | `context.isSpeaking` | `boolean` | Whether Notor was speaking when the utterance ended |
 | `context.queuedText` | `string` | Dictation held for after the current turn |
@@ -231,7 +232,7 @@ Automation code receives a `context` object with event-specific data.
 All automations are fire-and-forget — they execute asynchronously without blocking the pipeline. There are two exceptions:
 
 - **`pre_send`** — inherently blocking. A returned string is injected into the conversation as additional context.
-- **`on_voice_command`** — awaited, sequential in `notor-automation-order`. Return `{ handled: true }` (or `true`) to consume the utterance so it is not sent to the conversation; any other return lets the next automation, then the chat path, have it. Use `utils.voice` to act.
+- **`on_voice_command`** — awaited, sequential in `notor-automation-order`. Return `{ handled: true }` (or `true`) to consume the utterance so it is not sent to the conversation; any other return lets the next automation, then the chat path, have it. Unhandled utterances with `addressed: false` are dropped, never sent. Match whole phrases rather than prefixes, or a prompt like "send me a summary" is swallowed by a "send" command. Use `utils.voice` to act.
 - **`on_conversation_start` with `notor-blocking: true`** — awaited before the first LLM turn. The automation can emit a chat block (via `notor-blocking-emit-kind`) that is visible to the LLM on its first response. If the automation exceeds `notor-blocking-timeout`, it is cancelled and the conversation proceeds without its result.
 
 ### Example
@@ -476,7 +477,7 @@ All extension code executes with these variables in scope:
 | `utils.abortSignal` | `AbortSignal` for the current tool call (tools only, not automations). |
 | `utils.onProgress(status)` | Emit a progress status string for long-running tools (tools only, set per-invocation). |
 | `utils.notify(message, opts?)` | Display a toast notification. Options: `duration` (ms), `onClick`, `onRightClick`. |
-| `utils.voice` | [Voice mode](voice.md) controls: `speak(text, { interrupt? })`, `stopSpeaking()`, `repeatLast()`, `stopListening()`, `cancelTurn()`, `approvePending({ all? })`, `rejectPending({ all? })`, `answerPending(values)`, `sendQueued()`, `clearQueued()`, `describeState()`, `getState()`. `null` unless voice mode is on for this conversation. |
+| `utils.voice` | [Voice mode](voice.md) controls: `speak(text, { interrupt? })`, `stopSpeaking()`, `repeatLast()`, `stopListening()`, `cancelTurn()`, `approvePending({ all? })`, `rejectPending({ all? })`, `answerPending(values)`, `sendQueued()`, `clearQueued()`, `describeState()`, `getState()` (`{ listening, addressed, speaking, turnRunning, queuedText, pendingApprovals, pendingQuestions }`). `stopListening()` turns voice mode off. `null` unless voice mode is on for this conversation. |
 
 ### Bundled libraries
 

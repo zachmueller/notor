@@ -18,7 +18,7 @@ Configure shell commands to fire automatically at key points in the conversation
 | `after-completion` | After the LLM's full response turn completes | No |
 | `on_approval_required` | Before tool execution, when a tool call needs approval | Yes — sequential, short-circuits on first decision |
 
-> **Note:** Two additional triggers are available for [user-defined automations](extensions.md) only (not shell hooks): `on_conversation_start` fires once per conversation when the first user message is submitted, and `on_voice_command` fires for every utterance recognized while [voice mode](voice.md) is on.
+> **Note:** Two additional triggers are available for [user-defined automations](extensions.md) only (not shell hooks): `on_conversation_start` fires once per conversation when the first user message is submitted, and `on_voice_command` fires for every utterance said after the [voice mode](voice.md) wake word.
 
 **Behavior:**
 

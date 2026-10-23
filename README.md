@@ -13,7 +13,7 @@ Notor gives you a full AI chat panel inside Obsidian with the ability to read, s
 - **Side-panel AI chat** with streaming responses, conversation history, [model presets](docs/model-presets.md) for quick switching between providers/models, [conversation forking and favorites](docs/export-import.md), [export/import](docs/export-import.md) to HTML or Markdown, find-in-messages search (via command palette), and per-message copy and context menu actions
 - **[Attach notes and files](docs/context.md)** directly to messages — vault notes (with section-level references like `[[Note#Section]]`), external files (including `.docx`), images, and PDFs. Ambient workspace context (open notes, vault structure, OS) is injected automatically.
 - **Auto-compaction** — automatic context summarization when conversations approach the model's context window limit
-- **[Voice mode](docs/voice.md)** (macOS) — hands-free conversation: local whisper.cpp speech recognition, LLM clean-up of dictated input, spoken summaries of replies via `say`, and voice commands to approve tool calls or answer questions
+- **[Voice mode](docs/voice.md)** (macOS) — hands-free conversation: a local "Hey Notor" wake word (sherpa-onnx), local whisper.cpp speech recognition, LLM clean-up of dictated input, spoken summaries of replies via `say`, and voice commands to approve tool calls or answer questions
 - **Multiple LLM providers** — local OpenAI-compatible endpoints (Ollama, LM Studio), Anthropic, OpenAI, and AWS Bedrock
 
 ### Vault tools
@@ -122,7 +122,7 @@ src/
   include-note/        # <include_note> tag parser and resolver (vault-relative paths and wikilinks)
   rules/               # Vault-level instruction file evaluation
   shell/               # Shell executor, shell resolver, output buffer, login-shell PATH (shared by execute_command, hooks, MCP, voice)
-  voice/               # Voice mode: microphone capture, silence detection, whisper.cpp client, speech queue, controller
+  voice/               # Voice mode: microphone capture, wake-word sidecar, silence detection, whisper.cpp client, speech queue, controller
   mcp/                 # MCP server hub, tool adapter, and type definitions
   sub-agents/          # Sub-agent profile discovery, manager, built-in profiles, preamble, semaphore
   extensions/          # User-defined tool, automation, and chat block runtime: discovery, parsing,
