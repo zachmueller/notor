@@ -102,7 +102,7 @@ export interface VoiceUtils {
 	stopSpeaking: () => void;
 	/** Re-speak the last announcement or summary. False when there is nothing to repeat. */
 	repeatLast: () => boolean;
-	/** Turn voice mode off (announces first). */
+	/** Turn voice mode off — disarm the wake word (announces first). */
 	stopListening: () => void;
 	/** Abort the running turn; listening continues. False when nothing is running. */
 	cancelTurn: () => boolean;
@@ -117,7 +117,10 @@ export interface VoiceUtils {
 	/** A spoken one-liner describing the current state. */
 	describeState: () => string;
 	getState: () => {
+		/** Voice mode is on (armed for the wake word, or addressed). */
 		listening: boolean;
+		/** The wake word was heard and Notor is capturing what follows. */
+		addressed: boolean;
 		speaking: boolean;
 		turnRunning: boolean;
 		queuedText: string;

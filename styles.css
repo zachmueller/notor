@@ -4934,6 +4934,12 @@
 	color: var(--text-normal);
 }
 
+/* Armed: waiting for the wake word — lit but quiet; it pulses once addressed. */
+.notor-voice-btn.is-armed {
+	background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.2);
+	color: var(--text-accent);
+}
+
 .notor-voice-btn.is-listening {
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);

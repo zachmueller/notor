@@ -17,10 +17,11 @@ import type { NotorSettings } from "../settings/types";
 import type { LLMProvider } from "../providers/provider";
 import type { Message } from "../types";
 import type { AudioSource } from "./audio/audio-capture";
-import type { SttBackend, SttStatus, VoiceConfigProblem } from "./stt/types";
+import type { SttBackend, SttStatus, TranscribeHints, VoiceConfigProblem } from "./stt/types";
 import type { SpeakResult, TtsBackend } from "./tts/types";
 import type { VoicePromptFiles } from "./shaping-prompts";
-import { VoiceController, VoiceStartError, type VoiceOrchestratorLike, type VoiceStatus } from "./voice-controller";
+import { VoiceController, VoiceStartError, type VoiceEarcon, type VoiceOrchestratorLike, type VoiceStatus } from "./voice-controller";
+import { FakeWakeDetector } from "./wake/fake-wake-detector";
 
 // ---------------------------------------------------------------------------
 // Fakes
@@ -50,6 +51,7 @@ class FakeStt implements SttBackend {
 	problems: VoiceConfigProblem[] = [];
 	transcripts: string[] = [];
 	wavs: ArrayBuffer[] = [];
+	hints: Array<TranscribeHints | undefined> = [];
 	disposed = false;
 	restarted = 0;
 	private listeners = new Set<(status: SttStatus, detail?: string) => void>();
@@ -60,8 +62,9 @@ class FakeStt implements SttBackend {
 		this.status = "ready";
 		return Promise.resolve();
 	}
-	transcribe(wav: ArrayBuffer): Promise<string> {
+	transcribe(wav: ArrayBuffer, hints?: TranscribeHints): Promise<string> {
 		this.wavs.push(wav);
+		this.hints.push(hints);
 		return Promise.resolve(this.transcripts.shift() ?? "");
 	}
 	dispose(): Promise<void> {
@@ -206,6 +209,8 @@ const settle = async () => {
 interface Harness {
 	controller: VoiceController;
 	audio: FakeAudio;
+	wake: FakeWakeDetector;
+	earcons: VoiceEarcon[];
 	stt: FakeStt;
 	tts: FakeTts;
 	orchestrator: FakeOrchestrator;
@@ -223,6 +228,8 @@ function makeHarness(overrides: Partial<NotorSettings> = {}, provider: LLMProvid
 		...overrides,
 	};
 	const audio = new FakeAudio();
+	const wake = new FakeWakeDetector();
+	const earcons: VoiceEarcon[] = [];
 	const stt = new FakeStt();
 	const tts = new FakeTts();
 	const orchestrator = new FakeOrchestrator();
@@ -233,8 +240,10 @@ function makeHarness(overrides: Partial<NotorSettings> = {}, provider: LLMProvid
 		leafId: "leaf-1",
 		conversationId: "conv-1",
 		audio,
+		wake,
 		stt,
 		tts,
+		earcon: (kind) => earcons.push(kind),
 		prompts,
 		providerRegistry: {
 			getProvider: () => {
@@ -247,15 +256,22 @@ function makeHarness(overrides: Partial<NotorSettings> = {}, provider: LLMProvid
 		notify: (m) => notices.push(m),
 		postSpeechGuardMs: 0,
 	});
-	return { controller, audio, stt, tts, orchestrator, statuses, settings, notices };
+	return { controller, audio, wake, earcons, stt, tts, orchestrator, statuses, settings, notices };
 }
 
-/** Start voice mode and let the "Voice mode on." greeting finish. */
+/** Start voice mode: armed for the wake word, no speech. */
 async function startAndGreet(h: Harness): Promise<void> {
 	await h.controller.start();
-	expect(h.tts.spoken).toEqual(["Voice mode on."]);
-	h.tts.finish();
+	expect(h.tts.spoken).toEqual([]);
+	expect(h.earcons).toEqual(["arm"]);
 	await settle();
+}
+
+/** Say the wake word, then `speechMs` of speech, then enough silence to end the utterance. */
+function sayAfterWake(h: Harness, speechMs = 1000): void {
+	h.wake.emitHit();
+	h.audio.feed(0.1, speechMs);
+	h.audio.feed(0, 700);
 }
 
 beforeEach(() => {
@@ -275,12 +291,28 @@ describe("VoiceController start/stop", () => {
 		expect(last.problems).toEqual([{ code: "model_missing", message: "No model." }]);
 	});
 
-	it("starts recognition and the microphone, announces, and listens", async () => {
+	it("includes wake-word detector problems in preflight", async () => {
+		const h = makeHarness();
+		h.wake.problems = [{ code: "kws_model_missing", message: "No wake-word model." }];
+		await expect(h.controller.start()).rejects.toBeInstanceOf(VoiceStartError);
+		expect(h.statuses[h.statuses.length - 1]!.problems).toEqual([{ code: "kws_model_missing", message: "No wake-word model." }]);
+	});
+
+	it("starts recognition, the microphone and the wake word, and arms", async () => {
 		const h = makeHarness();
 		await startAndGreet(h);
 		expect(h.stt.status).toBe("ready");
+		expect(h.wake.status).toBe("ready");
 		expect(h.audio.started).toBe(true);
-		expect(h.controller.getStatus().state).toBe("listening");
+		expect(h.controller.getStatus()).toMatchObject({ state: "armed", detail: "Say “Hey Notor”" });
+		expect(h.notices).toContain("Voice mode on. Say “Hey Notor” to talk.");
+	});
+
+	it("plays no earcons when they are turned off", async () => {
+		const h = makeHarness({ voice_wake_earcon_enabled: false });
+		await h.controller.start();
+		h.wake.emitHit();
+		expect(h.earcons).toEqual([]);
 	});
 
 	it("stop releases everything and reports idle", async () => {
@@ -293,7 +325,9 @@ describe("VoiceController start/stop", () => {
 		await stopping;
 		expect(h.audio.stopped).toBe(true);
 		expect(h.stt.disposed).toBe(true);
+		expect(h.wake.disposed).toBe(true);
 		expect(h.tts.disposed).toBe(true);
+		expect(h.earcons).toEqual(["arm", "disarm"]);
 		expect(h.controller.getStatus()).toMatchObject({ state: "idle", detail: "Turned off." });
 	});
 
@@ -317,6 +351,30 @@ describe("VoiceController start/stop", () => {
 		await settle();
 		expect(h.controller.getStatus().state).toBe("idle");
 	});
+
+	it("stops with an announcement when wake-word detection fails", async () => {
+		const h = makeHarness();
+		await startAndGreet(h);
+		h.wake.emitStatus("error", "The wake-word detector stopped repeatedly.");
+		await tick();
+		expect(h.tts.spoken).toContain("Wake word detection stopped. Voice mode is off.");
+		expect(h.notices).toContain("Voice mode turned off: The wake-word detector stopped repeatedly.");
+		h.tts.finish();
+		await settle();
+		expect(h.controller.getStatus().state).toBe("idle");
+	});
+
+	it("turns off after a long stretch without the wake word", async () => {
+		const h = makeHarness({ voice_stop_on_silence_ms: 1000 });
+		await startAndGreet(h);
+		h.audio.feed(0.1, 600); // ambient talk without the wake word still counts as idle
+		h.audio.feed(0, 500);
+		await tick();
+		expect(h.notices).toContain("Voice mode turned off after silence.");
+		h.tts.finish();
+		await settle();
+		expect(h.controller.getStatus().state).toBe("idle");
+	});
 });
 
 describe("VoiceController utterances", () => {
@@ -330,14 +388,86 @@ describe("VoiceController utterances", () => {
 		expect(h.orchestrator.sent).toEqual(["summarize my meeting notes"]);
 	});
 
-	it("detects an utterance from microphone frames and submits it after the pause", async () => {
+	it("ignores speech until the wake word is heard", async () => {
+		const h = makeHarness();
+		await startAndGreet(h);
+		h.audio.feed(0.1, 1000);
+		h.audio.feed(0, 1000);
+		await settle();
+		expect(h.stt.wavs).toHaveLength(0);
+		expect(h.controller.getStatus().state).toBe("armed");
+	});
+
+	it("captures one utterance after the wake word and submits it after the pause", async () => {
 		const h = makeHarness();
 		await startAndGreet(h);
 		h.stt.transcripts.push("hello from the mic");
+		h.wake.emitHit();
+		expect(h.earcons).toEqual(["arm", "wake"]);
+		expect(h.controller.getStatus().state).toBe("listening");
 		h.audio.feed(0.1, 1000);
-		h.audio.feed(0, 2600);
+		h.audio.feed(0, 700); // 600 ms default pause
 		await settle();
 		expect(h.orchestrator.sent).toEqual(["hello from the mic"]);
+		expect(h.controller.getStatus().state).toBe("armed");
+		expect(h.stt.hints[0]).toEqual({ prompt: "Hey Notor" });
+
+		// Single-shot: the next utterance needs the wake word again.
+		h.audio.feed(0.1, 1000);
+		h.audio.feed(0, 700);
+		await settle();
+		expect(h.stt.wavs).toHaveLength(1);
+	});
+
+	it("keeps the start of a prompt said in one breath with the wake word", async () => {
+		const h = makeHarness();
+		await startAndGreet(h);
+		h.stt.transcripts.push("Notor, summarize my inbox");
+		h.audio.feed(0, 500);
+		h.audio.feed(0.1, 1500); // "Hey Notor, summ…" — the hit arrives mid-word
+		h.wake.emitHit(h.wake.samplesPushed - 4800);
+		h.audio.feed(0.1, 500);
+		h.audio.feed(0, 700);
+		await settle();
+		expect(h.stt.wavs).toHaveLength(1);
+		// Replay starts 800 ms before the hit: at least 0.5 s + 0.8 s + 0.5 s of speech.
+		expect(h.stt.wavs[0]!.byteLength).toBeGreaterThan(44 + 1.7 * 16_000 * 2);
+		expect(h.orchestrator.sent).toEqual(["summarize my inbox"]);
+	});
+
+	it("returns to armed when nothing is said after a bare wake word", async () => {
+		vi.useFakeTimers();
+		const h = makeHarness();
+		await h.controller.start();
+		h.wake.emitHit();
+		h.audio.feed(0.1, 200); // the wake word's tail: too short, discarded
+		h.audio.feed(0, 700);
+		expect(h.controller.getStatus().state).toBe("listening");
+		await vi.advanceTimersByTimeAsync(5_000);
+		expect(h.controller.getStatus().state).toBe("armed");
+		expect(h.earcons).toEqual(["arm", "wake", "disarm"]);
+		expect(h.stt.wavs).toHaveLength(0);
+	});
+
+	it("waits for the prompt when the transcript is only the wake word", async () => {
+		const h = makeHarness();
+		await startAndGreet(h);
+		h.stt.transcripts.push("Hey Notor.", "what's on my agenda");
+		sayAfterWake(h);
+		await settle();
+		expect(h.orchestrator.sent).toEqual([]);
+		expect(h.controller.getStatus().state).toBe("listening");
+		h.audio.feed(0.1, 1000);
+		h.audio.feed(0, 700);
+		await settle();
+		expect(h.orchestrator.sent).toEqual(["what's on my agenda"]);
+	});
+
+	it("strips whisper's spelling of the wake word before sending", async () => {
+		const h = makeHarness();
+		await startAndGreet(h);
+		await h.controller.injectTranscript("Hey Nota, summarize my inbox.");
+		expect(h.orchestrator.sent).toEqual(["summarize my inbox."]);
 	});
 
 	it("ignores empty transcripts", async () => {
@@ -345,19 +475,50 @@ describe("VoiceController utterances", () => {
 		await startAndGreet(h);
 		await h.controller.injectAudio(new Float32Array(16_000));
 		expect(h.orchestrator.sent).toEqual([]);
-		expect(h.controller.getStatus().state).toBe("listening");
+		expect(h.controller.getStatus().state).toBe("armed");
 	});
 
-	it("gives the command handler first refusal", async () => {
+	it("gives the command handler first refusal and drops unhandled unaddressed speech", async () => {
 		const h = makeHarness();
-		const handler = vi.fn(async (ctx: { rawTranscript: string }) => ctx.rawTranscript.startsWith("voice command"));
+		const handler = vi.fn(async (ctx: { rawTranscript: string }) => ctx.rawTranscript === "Hey Notor, approve");
 		(h.controller as unknown as { deps: { commandHandler: typeof handler } }).deps.commandHandler = handler;
 		await startAndGreet(h);
-		await h.controller.injectTranscript("voice command approve");
+		await h.controller.injectTranscript("Hey Notor, approve");
 		await h.controller.injectTranscript("plain message");
-		expect(handler).toHaveBeenCalledTimes(2);
-		expect(handler.mock.calls[0]![0]).toMatchObject({ conversationId: "conv-1", rawTranscript: "voice command approve", isTurnRunning: false });
+		await h.controller.injectTranscript("hello there", { addressed: false });
+		expect(handler).toHaveBeenCalledTimes(3);
+		expect(handler.mock.calls[0]![0]).toMatchObject({ conversationId: "conv-1", rawTranscript: "Hey Notor, approve", addressed: true, isTurnRunning: false });
+		expect(handler.mock.calls[2]![0]).toMatchObject({ addressed: false });
 		expect(h.orchestrator.sent).toEqual(["plain message"]);
+	});
+
+	it("hears short unaddressed replies only while an approval is pending", async () => {
+		const h = makeHarness();
+		const contexts: Array<{ rawTranscript: string; addressed: boolean }> = [];
+		const handler = vi.fn(async (ctx: { rawTranscript: string; addressed: boolean }) => {
+			contexts.push(ctx);
+			return ctx.rawTranscript === "yes";
+		});
+		(h.controller as unknown as { deps: { commandHandler: typeof handler } }).deps.commandHandler = handler;
+		await startAndGreet(h);
+		const session = h.orchestrator.startTurn([{ role: "user", content: "write it" }]);
+		session.pendingApprovals.set("m1", { resolve: () => {}, toolCallId: "t1", messageId: "m1", toolName: "write_note", parameters: {} });
+		h.stt.transcripts.push("yes", "hello there");
+		h.audio.feed(0.1, 1000);
+		h.audio.feed(0, 700);
+		await settle();
+		h.audio.feed(0.1, 1000);
+		h.audio.feed(0, 700);
+		await settle();
+		expect(contexts.map((c) => [c.rawTranscript, c.addressed])).toEqual([["yes", false], ["hello there", false]]);
+		expect(h.controller.getQueuedText()).toBe("");
+		expect(h.orchestrator.sent).toEqual([]);
+
+		session.pendingApprovals.clear();
+		h.audio.feed(0.1, 1000);
+		h.audio.feed(0, 700);
+		await settle();
+		expect(h.stt.wavs).toHaveLength(2);
 	});
 });
 
@@ -369,13 +530,13 @@ describe("VoiceController during a turn", () => {
 		await h.controller.injectTranscript("and also this");
 		await h.controller.injectTranscript("one more thing");
 		expect(h.orchestrator.sent).toEqual([]);
-		expect(h.controller.getStatus()).toMatchObject({ state: "listening", queuedText: "and also this\none more thing" });
+		expect(h.controller.getStatus()).toMatchObject({ state: "armed", queuedText: "and also this\none more thing" });
 
 		session.conversationManager.addMessage({ role: "assistant", content: "All **done**." });
 		h.orchestrator.finishTurn(session);
 		await settle();
 		// No shaping model in this harness → the last assistant message is spoken as the summary.
-		expect(h.tts.spoken).toEqual(["Voice mode on.", "All done."]);
+		expect(h.tts.spoken).toEqual(["All done."]);
 		expect(h.orchestrator.sent).toEqual([]);
 		h.tts.finish();
 		await settle();
@@ -391,19 +552,22 @@ describe("VoiceController during a turn", () => {
 		session.conversationManager.addMessage({ role: "assistant", content: "Long markdown reply…" });
 		h.orchestrator.finishTurn(session);
 		await settle();
-		expect(h.tts.spoken[1]).toBe("I finished the report and found two issues.");
+		expect(h.tts.spoken[0]).toBe("I finished the report and found two issues.");
 		const [messages] = (provider.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]!;
 		expect(messages[0]).toEqual({ role: "system", content: "SUMMARY" });
 	});
 
-	it("barge-in stops playback but leaves the turn running", async () => {
+	it("the wake word stops playback but leaves the turn running; plain speech does not", async () => {
 		const h = makeHarness();
 		await startAndGreet(h);
 		const session = h.orchestrator.startTurn([{ role: "user", content: "go" }]);
 		h.controller.speak("A long announcement that the user talks over.");
 		await tick();
 		expect(h.tts.isSpeaking).toBe(true);
-		h.audio.feed(0.1, 420); // > 3× threshold, sustained past 400 ms
+		h.audio.feed(0.3, 600); // loud room talk
+		await tick();
+		expect(h.tts.stops).toBe(0);
+		h.wake.emitHit();
 		await tick();
 		expect(h.tts.stops).toBe(1);
 		expect(h.tts.isSpeaking).toBe(false);
@@ -418,12 +582,14 @@ describe("VoiceController during a turn", () => {
 		session.pendingApprovals.set("m1", { resolve: () => {}, toolCallId: "t1", messageId: "m1", toolName: "write_note", parameters: { path: "Ideas.md" } });
 		session.setStatus("waiting_approval");
 		await settle();
-		expect(h.tts.spoken[1]).toBe("Approval needed for writing Ideas. Say approve or reject.");
+		expect(h.tts.spoken[0]).toBe("Approval needed for writing Ideas. Say approve or reject.");
+		expect(h.controller.getStatus()).toMatchObject({ state: "speaking" });
 		h.tts.finish();
 		await settle();
+		expect(h.controller.getStatus()).toMatchObject({ state: "armed", detail: "Waiting for your reply" });
 		session.setStatus("waiting_approval"); // second status ping in the same episode
 		await settle();
-		expect(h.tts.spoken).toHaveLength(2);
+		expect(h.tts.spoken).toHaveLength(1);
 
 		session.pendingApprovals.clear();
 		session.setStatus("running");
@@ -435,7 +601,7 @@ describe("VoiceController during a turn", () => {
 		});
 		session.setStatus("waiting_approval");
 		await settle();
-		expect(h.tts.spoken[2]).toBe("Which folder? Options: 1, Inbox; 2, Archive. Say answer, followed by your reply.");
+		expect(h.tts.spoken[1]).toBe("Which folder? Options: 1, Inbox; 2, Archive. Say answer, followed by your reply.");
 	});
 
 	it("speaks tool progress at the every_tool level and stays quiet at needs_me", async () => {
@@ -444,7 +610,7 @@ describe("VoiceController during a turn", () => {
 		const s1 = quiet.orchestrator.startTurn([{ role: "user", content: "x" }]);
 		quiet.orchestrator.observers.emitToolCallStarted(s1, "read_note", { path: "Daily.md" }, "m");
 		await tick();
-		expect(quiet.tts.spoken).toEqual(["Voice mode on."]);
+		expect(quiet.tts.spoken).toEqual([]);
 
 		const chatty = makeHarness({ voice_progress_verbosity: "every_tool" });
 		await startAndGreet(chatty);
@@ -452,10 +618,10 @@ describe("VoiceController during a turn", () => {
 		chatty.orchestrator.observers.emitToolCallStarted(s2, "read_note", { path: "Daily.md" }, "m");
 		chatty.orchestrator.observers.emitToolCallStarted(s2, "search_notes", { query: "plans" }, "m");
 		await tick();
-		expect(chatty.tts.spoken.slice(1)).toEqual(["reading Daily"]);
+		expect(chatty.tts.spoken).toEqual(["reading Daily"]);
 		chatty.tts.finish();
 		await settle();
-		expect(chatty.tts.spoken.slice(1)).toEqual(["reading Daily", "searching for plans"]);
+		expect(chatty.tts.spoken).toEqual(["reading Daily", "searching for plans"]);
 	});
 
 	it("reports cancelled and failed turns", async () => {
@@ -464,7 +630,7 @@ describe("VoiceController during a turn", () => {
 		const s1 = h.orchestrator.startTurn([{ role: "user", content: "a" }]);
 		h.orchestrator.finishTurn(s1, { cancelled: true });
 		await settle();
-		expect(h.tts.spoken[1]).toBe("Cancelled.");
+		expect(h.tts.spoken[0]).toBe("Cancelled.");
 		h.tts.finish();
 		await settle();
 
@@ -472,7 +638,7 @@ describe("VoiceController during a turn", () => {
 		s2.conversationManager.addMessage({ role: "error", content: "Provider returned **500**." });
 		h.orchestrator.finishTurn(s2, { status: "errored" });
 		await settle();
-		expect(h.tts.spoken[2]).toBe("The last turn failed: Provider returned 500.");
+		expect(h.tts.spoken[1]).toBe("The last turn failed: Provider returned 500.");
 	});
 
 	it("cancelTurn aborts the running session and does not stop listening", async () => {
@@ -481,16 +647,17 @@ describe("VoiceController during a turn", () => {
 		const session = h.orchestrator.startTurn([{ role: "user", content: "a" }]);
 		expect(h.controller.cancelTurn()).toBe(true);
 		expect(session.abortController.signal.aborted).toBe(true);
-		expect(h.controller.getStatus().state).toBe("listening");
+		expect(h.controller.getStatus().state).toBe("armed");
 		h.orchestrator.finishTurn(session, { cancelled: true });
 		expect(h.controller.cancelTurn()).toBe(false);
 	});
 
-	it("restartRecognition delegates to the backend", async () => {
+	it("restartRecognition restarts speech recognition and the wake word", async () => {
 		const h = makeHarness();
 		await startAndGreet(h);
 		await h.controller.restartRecognition();
 		expect(h.stt.restarted).toBe(1);
+		expect(h.wake.restarted).toBe(1);
 	});
 });
 
@@ -573,7 +740,7 @@ describe("VoiceController settling prompts by voice", () => {
 	it("describeState reports pending work and queued dictation", async () => {
 		const h = makeHarness();
 		await startAndGreet(h);
-		expect(h.controller.describeState()).toBe("Idle and listening.");
+		expect(h.controller.describeState()).toBe("Idle. Say Hey Notor to talk.");
 		const session = h.orchestrator.startTurn([{ role: "user", content: "go" }]);
 		h.orchestrator.observers.emitToolCallStarted(session, "read_note", {}, "m");
 		await h.controller.injectTranscript("and one more thing");

@@ -33,6 +33,7 @@ export function buildVoiceUtils(ctx: BuilderContext): Pick<ExtensionUtils, "voic
 			describeState: () => controller.describeState(),
 			getState: () => ({
 				listening: controller.getStatus().state !== "idle",
+				addressed: controller.isAddressed,
 				speaking: controller.isSpeaking,
 				turnRunning: controller.isTurnRunning,
 				queuedText: controller.getQueuedText(),

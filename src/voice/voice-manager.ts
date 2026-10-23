@@ -3,8 +3,8 @@
  *
  * One controller per chat panel (leaf), at most one active at a time because
  * the microphone is a single shared resource. Builds the real backends
- * (microphone, whisper-server, `say`) from settings, relays status to the UI,
- * and offers test seams that bypass the microphone.
+ * (microphone, sherpa-onnx wake word, whisper-server, `say`) from settings,
+ * relays status to the UI, and offers test seams that bypass the microphone.
  */
 
 import { Notice, Platform } from "obsidian";
@@ -21,8 +21,18 @@ import { CommandTts } from "./tts/command-tts";
 import { MicrophoneAudioSource, type AudioSource } from "./audio/audio-capture";
 import { createVoicePromptFiles, type VoicePromptFiles } from "./shaping-prompts";
 import { buildWhisperInitialPrompt, readVoiceConfig } from "./voice-settings";
+import { SherpaKwsBackend } from "./wake/sherpa-kws-backend";
+import { FakeWakeDetector } from "./wake/fake-wake-detector";
+import { EarconPlayer } from "./wake/earcon";
+import type { WakeWordDetector } from "./wake/types";
 
 const log = logger("VoiceManager");
+
+/** ScriptProcessor frame size: ~128 ms at 16 kHz keeps wake-word latency low. */
+const MIC_FRAME_SAMPLES = 2048;
+
+/** Settings edits are batched before the wake-word detector restarts. */
+const WAKE_CONFIG_DEBOUNCE_MS = 1_500;
 
 export const IDLE_VOICE_STATUS: VoiceStatus = { state: "idle" };
 
@@ -45,6 +55,8 @@ export class VoiceManager {
 	private readonly listeners = new Set<(leafId: string, status: VoiceStatus) => void>();
 	private commandHandler: VoiceCommandHandler | null = null;
 	private disposed = false;
+	private readonly earcons = new EarconPlayer();
+	private wakeConfigTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(private readonly plugin: NotorPlugin) {
 		this.commandHandler = (ctx) => this.dispatchVoiceCommand(ctx);
@@ -61,7 +73,7 @@ export class VoiceManager {
 
 	/** Environment check without starting anything. */
 	preflight(): VoiceConfigProblem[] {
-		return this.createStt().preflight();
+		return [...this.createStt().preflight(), ...this.createWakeDetector().preflight()];
 	}
 
 	getStatus(leafId: string): VoiceStatus {
@@ -107,7 +119,7 @@ export class VoiceManager {
 	// Lifecycle
 	// -----------------------------------------------------------------------
 
-	/** Turn voice mode on or off for the panel behind `orchestrator`. */
+	/** Turn voice mode (the armed wake word) on or off for the panel behind `orchestrator`. */
 	async toggle(orchestrator: ChatOrchestrator): Promise<void> {
 		const leafId = orchestrator.getView()?.leaf.id;
 		if (!leafId) {
@@ -116,7 +128,8 @@ export class VoiceManager {
 		}
 		const existing = this.controllers.get(leafId);
 		if (existing) {
-			await existing.stop("Turned off.", { announce: true });
+			await existing.stop("Turned off.", { announce: false });
+			new Notice("Voice mode off.");
 			return;
 		}
 		await this.startForOrchestrator(orchestrator);
@@ -129,7 +142,7 @@ export class VoiceManager {
 	 */
 	async startForOrchestrator(
 		orchestrator: ChatOrchestrator,
-		opts: { withoutCapture?: boolean } = {},
+		opts: { withoutCapture?: boolean; realWakeDetector?: boolean } = {},
 	): Promise<VoiceController | null> {
 		if (this.disposed) return null;
 		const view = orchestrator.getView();
@@ -171,8 +184,10 @@ export class VoiceManager {
 			orchestrator,
 			leafId,
 			conversationId,
-			audio: opts.withoutCapture ? new SilentAudioSource() : new MicrophoneAudioSource(),
+			audio: opts.withoutCapture ? new SilentAudioSource() : new MicrophoneAudioSource({ bufferSize: MIC_FRAME_SAMPLES }),
+			wake: opts.withoutCapture && !opts.realWakeDetector ? new FakeWakeDetector() : this.createWakeDetector(),
 			stt: this.createStt(),
+			earcon: (kind) => this.earcons.play(kind),
 			tts: new CommandTts({ command: config.ttsCommand, voice: config.ttsVoice, rate: config.ttsRate }),
 			prompts: this.getPromptFiles(),
 			providerRegistry: this.plugin.getProviderRegistry(),
@@ -243,16 +258,32 @@ export class VoiceManager {
 		}
 	}
 
-	/** After system wake the whisper server may be gone; restart it for any active controller. */
+	/** After system wake the sidecars may be gone; restart them for any active controller. */
 	async restartRecognitionAfterWake(): Promise<void> {
 		for (const controller of [...this.controllers.values()]) {
 			await controller.restartRecognition();
 		}
 	}
 
+	/**
+	 * Call after a wake-word or keyword-spotter setting changed: once edits
+	 * settle, the running detector restarts with the new keywords and tuning.
+	 */
+	applyWakeConfigChange(): void {
+		if (this.wakeConfigTimer !== null) clearTimeout(this.wakeConfigTimer);
+		this.wakeConfigTimer = setTimeout(() => {
+			this.wakeConfigTimer = null;
+			for (const controller of [...this.controllers.values()]) {
+				void controller.restartWakeWord();
+			}
+		}, WAKE_CONFIG_DEBOUNCE_MS);
+	}
+
 	async dispose(): Promise<void> {
 		this.disposed = true;
+		if (this.wakeConfigTimer !== null) clearTimeout(this.wakeConfigTimer);
 		await this.stopAll("Plugin unloading.");
+		this.earcons.dispose();
 		this.listeners.clear();
 		this.statuses.clear();
 	}
@@ -261,20 +292,33 @@ export class VoiceManager {
 	// Test and automation seams (bypass the microphone)
 	// -----------------------------------------------------------------------
 
-	startWithoutCapture(orchestrator: ChatOrchestrator): Promise<VoiceController | null> {
-		return this.startForOrchestrator(orchestrator, { withoutCapture: true });
+	/**
+	 * Start without the microphone. The wake word is injected with `injectWake`
+	 * unless `realWakeDetector` is set, which spawns the configured keyword
+	 * spotter (the e2e suite points it at a fake).
+	 */
+	startWithoutCapture(orchestrator: ChatOrchestrator, opts: { realWakeDetector?: boolean } = {}): Promise<VoiceController | null> {
+		return this.startForOrchestrator(orchestrator, { withoutCapture: true, realWakeDetector: opts.realWakeDetector });
 	}
 
-	injectTranscript(leafId: string, text: string): Promise<void> {
+	/** Act as if the wake word had just been heard. */
+	injectWake(leafId: string): void {
 		const controller = this.controllers.get(leafId);
-		if (!controller) return Promise.reject(new Error(`No voice controller for leaf ${leafId}`));
-		return controller.injectTranscript(text);
+		if (!controller) throw new Error(`No voice controller for leaf ${leafId}`);
+		controller.injectWake();
 	}
 
-	injectAudio(leafId: string, samples: ArrayLike<number>, sampleRate = 16_000): Promise<void> {
+	/** Feed a transcript; addressed (as if said after the wake word) unless `addressed: false`. */
+	injectTranscript(leafId: string, text: string, opts: { addressed?: boolean } = {}): Promise<void> {
 		const controller = this.controllers.get(leafId);
 		if (!controller) return Promise.reject(new Error(`No voice controller for leaf ${leafId}`));
-		return controller.injectAudio(Float32Array.from(samples), sampleRate);
+		return controller.injectTranscript(text, opts);
+	}
+
+	injectAudio(leafId: string, samples: ArrayLike<number>, sampleRate = 16_000, opts: { addressed?: boolean } = {}): Promise<void> {
+		const controller = this.controllers.get(leafId);
+		if (!controller) return Promise.reject(new Error(`No voice controller for leaf ${leafId}`));
+		return controller.injectAudio(Float32Array.from(samples), sampleRate, opts);
 	}
 
 	// -----------------------------------------------------------------------
@@ -320,6 +364,18 @@ export class VoiceManager {
 			language: config.whisperLanguage,
 			initialPrompt: buildWhisperInitialPrompt(config),
 			extraArgs: config.whisperExtraArgs,
+		});
+	}
+
+	private createWakeDetector(): WakeWordDetector {
+		const config = readVoiceConfig(this.plugin.settings);
+		return new SherpaKwsBackend({
+			pythonPath: config.kwsPythonPath,
+			modelDir: config.kwsModelDir,
+			spellings: config.wakeWordSpellings,
+			threshold: config.kwsThreshold,
+			score: config.kwsScore,
+			numThreads: config.kwsNumThreads,
 		});
 	}
 

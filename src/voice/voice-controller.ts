@@ -1,15 +1,21 @@
 /**
  * Voice controller — the per-panel hands-free loop.
  *
- * Owns one microphone source, one speech recognizer, one speech queue and the
- * silence detector, and is bound to a single conversation for its lifetime:
+ * Owns one microphone source, one wake-word detector, one speech recognizer,
+ * one speech queue and the silence detector, and is bound to a single
+ * conversation for its lifetime:
  *
- *   mic frames → detector → utterance → STT → (voice command?) → clean-up →
- *   submit or queue → turn observer → progress / announcements → summary → TTS
+ *   mic frames → wake word → detector → utterance → STT → (voice command?) →
+ *   clean-up → submit or queue → turn observer → announcements → summary → TTS
  *
  * Rules (see docs/voice.md):
- * - End of turn = pause; listening stays on.
- * - Barge-in (speech while Notor speaks) stops playback only; the agent turn
+ * - Armed by default: frames go only to the wake-word detector, and nothing
+ *   reaches speech recognition until the wake word is heard.
+ * - Each wake word addresses one utterance, ended by a pause; then it is back
+ *   to armed. A bare wake word waits a few seconds for speech to start.
+ * - While an approval or question is pending, short unaddressed replies are
+ *   also recognized ("yes", "no"); anything else unaddressed is dropped.
+ * - The wake word while Notor speaks stops playback only; the agent turn
  *   keeps running.
  * - Speech during a running turn is queued and sent as one message after the
  *   turn's summary has been spoken.
@@ -33,7 +39,10 @@ import type { SttBackend, VoiceConfigProblem } from "./stt/types";
 import type { TtsBackend } from "./tts/types";
 import { SpeechQueue } from "./tts/speech-queue";
 import type { VoicePromptFiles } from "./shaping-prompts";
-import { readVoiceConfig, type VoiceConfig } from "./voice-settings";
+import { buildWhisperInitialPrompt, readVoiceConfig, type VoiceConfig } from "./voice-settings";
+import { stripWakeWord } from "./command-matcher";
+import { KwsStartError } from "./wake/sherpa-kws-backend";
+import type { WakeHit, WakeWordDetector } from "./wake/types";
 import {
 	buildTurnTranscript,
 	cleanupTranscript,
@@ -53,7 +62,24 @@ const log = logger("VoiceController");
 /** Longest we wait for the farewell line before releasing the speech backend. */
 const FAREWELL_TIMEOUT_MS = 8_000;
 
-export type VoiceState = "idle" | "starting" | "listening" | "transcribing" | "thinking" | "speaking" | "error";
+/** Recent audio kept so an addressed capture can start just before the wake word ended. */
+const RING_MS = 3_000;
+
+/**
+ * How far before the spotter's hit the addressed capture starts. Hits arrive
+ * 0.4–0.6 s after the wake word ends (spike, 2026-10-23), so starting at the
+ * hit would clip the first word of "Hey Notor, summarize…"; the wake word's
+ * tail that this pulls in is stripped from the transcript.
+ */
+const REPLAY_LEAD_MS = 800;
+
+export type VoiceEarcon = "arm" | "wake" | "disarm";
+
+/**
+ * `armed`: waiting for the wake word. `listening`: addressed — capturing what
+ * the user says after it.
+ */
+export type VoiceState = "idle" | "starting" | "armed" | "listening" | "transcribing" | "thinking" | "speaking" | "error";
 
 export interface VoiceStatus {
 	state: VoiceState;
@@ -93,8 +119,11 @@ export interface VoiceControllerDeps {
 	leafId: string;
 	conversationId: string;
 	audio: AudioSource;
+	wake: WakeWordDetector;
 	stt: SttBackend;
 	tts: TtsBackend;
+	/** Short non-speech feedback sounds (renderer WebAudio); omitted in tests. */
+	earcon?: (kind: VoiceEarcon) => void;
 	prompts: VoicePromptFiles;
 	providerRegistry: Pick<ProviderRegistry, "getProvider">;
 	getSettings: () => NotorSettings;
@@ -107,7 +136,7 @@ export interface VoiceControllerDeps {
 	dismissPrompt?: (messageId: string, kind: "approval" | "interaction", decision?: "approved" | "rejected") => void;
 	/** Settle a pending plan review (routed through the PlanReviewController). */
 	resolvePlanReview?: (conversationId: string, decision: "approved" | "rejected") => boolean;
-	/** Delay before the detector returns to normal listening after speech ends. Default 300. */
+	/** Delay before the detector returns to listening onset after Notor stops speaking. Default 300. */
 	postSpeechGuardMs?: number;
 	setTimeoutFn?: (handler: () => void, ms: number) => ReturnType<typeof setTimeout>;
 	clearTimeoutFn?: (id: ReturnType<typeof setTimeout>) => void;
@@ -142,6 +171,18 @@ export class VoiceController {
 	private lastProgressAt = 0;
 	private recognitionFailures = 0;
 	private guardTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Addressed: the wake word was heard and its utterance has not ended yet. */
+	private addressed = false;
+	/** Fires when no speech starts after a bare wake word. */
+	private listenTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Samples given to the wake detector so far (the clock `WakeHit.endSample` uses). */
+	private sampleCursor = 0;
+	private ring: Array<{ start: number; frame: Float32Array }> = [];
+	/** Whether the silence detector received the previous frame. */
+	private detectorFed = false;
+	/** Samples since the wake word was last heard (stop-on-silence). */
+	private idleSamples = 0;
 
 	private readonly setTimeoutFn: (handler: () => void, ms: number) => ReturnType<typeof setTimeout>;
 	private readonly clearTimeoutFn: (id: ReturnType<typeof setTimeout>) => void;
@@ -200,7 +241,7 @@ export class VoiceController {
 		this.started = true;
 		this.setState("starting", "Checking voice configuration…");
 
-		const problems = this.deps.stt.preflight();
+		const problems = [...this.deps.stt.preflight(), ...this.deps.wake.preflight()];
 		if (problems.length > 0) {
 			const message = problems.map((p) => p.message).join(" ");
 			this.fail(message, problems);
@@ -234,9 +275,23 @@ export class VoiceController {
 			threshold: config.silenceThreshold,
 			pauseMs: config.endOfTurnPauseMs,
 			minUtteranceMs: config.minUtteranceMs,
-			stopOnSilenceMs: config.stopOnSilenceMs,
 			bargeInThresholdMultiplier: config.bargeInMultiplier,
 		});
+
+		// Frames flow from here on; the detector counts them while it loads.
+		this.setState("starting", "Starting wake-word detection…");
+		try {
+			await this.deps.wake.start(this.deps.audio.sampleRate);
+		} catch (e) {
+			const problem: VoiceConfigProblem = e instanceof KwsStartError
+				? e.problem
+				: { code: "kws_failed", message: e instanceof Error ? e.message : String(e) };
+			this.detector = null;
+			void this.deps.stt.dispose();
+			void this.deps.wake.dispose();
+			this.fail(problem.message, [problem]);
+			throw new VoiceStartError([problem], problem.message);
+		}
 
 		this.unsubscribers.push(
 			this.deps.orchestrator.addTurnObserver(this.turnObserver()),
@@ -252,13 +307,22 @@ export class VoiceController {
 					void this.stop(detail ?? "Speech recognition failed.", { announce: true, announcement: "Speech recognition stopped. Voice mode is off." });
 				}
 			}),
+			this.deps.wake.onHit((hit) => this.onWakeHit(hit)),
+			this.deps.wake.onStatus((status, detail) => {
+				if (status === "error" && !this.stopped) {
+					this.deps.notify?.(`Voice mode turned off: ${detail ?? "wake-word detection failed."}`);
+					void this.stop(detail ?? "Wake-word detection failed.", { announce: true, announcement: "Wake word detection stopped. Voice mode is off." });
+				}
+			}),
 		);
 
 		if (this.deps.orchestrator.hasActiveSession(this.deps.conversationId)) {
 			this.turnRunning = true;
 		}
-		this.setState("listening");
-		this.speech.enqueue("Voice mode on.", "announce");
+		this.state = "armed";
+		this.refreshState();
+		this.earcon("arm");
+		this.deps.notify?.(`Voice mode on. Say “${config.wakeWord}” to talk.`);
 		log.info("Voice mode started", { leafId: this.deps.leafId, conversationId: this.deps.conversationId });
 	}
 
@@ -270,6 +334,9 @@ export class VoiceController {
 		if (this.stopped) return;
 		this.stopped = true;
 		this.cancelGuard();
+		this.clearListenTimer();
+		this.addressed = false;
+		this.ring = [];
 		for (const unsubscribe of this.unsubscribers.splice(0)) {
 			try {
 				unsubscribe();
@@ -287,8 +354,10 @@ export class VoiceController {
 			log.warn("audio stop failed", { error: String(e) });
 		}
 		void this.deps.stt.dispose().catch((e) => log.warn("stt dispose failed", { error: String(e) }));
+		void this.deps.wake.dispose().catch((e) => log.warn("wake dispose failed", { error: String(e) }));
 
 		this.speech.interrupt();
+		this.earcon("disarm");
 		if (opts.announce) {
 			let timer: ReturnType<typeof setTimeout> | null = null;
 			try {
@@ -309,14 +378,30 @@ export class VoiceController {
 		this.setState("idle", reason);
 	}
 
-	/** Restart speech recognition in place (after system wake). */
+	/** Restart speech recognition and wake-word detection in place (after system wake). */
 	async restartRecognition(): Promise<void> {
-		if (this.stopped || !this.deps.stt.restart) return;
+		if (this.stopped) return;
 		try {
-			await this.deps.stt.restart();
+			await this.deps.stt.restart?.();
 		} catch (e) {
 			log.warn("Speech recognition restart failed", { error: String(e) });
 		}
+		await this.restartWakeWord();
+	}
+
+	/** Restart wake-word detection in place (after system wake or a wake-word settings change). */
+	async restartWakeWord(): Promise<void> {
+		if (this.stopped || !this.deps.wake.restart) return;
+		try {
+			await this.deps.wake.restart();
+		} catch (e) {
+			log.warn("Wake-word detection restart failed", { error: String(e) });
+		}
+	}
+
+	/** True while the wake word has been heard and its utterance is still being captured. */
+	get isAddressed(): boolean {
+		return this.addressed;
 	}
 
 	/** Queue a line to speak (announcement priority). */
@@ -406,7 +491,7 @@ export class VoiceController {
 		if (approvals.length > 0) parts.push(`${approvals.length} approval${approvals.length === 1 ? "" : "s"} pending.`);
 		else if (questions.length > 0) parts.push("Waiting for your answer.");
 		else if (this.isTurnRunning) parts.push(`The assistant is working; ${this.toolCount} tool call${this.toolCount === 1 ? "" : "s"} so far.`);
-		else parts.push("Idle and listening.");
+		else parts.push(`Idle. Say ${this.config().wakeWord} to talk.`);
 		if (this.queuedUtterances.length > 0) parts.push(`${this.queuedUtterances.length} message${this.queuedUtterances.length === 1 ? "" : "s"} queued.`);
 		return parts.join(" ");
 	}
@@ -433,16 +518,28 @@ export class VoiceController {
 		return this.deps.orchestrator.getActiveSession(this.deps.conversationId);
 	}
 
-	/** Test/automation seam: feed a transcript as if it had just been recognized. */
-	async injectTranscript(text: string): Promise<void> {
+	/** Test seam: act as if the wake word had just been heard. */
+	injectWake(): void {
+		this.onWakeHit({ keyword: "injected", endSample: this.sampleCursor });
+	}
+
+	/**
+	 * Test/automation seam: feed a transcript as if it had just been recognized.
+	 * Addressed (said after the wake word) unless `addressed: false`.
+	 */
+	async injectTranscript(text: string, opts: { addressed?: boolean } = {}): Promise<void> {
 		if (this.stopped) return;
-		await this.routeTranscript(text.trim());
+		await this.routeTranscript(text.trim(), opts.addressed !== false);
 	}
 
 	/** Test seam: feed PCM audio as a complete utterance (bypasses the microphone). */
-	async injectAudio(samples: Float32Array, sampleRate: number = this.deps.audio.sampleRate): Promise<void> {
+	async injectAudio(
+		samples: Float32Array,
+		sampleRate: number = this.deps.audio.sampleRate,
+		opts: { addressed?: boolean } = {},
+	): Promise<void> {
 		if (this.stopped) return;
-		await this.handleUtterance(samples, sampleRate);
+		await this.handleUtterance(samples, sampleRate, opts.addressed !== false);
 	}
 
 	/** Build the context handed to voice-command handlers (Milestone B). */
@@ -476,45 +573,149 @@ export class VoiceController {
 
 	private onFrame(frame: Float32Array): void {
 		if (this.stopped || !this.detector) return;
-		for (const event of this.detector.push(frame)) this.handleDetectorEvent(event);
+		const start = this.sampleCursor;
+		this.sampleCursor += frame.length;
+		this.remember(start, frame);
+		this.deps.wake.push(frame);
+		this.feedDetector(frame);
+		this.trackIdle(frame.length);
+	}
+
+	/** Keep the last few seconds of audio for replay after a wake hit. */
+	private remember(start: number, frame: Float32Array): void {
+		this.ring.push({ start, frame });
+		const keepFrom = this.sampleCursor - this.samplesOf(RING_MS);
+		while (this.ring.length > 1 && this.ring[0]!.start + this.ring[0]!.frame.length <= keepFrom) this.ring.shift();
+	}
+
+	/**
+	 * The silence detector only hears audio while the user is addressing Notor,
+	 * or while Notor is waiting on an approval or answer (for bare "yes"/"no").
+	 */
+	private feedDetector(frame: Float32Array): void {
+		const detector = this.detector!;
+		if (!this.addressed && !this.isAwaitingReply()) {
+			if (this.detectorFed) {
+				detector.reset();
+				this.detectorFed = false;
+			}
+			return;
+		}
+		if (!this.detectorFed) {
+			detector.reset();
+			this.detectorFed = true;
+		}
+		for (const event of detector.push(frame)) this.handleDetectorEvent(event);
+	}
+
+	private onWakeHit(hit: WakeHit): void {
+		if (this.stopped || !this.detector || this.addressed) return;
+		log.info("Wake word heard", { keyword: hit.keyword });
+		if (this.speech.isSpeaking) {
+			log.debug("Barge-in: stopping speech");
+			this.speech.interrupt();
+		}
+		this.addressed = true;
+		this.idleSamples = 0;
+		this.earcon("wake");
+		this.startListenTimer();
+
+		// Start the capture just before the wake word ended, so "Hey Notor,
+		// summarize…" said in one breath keeps its first word.
+		const detector = this.detector;
+		detector.reset();
+		detector.setMode("listening");
+		this.detectorFed = true;
+		const from = hit.endSample - this.samplesOf(REPLAY_LEAD_MS);
+		for (const { start, frame } of [...this.ring]) {
+			if (start + frame.length <= from) continue;
+			const part = start >= from ? frame : frame.subarray(from - start);
+			for (const event of detector.push(part)) this.handleDetectorEvent(event);
+			if (this.stopped || !this.addressed) break;
+		}
+		this.refreshState();
 	}
 
 	private handleDetectorEvent(event: DetectorEvent): void {
 		switch (event.type) {
 			case "speech_start":
-				if (this.speech.isSpeaking) {
-					log.debug("Barge-in: stopping speech");
-					this.speech.interrupt();
-				}
+				if (this.addressed) this.clearListenTimer();
 				break;
-			case "utterance_end":
-				void this.handleUtterance(event.samples, this.deps.audio.sampleRate);
+			case "utterance_end": {
+				// One utterance per wake word: back to armed straight away.
+				const addressed = this.addressed;
+				this.addressed = false;
+				this.clearListenTimer();
+				this.idleSamples = 0;
+				void this.handleUtterance(event.samples, this.deps.audio.sampleRate, addressed);
 				break;
+			}
 			case "utterance_discarded":
 				log.debug("Discarded short utterance", { durationMs: Math.round(event.durationMs) });
+				// Often just the wake word's tail; keep waiting for the real prompt.
+				if (this.addressed && this.listenTimer === null) this.startListenTimer();
 				break;
 			case "silence_timeout":
-				this.deps.notify?.("Voice mode turned off after silence.");
-				void this.stop("Turned off after silence.", { announce: true, announcement: "Voice mode off after silence." });
 				break;
 		}
 	}
 
-	private async handleUtterance(samples: Float32Array, sampleRate: number): Promise<void> {
+	private startListenTimer(): void {
+		this.clearListenTimer();
+		this.listenTimer = this.setTimeoutFn(() => {
+			this.listenTimer = null;
+			if (this.stopped || !this.addressed || this.detector?.isInSpeech) return;
+			log.debug("Nothing said after the wake word");
+			this.addressed = false;
+			this.earcon("disarm");
+			this.refreshState();
+		}, this.config().wakeListenTimeoutMs);
+	}
+
+	private clearListenTimer(): void {
+		if (this.listenTimer !== null) {
+			this.clearTimeoutFn(this.listenTimer);
+			this.listenTimer = null;
+		}
+	}
+
+	/** Stop-on-silence: turn off after a long stretch with no wake word and nothing going on. */
+	private trackIdle(samples: number): void {
+		const stopMs = this.config().stopOnSilenceMs;
+		if (stopMs <= 0 || this.addressed || this.isBusy() || this.inflightTranscriptions > 0 || this.isAwaitingReply()) {
+			this.idleSamples = 0;
+			return;
+		}
+		this.idleSamples += samples;
+		if (this.idleSamples >= this.samplesOf(stopMs)) {
+			this.idleSamples = 0;
+			this.deps.notify?.("Voice mode turned off after silence.");
+			void this.stop("Turned off after silence.", { announce: true, announcement: "Voice mode off after silence." });
+		}
+	}
+
+	/** True while the bound conversation waits on an approval, question or plan review. */
+	private isAwaitingReply(): boolean {
+		const session = this.getSession();
+		return session !== undefined && (session.pendingApprovals.size > 0 || session.pendingInteractions.size > 0);
+	}
+
+	private async handleUtterance(samples: Float32Array, sampleRate: number, addressed: boolean): Promise<void> {
 		if (this.stopped) return;
 		this.inflightTranscriptions++;
 		this.refreshState();
 		try {
 			const wav = encodeWav16kMono(samples, sampleRate);
-			const transcript = (await this.deps.stt.transcribe(wav)).trim();
+			const prompt = buildWhisperInitialPrompt(this.config());
+			const transcript = (await this.deps.stt.transcribe(wav, prompt ? { prompt } : undefined)).trim();
 			this.recognitionFailures = 0;
 			if (!transcript) return;
-			log.info("Transcript", { chars: transcript.length, text: transcript.slice(0, 200) });
-			await this.routeTranscript(transcript);
+			log.info("Transcript", { chars: transcript.length, addressed, text: transcript.slice(0, 200) });
+			await this.routeTranscript(transcript, addressed);
 		} catch (e) {
 			this.recognitionFailures++;
 			log.warn("Transcription failed", { error: String(e) });
-			if (this.recognitionFailures === 1) {
+			if (this.recognitionFailures === 1 && addressed) {
 				this.speech.enqueue("Sorry, speech recognition failed for that.", "announce");
 			}
 		} finally {
@@ -527,16 +728,34 @@ export class VoiceController {
 	// Transcript → command / chat
 	// -----------------------------------------------------------------------
 
-	private async routeTranscript(transcript: string): Promise<void> {
+	private async routeTranscript(transcript: string, addressed: boolean): Promise<void> {
 		if (!transcript || this.stopped) return;
+		const config = this.config();
 
 		if (this.deps.commandHandler) {
 			try {
-				if (await this.deps.commandHandler(this.buildUtteranceContext(transcript))) return;
+				if (await this.deps.commandHandler(this.buildUtteranceContext(transcript, addressed))) return;
 			} catch (e) {
 				log.error("Voice command handler threw", { error: String(e) });
 			}
 			if (this.stopped) return;
+		}
+
+		// Unaddressed speech is only ever a reply to a pending prompt.
+		if (!addressed) {
+			log.debug("Dropped unaddressed utterance", { chars: transcript.length });
+			return;
+		}
+
+		const text = stripWakeWord(transcript, config.wakeWordSpellings);
+		if (!text) {
+			// Only the wake word was recognized: keep listening for the prompt.
+			if (!this.addressed) {
+				this.addressed = true;
+				this.startListenTimer();
+				this.refreshState();
+			}
+			return;
 		}
 
 		if (!this.isBoundConversationDisplayed()) {
@@ -545,8 +764,7 @@ export class VoiceController {
 			return;
 		}
 
-		const config = this.config();
-		const cleaned = await cleanupTranscript(transcript, config, this.shapingDeps(config));
+		const cleaned = await cleanupTranscript(text, config, this.shapingDeps(config));
 		if (!cleaned || this.stopped) return;
 
 		if (this.isBusy()) {
@@ -560,7 +778,8 @@ export class VoiceController {
 			this.refreshState();
 			return;
 		}
-		await this.submit(cleaned);
+		const queued = this.queuedUtterances.splice(0);
+		await this.submit([...queued, cleaned].join("\n"));
 	}
 
 	private async submit(text: string): Promise<void> {
@@ -655,7 +874,10 @@ export class VoiceController {
 		}
 		if (session.status !== "waiting_approval") return;
 		// The interaction path sets the status before populating its map; read lazily.
-		this.setTimeoutFn(() => this.announceWaiting(session), 0);
+		this.setTimeoutFn(() => {
+			this.announceWaiting(session);
+			this.refreshState();
+		}, 0);
 	}
 
 	private announceWaiting(session: ConversationSession): void {
@@ -745,8 +967,10 @@ export class VoiceController {
 		if (this.inflightTranscriptions > 0) this.setState("transcribing", queued);
 		else if (this.speech.isSpeaking) this.setState("speaking", queued);
 		else if (this.summarizing) this.setState("thinking", "Summarizing the reply…");
-		else if (this.turnRunning) this.setState("listening", queued ?? "Working…");
-		else this.setState("listening", queued);
+		else if (this.addressed) this.setState("listening", queued);
+		else if (this.isAwaitingReply()) this.setState("armed", queued ?? "Waiting for your reply");
+		else if (this.turnRunning) this.setState("armed", queued ?? "Working…");
+		else this.setState("armed", queued ?? `Say “${this.config().wakeWord}”`);
 	}
 
 	private setState(state: VoiceState, detail?: string): void {
@@ -773,6 +997,19 @@ export class VoiceController {
 
 	private config(): VoiceConfig {
 		return readVoiceConfig(this.deps.getSettings());
+	}
+
+	private earcon(kind: VoiceEarcon): void {
+		if (!this.deps.earcon || !this.config().wakeEarconEnabled) return;
+		try {
+			this.deps.earcon(kind);
+		} catch (e) {
+			log.debug("earcon failed", { error: String(e) });
+		}
+	}
+
+	private samplesOf(ms: number): number {
+		return Math.round((ms / 1000) * this.deps.audio.sampleRate);
 	}
 
 	private shapingDeps(config: VoiceConfig): ShapingDeps {

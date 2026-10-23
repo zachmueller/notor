@@ -41,6 +41,7 @@ const log = logger("ChatInput");
 const VOICE_STATE_LABELS: Record<VoiceState, string> = {
 	idle: "Off",
 	starting: "Starting…",
+	armed: "Armed",
 	listening: "Listening…",
 	transcribing: "Transcribing…",
 	thinking: "Summarizing…",
@@ -457,7 +458,7 @@ export class ChatInput {
 		const label = VOICE_STATE_LABELS[state];
 		const btn = this.voiceButtonEl;
 		if (btn) {
-			btn.removeClass("is-starting", "is-listening", "is-transcribing", "is-thinking", "is-speaking", "is-error");
+			btn.removeClass("is-starting", "is-armed", "is-listening", "is-transcribing", "is-thinking", "is-speaking", "is-error");
 			if (state !== "idle") btn.addClass(`is-${state}`);
 			setIcon(btn, state === "idle" || state === "error" ? "mic-off" : "mic");
 			btn.setAttribute(

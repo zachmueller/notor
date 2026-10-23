@@ -14,7 +14,12 @@ export type VoiceProblemCode =
 	| "model_missing"
 	| "server_failed"
 	| "microphone_denied"
-	| "microphone_unavailable";
+	| "microphone_unavailable"
+	| "kws_python_not_found"
+	| "kws_model_missing"
+	| "kws_module_missing"
+	| "kws_keyword_invalid"
+	| "kws_failed";
 
 /** A configuration or environment problem that prevents voice mode from running. */
 export interface VoiceConfigProblem {
