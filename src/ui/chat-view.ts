@@ -842,7 +842,7 @@ export class NotorChatView extends ItemView {
 				});
 			}
 		} else {
-			this.personaLabelEl.textContent = "🎭 default";
+			this.personaLabelEl.textContent = "🎭 Default";
 			this.personaLabelEl.addClass("notor-persona-label--default");
 			this.personaLabelEl.removeClass("notor-persona-label--custom");
 			this.personaLabelEl.setCssProps({

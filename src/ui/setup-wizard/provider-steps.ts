@@ -203,7 +203,7 @@ function renderModelPicker(
 
 	const renderDropdown = (models: ModelInfo[]) =>
 		modelRow.addDropdown((dropdown) => {
-			dropdown.addOption("", "(select model)");
+			dropdown.addOption("", "(Select model)");
 			addModelOptions(dropdown, models);
 			selectModelOption(dropdown, currentValue);
 			dropdown.onChange(async (value) => {

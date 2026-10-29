@@ -48,7 +48,7 @@ export function renderCompactionSection(
 		)
 		.addTextArea((text) =>
 			text
-				.setPlaceholder("(using default prompt)")
+				.setPlaceholder("(Using default prompt)")
 				.setValue(ctx.settings.compaction_prompt_override)
 				.onChange(async (value) => {
 					ctx.settings.compaction_prompt_override = value;

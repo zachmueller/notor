@@ -271,7 +271,7 @@ export class EffectiveConfigInspectorView extends ItemView {
 			.filter(({ paths }) => paths.length > 0);
 
 		if (own.length === 0 && inherited.length === 0) {
-			cell.setText("(none)");
+			cell.setText("(None)");
 			cell.addClass("notor-config-inspector-muted");
 			return;
 		}

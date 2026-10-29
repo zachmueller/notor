@@ -31,7 +31,7 @@ export function renderShellSection(
 		)
 		.addText((text) =>
 			text
-				.setPlaceholder("(platform default)")
+				.setPlaceholder("(Platform default)")
 				.setValue(ctx.settings.execute_command_shell)
 				.onChange(async (value) => {
 					ctx.settings.execute_command_shell = value.trim();
@@ -47,7 +47,7 @@ export function renderShellSection(
 		)
 		.addText((text) =>
 			text
-				.setPlaceholder("(platform default)")
+				.setPlaceholder("(Platform default)")
 				.setValue(
 					ctx.settings.execute_command_shell_args.join(", ")
 				)

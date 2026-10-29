@@ -299,7 +299,7 @@ export function renderVoiceSection(containerEl: HTMLElement, ctx: SettingsContex
 		.setName("Shaping model preset")
 		.setDesc("Model used for the clean-up and summary passes. Defaults to the conversation's current model.")
 		.addDropdown((dropdown) => {
-			dropdown.addOption("", "(same as the conversation)");
+			dropdown.addOption("", "(Same as the conversation)");
 			for (const p of configuredPresets) dropdown.addOption(p.name, p.name);
 			dropdown.setValue(ctx.settings.voice_shaping_preset).onChange(async (value) => {
 				ctx.settings.voice_shaping_preset = value;

@@ -38,7 +38,7 @@ When upgrading an existing Notor installation, the four default presets are auto
 Click the gear icon in the chat panel header to open the settings popover. The **Model Preset** dropdown shows:
 
 - All configured presets with provider and model details in lighter text
-- Unconfigured presets greyed out and marked "(not configured)"
+- Unconfigured presets greyed out and marked "(Not configured)"
 - A separator
 - **Custom...** — reveals the legacy provider and model dropdowns for one-off selections
 

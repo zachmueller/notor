@@ -144,11 +144,11 @@ export function renderWriteNoteDiffPreview(
 			}
 
 			const collapseToggle = headerEl.createDiv({ cls: "notor-diff-toggle" });
-			collapseToggle.textContent = "▶ show diff";
+			collapseToggle.textContent = "▶ Show diff";
 			collapseToggle.addEventListener("click", () => {
 				const isHidden = bodyEl.hasClass("notor-hidden");
 				bodyEl.toggleClass("notor-hidden", !isHidden);
-				collapseToggle.textContent = isHidden ? "▼ hide diff" : "▶ show diff";
+				collapseToggle.textContent = isHidden ? "▼ Hide diff" : "▶ Show diff";
 			});
 
 			// Render the diff lines into source view container
@@ -285,7 +285,7 @@ export function renderReplaceInNoteDiffPreview(
 
 			// Auto-approved: collapsed combined diff, no controls
 			const collapseToggle = headerEl.createDiv({ cls: "notor-diff-toggle" });
-			collapseToggle.textContent = "▶ show diff";
+			collapseToggle.textContent = "▶ Show diff";
 
 			const bodyEl = wrapperEl.createDiv({ cls: "notor-diff-body notor-hidden" });
 
@@ -299,7 +299,7 @@ export function renderReplaceInNoteDiffPreview(
 			collapseToggle.addEventListener("click", () => {
 				const isHidden = bodyEl.hasClass("notor-hidden");
 				bodyEl.toggleClass("notor-hidden", !isHidden);
-				collapseToggle.textContent = isHidden ? "▼ hide diff" : "▶ show diff";
+				collapseToggle.textContent = isHidden ? "▼ Hide diff" : "▶ Show diff";
 			});
 
 			const statusEl = wrapperEl.createDiv({ cls: "notor-diff-status notor-diff-status-applied" });
@@ -643,7 +643,7 @@ async function renderBlockMarkdownPreview(
 		const deletedPanel = panelsEl.createDiv({ cls: "notor-diff-rendered-panel notor-diff-rendered-after" });
 		deletedPanel.createDiv({ cls: "notor-diff-rendered-panel-label", text: "Deleted" });
 		const deletedContentEl = deletedPanel.createDiv({ cls: "notor-diff-rendered-panel-content notor-diff-rendered-deleted" });
-		deletedContentEl.textContent = "(block will be removed)";
+		deletedContentEl.textContent = "(Block will be removed)";
 	}
 }
 

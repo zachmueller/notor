@@ -136,7 +136,7 @@ function renderAddRow(containerEl: HTMLElement, ctx: SettingsContext): void {
 		.setDesc("A folder or file prefix. Relative paths apply to the vault; ~ or absolute paths to the filesystem.");
 
 	addSetting.addText((text) => {
-		text.setPlaceholder("Path prefix, e.g. ai/ or ~/Downloads").onChange((value) => {
+		text.setPlaceholder("Path prefix, e.g. projects/ or ~/notes").onChange((value) => {
 			newPath = value.trim();
 			addSetting.setDesc(
 				newPath === ""

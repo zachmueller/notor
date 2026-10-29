@@ -5,7 +5,7 @@
  * Validates the complete persona system (Group A) through simulated user
  * actions via Playwright + CDP:
  *
- *  2. Default persona chip ("🎭 default") sits after the mode toggle
+ *  2. Default persona chip ("🎭 Default") sits after the mode toggle
  *  3. Persona chip opens the persona menu
  *  4. Menu lists discovered personas; broken YAML / empty dirs excluded
  *  5. Selecting a persona updates the chip and the conversation header
@@ -159,7 +159,7 @@ async function tests(ctx: TestContext) {
 				el.previousElementSibling?.classList.contains("notor-input-toolbar-left") === true
 			);
 			const text = await label.textContent();
-			if (isDefault && placed && text?.trim() === "🎭 default") {
+			if (isDefault && placed && text?.trim() === "🎭 Default") {
 				ctx.pass("Default persona chip", `Label "${text.trim()}" placed after the mode toggle`);
 			} else {
 				ctx.fail("Default persona chip", `default=${isDefault}, placed=${placed}, text="${text?.trim()}"`);
@@ -259,7 +259,7 @@ async function tests(ctx: TestContext) {
 			const isDefault = label ? await label.evaluate((el) => el.classList.contains("notor-persona-label--default")) : false;
 			const text = label ? (await label.textContent())?.trim() : "";
 			const shot = await ctx.screenshot("08-none-selected");
-			if (isDefault && text === "🎭 default") {
+			if (isDefault && text === "🎭 Default") {
 				ctx.pass("Default chip after None selected", `Label "${text}"`, shot);
 			} else {
 				ctx.fail("Default chip after None selected", `default=${isDefault}, text="${text}"`, shot);

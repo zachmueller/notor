@@ -29,7 +29,7 @@ export function renderNetworkRetrySection(
 
 	new Setting(containerEl)
 		.setName("Automatic retries")
-		.setDesc("How many times to re-send a failed turn before showing an error. 0 turns automatic retry off. (0–10)")
+		.setDesc("How many times to re-send a failed turn before showing an error. Set to 0 to turn automatic retry off. (0–10)")
 		.addText((text) =>
 			text
 				.setPlaceholder("6")

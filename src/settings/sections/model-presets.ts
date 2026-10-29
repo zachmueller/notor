@@ -52,7 +52,7 @@ export function renderModelPresetsSection(
 		.setDesc("The preset used for new conversations.")
 		.addDropdown((dropdown) => {
 			if (configuredPresets.length === 0) {
-				dropdown.addOption("", "(no presets configured)");
+				dropdown.addOption("", "(No presets configured)");
 				dropdown.setDisabled(true);
 			} else {
 				for (const p of configuredPresets) {
@@ -106,7 +106,7 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 			.setDesc(
 				preset.provider_id && preset.model_id
 					? `${providerLabels[preset.provider_id] ?? preset.provider_id} \u00B7 ${preset.model_id}${preset.use_extended_context ? " \u00B7 1M" : ""}`
-					: "(not configured)",
+					: "(Not configured)",
 			);
 
 		// Name edit
@@ -135,7 +135,7 @@ function renderPresetRows(containerEl: HTMLElement, ctx: SettingsContext): void 
 			.setName("Provider");
 
 		providerRow.addDropdown((dropdown) => {
-			dropdown.addOption("", "(not configured)");
+			dropdown.addOption("", "(Not configured)");
 			for (const provider of ctx.settings.providers) {
 				dropdown.addOption(provider.id, provider.display_name);
 			}
@@ -351,7 +351,7 @@ function renderModelDropdown(
 	registry: ReturnType<SettingsContext["plugin"]["getProviderRegistry"]>,
 ): void {
 	setting.addDropdown((dropdown) => {
-		dropdown.addOption("", "(select model)");
+		dropdown.addOption("", "(Select model)");
 		addModelOptions(dropdown, models);
 		selectModelOption(dropdown, currentValue);
 		dropdown.onChange(async (value) => {

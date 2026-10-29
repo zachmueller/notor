@@ -631,7 +631,7 @@ export async function selectPersona(page: Page, personaName: string | null): Pro
 }
 
 /**
- * Read the persona chip. With no persona active it shows "🎭 default" with the
+ * Read the persona chip. With no persona active it shows "🎭 Default" with the
  * `notor-persona-label--default` class (it is never hidden).
  */
 export async function getPersonaChip(page: Page): Promise<{ text: string; isDefault: boolean } | null> {
