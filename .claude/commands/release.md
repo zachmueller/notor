@@ -11,6 +11,24 @@ Push a new versioned release of the Notor Obsidian plugin. Bump the version, com
 
 ---
 
+## Step 0: Run the community review guard
+
+Obsidian's automated review scans every release and pulls a failing one from the community directory within 24 hours (0.12.0 was delisted this way). Before changing any versions, run the guard on the commit you intend to release:
+
+```bash
+npm run review:guard
+```
+
+It lints with the scanner's latest rules and scope, checks restricted `eslint-disable` directives, release metadata, the built `main.js` and `npm audit`, and compares warnings with the last release's baseline. See `.claude/skills/community-review-guard/SKILL.md`.
+
+- **`BLOCKED`**: stop. Fix each blocking finding in the code (never by adding an `eslint-disable`, since disabling restricted rules is itself an error), commit, and rerun.
+- **Warnings marked ▲**: this release added them. Fix the new ones where reasonable, or tell the user which ones remain.
+- **`NEEDS PREVIEW-SCAN CONFIRMATION`**: push the branch, then ask the user to run the **dashboard preview scan** on the printed SHA (community.obsidian.md → **Plugins** → **Notor** → **Review branch** → **Run preview scan**). Continue only once they confirm it reports no errors.
+
+The release workflow also runs `npm run review:guard -- --ci` on the tag, so a blocking problem stops the draft release from being created.
+
+---
+
 ## Step 1: Confirm the target version
 
 Ask the user (or confirm from context) what the new version number should be. It must be a SemVer string like `0.2.0` or `1.0.0`.
@@ -140,11 +158,31 @@ The release is created as a draft to allow review before publishing. **This step
 
 ---
 
+## Step 10: After publishing
+
+1. **Trigger the review.** Ask the user to open Notor in the developer dashboard and select **…** → **Request review** (or **Check for new releases** if the new version isn't shown yet). Results usually arrive within minutes.
+2. **Calibrate the guard** once the public scorecard shows the new version:
+   ```bash
+   npx tsx .claude/skills/community-review-guard/calibrate.ts
+   ```
+   Any "Scorecard Risks the guard doesn't BLOCK" means the guard missed something. Fix the guard before the next release.
+3. **Record the baseline** so the next release's warnings are compared with this one:
+   ```bash
+   npm run review:guard -- --ref {NEW_VERSION} --write-baseline
+   ```
+   Commit `.claude/skills/community-review-guard/baseline.json` on its own ("Record community review baseline for {NEW_VERSION}").
+4. **Listing watch.** `.github/workflows/listing-watch.yml` checks the directory hourly and opens a `delisted` issue if Notor disappears more than 2 hours after a release. Treat that issue as an incident: read the dashboard errors, fix, and ship a patch release.
+
+---
+
 ## Troubleshooting
 
 **Build fails in GitHub Actions:**
 - Check the Actions tab for the full error log
 - Common causes: TypeScript errors introduced since last release, missing `build/` output files
+
+**"Community review guard" step fails in GitHub Actions:**
+- The log has the same report as `npm run review:guard`. Fix the blocking findings, delete and re-push the tag (see below), and rerun Step 0 locally first.
 
 **Tag already exists:**
 - If you need to re-tag: `git tag -d {NEW_VERSION}` then `git push origin :refs/tags/{NEW_VERSION}` to delete locally and remotely, then re-create

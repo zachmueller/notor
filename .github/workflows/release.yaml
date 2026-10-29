@@ -27,6 +27,13 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Re-lints with the scanner's latest rules and scope, and checks the release
+      # metadata against the tag (.claude/skills/community-review-guard).
+      - name: Community review guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run review:guard -- --ci --tag "${GITHUB_REF#refs/tags/}"
+
       - name: Build plugin
         run: npm run build
 

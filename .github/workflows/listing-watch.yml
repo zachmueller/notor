@@ -1,0 +1,75 @@
+name: Community listing watch
+
+# Obsidian's automated review pulls a failing release from the community directory
+# within 24h, silently. This checks the directory's feed hourly and opens (or
+# updates) a single `delisted` issue while Notor is missing from it, closing the
+# issue once it's back.
+
+on:
+  schedule:
+    # Off the top of the hour; scheduled runs at :00 are heavily delayed.
+    - cron: "47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: listing-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    if: github.repository == 'zachmueller/notor'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PLUGIN_ID: notor
+      FEED: https://community.obsidian.md/assets/community-plugins.json
+      LABEL: delisted
+    steps:
+      - name: Check the directory feed
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-delay 10 --max-time 60 -o plugins.json "$FEED"
+          # Guard against a truncated or failed feed being read as "delisted".
+          count=$(jq 'length' plugins.json)
+          if [ "$count" -lt 1500 ]; then
+            echo "::warning::Feed has only $count entries; skipping"
+            exit 0
+          fi
+
+          open_issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')
+          scorecard="https://community.obsidian.md/plugins/$PLUGIN_ID"
+
+          if jq -e --arg id "$PLUGIN_ID" 'any(.[]; .id == $id)' plugins.json > /dev/null; then
+            echo "$PLUGIN_ID is listed."
+            if [ -n "$open_issue" ]; then
+              gh issue close "$open_issue" --repo "$GITHUB_REPOSITORY" --comment "Back in the community directory as of $(date -u +%FT%TZ)."
+            fi
+            exit 0
+          fi
+
+          # A release published in the last 2h may simply not be reviewed yet.
+          release=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName,publishedAt)
+          tag=$(jq -r '.tagName' <<< "$release")
+          published=$(jq -r '.publishedAt' <<< "$release")
+          age=$(( $(date -u +%s) - $(date -u -d "$published" +%s) ))
+          if [ "$age" -lt 7200 ]; then
+            echo "$PLUGIN_ID missing, but $tag was published ${age}s ago; waiting."
+            exit 0
+          fi
+
+          body="\`$PLUGIN_ID\` is missing from the community directory feed ($FEED) as of $(date -u +%FT%TZ). Latest release: $tag (published $published).
+
+          Likely a failed automated review of $tag. See the scorecard ($scorecard) and the developer dashboard for the errors, then run \`npm run review:guard\` and \`calibrate.ts\` (.claude/skills/community-review-guard)."
+          if [ -n "$open_issue" ]; then
+            # Fail only on first detection, so a delisting doesn't email every hour.
+            echo "::warning::$PLUGIN_ID still missing; tracked in #$open_issue"
+            exit 0
+          fi
+          gh label create "$LABEL" --repo "$GITHUB_REPOSITORY" --color B60205 --description "Plugin missing from the Obsidian community directory" 2>/dev/null || true
+          gh issue create --repo "$GITHUB_REPOSITORY" --label "$LABEL" --title "Notor is missing from the community directory ($tag)" --body "$body"
+          echo "::error::$PLUGIN_ID is not in the community directory"
+          exit 1
