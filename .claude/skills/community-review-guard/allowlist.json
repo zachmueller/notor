@@ -1,0 +1,5 @@
+{
+	"wasm": {
+		"qcms_bg.wasm": "unpdf's bundled pdf.js references its optional ICC color-management module by path; it is only fetched when a wasmUrl is configured, which Notor never sets, and the file isn't shipped."
+	}
+}

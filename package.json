@@ -9,6 +9,7 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
+		"review:guard": "npx tsx .claude/skills/community-review-guard/preflight.ts",
 		"e2e": "npx playwright test --config=e2e/playwright.config.ts",
 		"e2e:run": "npx tsx e2e/run-and-collect.ts",
 		"e2e:run:quick": "npx tsx e2e/run-and-collect.ts --duration 10",

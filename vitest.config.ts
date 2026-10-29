@@ -10,7 +10,8 @@ export default defineConfig({
 	},
 	test: {
 		// Plugin/product tests live beside their sources in src/. The esbuild/
-		// build-tooling tests are plain ESM (.mjs) outside the TypeScript program.
-		include: ["src/**/*.test.ts", "esbuild/**/*.test.mjs"],
+		// build-tooling tests are plain ESM (.mjs) outside the TypeScript program;
+		// agent-skill helpers under .claude/skills/ likewise.
+		include: ["src/**/*.test.ts", "esbuild/**/*.test.mjs", ".claude/skills/**/*.test.ts"],
 	},
 });
