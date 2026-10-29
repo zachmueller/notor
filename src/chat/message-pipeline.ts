@@ -19,7 +19,7 @@ import { getModelMetadata } from "../providers/model-metadata";
 import { parseStreamEvents, type ParseStreamOpts } from "./stream-utils";
 import type { ToolCallInfo } from "./tool-orchestration";
 import type { NotorChatView } from "../ui/chat-view";
-import type { NotorSettings, ModelPricing } from "../settings";
+import type { NotorSettings } from "../settings";
 import { logger } from "../utils/logger";
 import { estimateCutOffOutputTokens, estimateTokenCount } from "../utils/tokens";
 
@@ -703,7 +703,7 @@ export function calculateCost(
 	settings: NotorSettings,
 ): number | null {
 	// Check user-configured pricing first
-	const userPricing = settings.model_pricing[modelId] as ModelPricing | undefined;
+	const userPricing = settings.model_pricing[modelId];
 	if (userPricing) {
 		return (
 			(inputTokens / 1000) * userPricing.input +

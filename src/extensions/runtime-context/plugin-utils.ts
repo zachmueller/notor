@@ -52,7 +52,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				getConversationId: gateError,
 				persistUrl: gateError,
 				readPersistedUrl: gateError,
-			} as NonNullable<ExtensionUtils["webview"]>;
+			};
 		}
 
 		const WEB_VIEWER_TYPE_CANDIDATES = ["web-viewer", "web-browser", "webviewer", "browser-view"];
@@ -310,7 +310,7 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 				}
 
 				const parts = keyPath.split(".");
-				let target: unknown = plugin.settings as unknown;
+				let target: unknown = plugin.settings;
 				for (let i = 0; i < parts.length - 1; i++) {
 					const key = parts[i]!;
 					const index = /^\d+$/.test(key) ? Number(key) : key;

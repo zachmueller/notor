@@ -38,6 +38,16 @@ import { canonicalToolName, legacyToolNamesFor } from "../tools/tool-aliases";
 
 const log = logger("ExtensionManager");
 
+/** String form of a tool return value that is neither a string nor a non-null object. */
+function nonObjectResultToString(value: unknown): string {
+	if (value === undefined || value === null) return "";
+	if (typeof value === "function") return String(value);
+	if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint" || typeof value === "symbol") {
+		return String(value);
+	}
+	return "";
+}
+
 // ---------------------------------------------------------------------------
 // UserToolAdapter — wraps a UserToolDefinition as a Tool for the registry
 // ---------------------------------------------------------------------------
@@ -172,7 +182,7 @@ export class UserToolAdapter implements Tool {
 					? returnValue
 					: typeof returnValue === "object" && returnValue !== null
 						? returnValue as Record<string, unknown>
-						: String((returnValue ?? "") as string | number | boolean | bigint | symbol),
+						: nonObjectResultToString(returnValue),
 				duration_ms,
 			};
 
@@ -191,7 +201,7 @@ export class UserToolAdapter implements Tool {
 						? innerResult
 						: typeof innerResult === "object" && innerResult !== null
 							? innerResult as Record<string, unknown>
-							: String((innerResult ?? "") as string | number | boolean | bigint | symbol);
+							: nonObjectResultToString(innerResult);
 				}
 			}
 

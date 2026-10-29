@@ -318,7 +318,7 @@ function parseWorkflowFile(
 ): Workflow | null {
 	// Get frontmatter from metadata cache
 	const fileCache = metadataCache.getFileCache(file);
-	const frontmatter = fileCache?.frontmatter as Record<string, unknown> | undefined;
+	const frontmatter: Record<string, unknown> | undefined = fileCache?.frontmatter;
 
 	// No frontmatter → not a workflow (silently ignore)
 	if (!frontmatter) {

@@ -1,9 +1,9 @@
-import type { AutomationTrigger, BuiltinAutomationScaffold } from "../types";
+import type { BuiltinAutomationScaffold } from "../types";
 
 export const MEMORY_CAPTURE: BuiltinAutomationScaffold = {
 	name: "memory-capture",
 	displayName: "Memory Capture (auto)",
-	trigger: "after_completion" as AutomationTrigger,
+	trigger: "after_completion",
 	featureGroup: "memory",
 	settingsSchema: [
 		{

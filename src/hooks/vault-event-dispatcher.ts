@@ -21,7 +21,7 @@
 
 import { Notice, Platform, TFile } from "obsidian";
 import type { App, Vault, MetadataCache } from "obsidian";
-import type { ConversationMode, VaultEventHook, Workflow, ExecutionChain, TriggerContext, WorkflowExecution } from "../types";
+import type { VaultEventHook, Workflow, ExecutionChain, TriggerContext, WorkflowExecution } from "../types";
 import type { AutomationTrigger, UserAutomationDefinition } from "../extensions/types";
 import type { NotorSettings } from "../settings";
 import type { WorkflowConcurrencyManager } from "../workflows/workflow-concurrency";
@@ -431,7 +431,7 @@ export async function executeRunWorkflowAction(
 	// by reading its frontmatter via metadataCache.
 	const workflowFile = abstractFile;
 	const cache = deps.metadataCache.getFileCache(workflowFile);
-	let fm = cache?.frontmatter as Record<string, unknown> | undefined;
+	let fm: Record<string, unknown> | undefined = cache?.frontmatter;
 
 	// Validate it's a Notor workflow note — attempt auto-repair if missing
 	const isValidWorkflow = fm?.["notor-workflow"] === true || fm?.["notor-type"] === "workflow";
@@ -470,7 +470,7 @@ export async function executeRunWorkflowAction(
 		schedule: (fm["notor-schedule"] as string | null | undefined) ?? null,
 		persona_name: (fm["notor-workflow-persona"] as string | null | undefined) ?? null,
 		mode: (fm["notor-conversation-mode"] === "plan" || fm["notor-conversation-mode"] === "act")
-			? fm["notor-conversation-mode"] as ConversationMode
+			? fm["notor-conversation-mode"]
 			: null,
 		model_preset: (fm["notor-model-preset"] as string | null | undefined)?.trim() ?? null,
 		thinking_level: (fm["notor-thinking-level"] as string | null | undefined)?.trim() ?? null,

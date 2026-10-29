@@ -39,5 +39,5 @@ export function withTimeout<T>(invoke: () => Promise<T>, ms: number): Promise<T>
 	// surfaces as a rejected promise rather than escaping the race.
 	return Promise.race([Promise.resolve().then(invoke), timeout]).finally(() => {
 		if (timer !== undefined) clearTimeout(timer);
-	}) as Promise<T>;
+	});
 }

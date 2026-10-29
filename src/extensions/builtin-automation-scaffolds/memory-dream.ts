@@ -1,9 +1,9 @@
-import type { AutomationTrigger, BuiltinAutomationScaffold } from "../types";
+import type { BuiltinAutomationScaffold } from "../types";
 
 export const MEMORY_DREAM: BuiltinAutomationScaffold = {
 	name: "memory-dream",
 	displayName: "Memory Dream",
-	trigger: "on_schedule" as AutomationTrigger,
+	trigger: "on_schedule",
 	featureGroup: "memory",
 	schedule: "0 */3 * * *",
 	settingsSchema: [

@@ -51,7 +51,6 @@ import {
 } from "@aws-sdk/client-bedrock-runtime";
 import type {
 	ContentBlock,
-	ConversationRole,
 	ConverseStreamCommandInput,
 	ConverseStreamCommandOutput,
 	ConverseStreamOutput,
@@ -107,14 +106,14 @@ const DEFAULT_REGION = "us-east-1";
 function mapToBedrockBlock(block: MediaContentBlock): ContentBlock {
 	switch (block.type) {
 		case "text":
-			return { text: block.text } as ContentBlock;
+			return { text: block.text };
 		case "image":
 			return {
 				image: {
 					format: block.media_type.split("/")[1] as "png" | "jpeg" | "gif" | "webp",
 					source: { bytes: Buffer.from(block.data, "base64") },
 				},
-			} as ContentBlock;
+			};
 		case "document":
 			return {
 				document: {
@@ -122,10 +121,10 @@ function mapToBedrockBlock(block: MediaContentBlock): ContentBlock {
 					name: block.name ?? "document.pdf",
 					source: { bytes: Buffer.from(block.data, "base64") },
 				},
-			} as ContentBlock;
+			};
 		case "custom_block":
 			// custom_block is translated to wire text before reaching providers
-			return { text: block.fallback_text ?? "" } as ContentBlock;
+			return { text: block.fallback_text ?? "" };
 	}
 }
 
@@ -160,7 +159,7 @@ function toBedrockMessages(
 				});
 			}
 			bedrockMessages.push({
-				role: "assistant" as ConversationRole,
+				role: "assistant",
 				content,
 			});
 			continue;
@@ -168,9 +167,9 @@ function toBedrockMessages(
 
 		if (msg.role === "tool_result" && msg.tool_results?.length) {
 			bedrockMessages.push({
-				role: "user" as ConversationRole,
+				role: "user",
 				content: msg.tool_results.map((tr) => {
-					const trContent: ContentBlock[] = [{ text: tr.result } as ContentBlock];
+					const trContent: ContentBlock[] = [{ text: tr.result }];
 					if (tr.content_blocks?.length) {
 						for (const block of tr.content_blocks) {
 							trContent.push(mapToBedrockBlock(block));
@@ -191,12 +190,12 @@ function toBedrockMessages(
 		if (msg.role === "user") {
 			if (Array.isArray(msg.content)) {
 				bedrockMessages.push({
-					role: "user" as ConversationRole,
+					role: "user",
 					content: msg.content.map(mapToBedrockBlock),
 				});
 			} else {
 				bedrockMessages.push({
-					role: "user" as ConversationRole,
+					role: "user",
 					content: [{ text: msg.content }],
 				});
 			}
@@ -206,7 +205,7 @@ function toBedrockMessages(
 				? msg.content
 				: (() => { throw new Error("Expected string content for assistant message"); })();
 			bedrockMessages.push({
-				role: "assistant" as ConversationRole,
+				role: "assistant",
 				content: [{ text }],
 			});
 		}
@@ -291,14 +290,14 @@ export class BedrockProvider implements LLMProvider {
 			e instanceof Error
 				? e.name
 				: typeof e === "object" && e !== null && "name" in e
-					? String((e as { name: unknown }).name)
+					? String(e.name)
 					: "";
 		if (name === "ExpiredTokenException") return true;
 		const msg =
 			e instanceof Error
 				? e.message
 				: typeof e === "object" && e !== null && "message" in e
-					? String((e as { message: unknown }).message)
+					? String(e.message)
 					: String(e);
 		return msg.includes("security token") && msg.includes("expired");
 	}
@@ -516,9 +515,9 @@ export class BedrockProvider implements LLMProvider {
 			const errMsg = e instanceof Error
 				? (typeof e.message === "string" ? e.message : JSON.stringify(e.message))
 				: (typeof e === "object" && e !== null && "message" in e)
-					? String((e as { message: unknown }).message)
+					? String(e.message)
 					: String(e);
-			const errName = e instanceof Error ? e.name : (typeof e === "object" && e !== null && "name" in e ? String((e as { name: unknown }).name) : "");
+			const errName = e instanceof Error ? e.name : (typeof e === "object" && e !== null && "name" in e ? String(e.name) : "");
 			// Keys of the request fields that may have triggered a rejection —
 			// persisted with the error so a failing chat log is diagnosable.
 			const offendingFields = input.additionalModelRequestFields
@@ -883,7 +882,7 @@ export class BedrockProvider implements LLMProvider {
 				e instanceof Error
 					? e.name
 					: typeof e === "object" && e !== null && "name" in e
-						? String((e as { name: unknown }).name)
+						? String(e.name)
 						: "";
 
 			if (
@@ -933,7 +932,7 @@ export class BedrockProvider implements LLMProvider {
 					byOutputModality: "TEXT",
 					byInferenceType: "ON_DEMAND",
 				})
-			) as unknown as ListFoundationModelsResponse;
+			);
 		} catch (e: unknown) {
 			log.warn(
 				"ListFoundationModels failed (supplementary query, continuing with inference profiles only):",

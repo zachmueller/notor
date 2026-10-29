@@ -10,7 +10,6 @@
  */
 
 import { Setting } from "obsidian";
-import type { VaultEventHookType } from "../../types";
 import type { SettingsContext } from "./context";
 import {
 	renderVaultEventHookSubsection,
@@ -101,25 +100,25 @@ export function renderVaultEventHooksSection(
 	// Per-event-type collapsible subsections
 	const eventMeta: VaultEventMeta[] = [
 		{
-			event: "on_note_open" as VaultEventHookType,
+			event: "on_note_open",
 			title: "On note open",
 			desc: "Fires when a Markdown note is opened (activated) in the editor.",
 			hasSchedule: false,
 		},
 		{
-			event: "on_note_create" as VaultEventHookType,
+			event: "on_note_create",
 			title: "On note create",
 			desc: "Fires when a new Markdown file is created in the vault.",
 			hasSchedule: false,
 		},
 		{
-			event: "on_save" as VaultEventHookType,
+			event: "on_save",
 			title: "On save",
 			desc: "Fires whenever a Markdown note is saved (auto-save or manual save).",
 			hasSchedule: false,
 		},
 		{
-			event: "on_manual_save" as VaultEventHookType,
+			event: "on_manual_save",
 			title: "On manual save",
 			desc: "Fires only on explicit keyboard saves (Cmd+S / Ctrl+S).",
 			hasSchedule: false,
@@ -127,19 +126,19 @@ export function renderVaultEventHooksSection(
 				"Desktop only — fires on Cmd+S / Ctrl+S; does not fire on mobile.",
 		},
 		{
-			event: "on_tag_change" as VaultEventHookType,
+			event: "on_tag_change",
 			title: "On tag change",
 			desc: "Fires when a note's frontmatter tags are added or removed.",
 			hasSchedule: false,
 		},
 		{
-			event: "on_schedule" as VaultEventHookType,
+			event: "on_schedule",
 			title: "On schedule",
 			desc: "Fires on a cron schedule (e.g. daily at midnight). Requires a cron expression.",
 			hasSchedule: true,
 		},
 		{
-			event: "on_daily_start" as VaultEventHookType,
+			event: "on_daily_start",
 			title: "On daily start",
 			desc:
 				"Fires once a day, the first time you use Obsidian after the day reset time — " +

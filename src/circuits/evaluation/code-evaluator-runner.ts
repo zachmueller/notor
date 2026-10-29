@@ -193,7 +193,7 @@ export async function runCodeEvaluator(args: CodeEvaluatorRunArgs): Promise<Eval
 
 	let fn: (...fnArgs: unknown[]) => Promise<unknown>;
 	try {
-		fn = compileFunction([...CODE_EVALUATOR_ARG_NAMES], stripTypes(fence.code)) as typeof fn;
+		fn = compileFunction([...CODE_EVALUATOR_ARG_NAMES], stripTypes(fence.code));
 	} catch (e) {
 		return fail("error", `compile error: ${e instanceof Error ? e.message : String(e)}`);
 	}

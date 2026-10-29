@@ -269,9 +269,7 @@ async function migrateProviderInstances(deps: MigrationDeps): Promise<void> {
  */
 async function migrateWebSearchMultiProvider(deps: MigrationDeps): Promise<void> {
 	const { settings, app, saveSettings } = deps;
-	const wsSettings = settings.user_extension_settings["web_search"] as
-		| Record<string, string | number | boolean | string[]>
-		| undefined;
+	const wsSettings = settings.user_extension_settings["web_search"];
 
 	if (!wsSettings || wsSettings.web_search_tavily_enabled === undefined) return;
 

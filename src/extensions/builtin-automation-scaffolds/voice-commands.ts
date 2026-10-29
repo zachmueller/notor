@@ -1,4 +1,4 @@
-import type { AutomationTrigger, BuiltinAutomationScaffold } from "../types";
+import type { BuiltinAutomationScaffold } from "../types";
 
 /**
  * Built-in voice-command automation (Milestone B of docs/voice.md).
@@ -12,7 +12,7 @@ import type { AutomationTrigger, BuiltinAutomationScaffold } from "../types";
 export const VOICE_COMMANDS: BuiltinAutomationScaffold = {
 	name: "voice-commands",
 	displayName: "Voice commands",
-	trigger: "on_voice_command" as AutomationTrigger,
+	trigger: "on_voice_command",
 	featureGroup: "voice",
 	settingsSchema: [],
 	scaffoldContent:

@@ -1,9 +1,9 @@
-import type { AutomationTrigger, BuiltinAutomationScaffold } from "../types";
+import type { BuiltinAutomationScaffold } from "../types";
 
 export const TITLE_GENERATION: BuiltinAutomationScaffold = {
 	name: "title-generation",
 	displayName: "Title Generation",
-	trigger: "on_conversation_start" as AutomationTrigger,
+	trigger: "on_conversation_start",
 	settingsSchema: [
 		{
 			key: "preset",

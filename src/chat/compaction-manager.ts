@@ -176,7 +176,7 @@ export class CompactionManager {
 					role: "system",
 					content: JSON.stringify(result.record),
 					timestamp: result.record.timestamp,
-				} as Message);
+				});
 
 				// Show permanent marker
 				if (messagesContainer) {
@@ -303,7 +303,7 @@ export class CompactionManager {
 					role: "system",
 					content: JSON.stringify(result.record),
 					timestamp: result.record.timestamp,
-				} as Message);
+				});
 
 				if (messagesContainer) {
 					showCompactionMarker(

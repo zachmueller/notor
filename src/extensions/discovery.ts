@@ -239,7 +239,7 @@ async function parseOneExtensionFile(
 
 	// Get frontmatter from metadata cache
 	const fileCache = metadataCache.getFileCache(file);
-	let frontmatter = fileCache?.frontmatter as Record<string, unknown> | undefined;
+	let frontmatter: Record<string, unknown> | undefined = fileCache?.frontmatter;
 
 	// If the metadata cache hasn't indexed the file yet, attempt manual YAML parsing
 	if (!frontmatter) {

@@ -1,9 +1,9 @@
-import type { AutomationTrigger, BuiltinAutomationScaffold } from "../types";
+import type { BuiltinAutomationScaffold } from "../types";
 
 export const MEMORY_SEARCH: BuiltinAutomationScaffold = {
 	name: "memory-search",
 	displayName: "Memory Search (auto-inject)",
-	trigger: "on_conversation_start" as AutomationTrigger,
+	trigger: "on_conversation_start",
 	blocking: true,
 	blockingEmitKind: "memory_recalled",
 	blockingTimeout: 10000,

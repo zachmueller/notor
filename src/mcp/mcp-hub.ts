@@ -410,8 +410,8 @@ export class McpHub {
 				return {
 					name: tool.name,
 					description: tool.description ?? "",
-					inputSchema: schema as Record<string, unknown>,
-					annotations: tool.annotations as McpDiscoveredTool["annotations"],
+					inputSchema: schema,
+					annotations: tool.annotations,
 				};
 			});
 

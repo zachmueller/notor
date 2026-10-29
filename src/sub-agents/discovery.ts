@@ -161,7 +161,7 @@ async function parseProfile(
 				try {
 					const parsed = parseYAML(yamlBody);
 					if (parsed && typeof parsed === "object") {
-						frontmatter = parsed as Record<string, unknown>;
+						frontmatter = parsed;
 					} else {
 						// Empty or non-object frontmatter (e.g., `---\n---`)
 						// Treat as no frontmatter — not malformed, just empty

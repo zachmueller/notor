@@ -332,7 +332,7 @@ export class StepNoteParser {
 	 */
 	async parse(file: TFile): Promise<StepDefinition | null> {
 		const cache = this.metadataCache.getFileCache(file);
-		const fm = cache?.frontmatter as Record<string, unknown> | undefined;
+		const fm: Record<string, unknown> | undefined = cache?.frontmatter;
 		if (!fm || !isCircuitStepType(fm["notor-type"])) {
 			log.warn("Step note missing circuit-step discriminator", { path: file.path });
 			return null;
@@ -412,7 +412,7 @@ export class EvaluatorNoteParser {
 
 	async parse(file: TFile, evalsDir: string): Promise<EvaluatorDefinition> {
 		const cache = this.metadataCache.getFileCache(file);
-		const fm = cache?.frontmatter as Record<string, unknown> | undefined;
+		const fm: Record<string, unknown> | undefined = cache?.frontmatter;
 		if (!fm || !isCircuitEvaluatorType(fm["notor-type"])) {
 			throw new CircuitParseError(
 				`Note '${file.path}' is missing 'notor-type: circuit-evaluator'.`,
@@ -616,7 +616,7 @@ export class CircuitDefinitionParser {
 		}
 
 		const cache = this.metadataCache.getFileCache(defFile);
-		const fm = cache?.frontmatter as Record<string, unknown> | undefined;
+		const fm: Record<string, unknown> | undefined = cache?.frontmatter;
 		if (!fm || !isCircuitDefinitionType(fm["notor-type"])) {
 			throw new CircuitParseError(
 				`definition.md in '${dir.path}' is missing 'notor-type: circuit' (or legacy 'orchestration-flow').`,
