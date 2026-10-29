@@ -28,7 +28,7 @@ import type { WakeWordDetector } from "./wake/types";
 
 const log = logger("VoiceManager");
 
-/** ScriptProcessor frame size: ~128 ms at 16 kHz keeps wake-word latency low. */
+/** Microphone frame size: ~128 ms at 16 kHz keeps wake-word latency low. */
 const MIC_FRAME_SAMPLES = 2048;
 
 /** Settings edits are batched before the wake-word detector restarts. */
@@ -184,7 +184,7 @@ export class VoiceManager {
 			orchestrator,
 			leafId,
 			conversationId,
-			audio: opts.withoutCapture ? new SilentAudioSource() : new MicrophoneAudioSource({ bufferSize: MIC_FRAME_SAMPLES }),
+			audio: opts.withoutCapture ? new SilentAudioSource() : new MicrophoneAudioSource({ frameSize: MIC_FRAME_SAMPLES }),
 			wake: opts.withoutCapture && !opts.realWakeDetector ? new FakeWakeDetector() : this.createWakeDetector(),
 			stt: this.createStt(),
 			earcon: (kind) => this.earcons.play(kind),
@@ -319,6 +319,27 @@ export class VoiceManager {
 		const controller = this.controllers.get(leafId);
 		if (!controller) return Promise.reject(new Error(`No voice controller for leaf ${leafId}`));
 		return controller.injectAudio(Float32Array.from(samples), sampleRate, opts);
+	}
+
+	/**
+	 * Open the real microphone source on its own (no controller) for `durationMs`
+	 * and report what it delivered. The e2e suite runs Obsidian with Chromium's
+	 * fake capture device to exercise the capture path end to end.
+	 */
+	async captureMicrophoneSample(durationMs: number): Promise<{ sampleRate: number; frameSizes: number[]; peak: number }> {
+		const source = new MicrophoneAudioSource({ frameSize: MIC_FRAME_SAMPLES });
+		const frameSizes: number[] = [];
+		let peak = 0;
+		await source.start((frame) => {
+			frameSizes.push(frame.length);
+			for (const sample of frame) peak = Math.max(peak, Math.abs(sample));
+		});
+		try {
+			await new Promise<void>((resolve) => window.setTimeout(resolve, durationMs));
+		} finally {
+			source.stop();
+		}
+		return { sampleRate: source.sampleRate, frameSizes, peak };
 	}
 
 	// -----------------------------------------------------------------------

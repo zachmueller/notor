@@ -167,6 +167,9 @@ export interface TestConfig {
 
 	/** Obsidian launch timeout in ms (default: 30000). */
 	launchTimeout?: number;
+
+	/** Extra command-line switches for Obsidian/Chromium (e.g. fake media devices). */
+	extraArgs?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +288,7 @@ export async function runTest(
 			vaultPath: VAULT_PATH,
 			cdpPort,
 			timeout: config.launchTimeout ?? 30_000,
+			extraArgs: config.extraArgs,
 		});
 
 		// 7. Connect CDP
