@@ -109,7 +109,7 @@ export default tseslint.config(
 		"src/**/__tests__/**", // test files + fixtures (excluded from tsconfig)
 		"esbuild.config.mjs",
 		"esbuild",               // build-tooling scripts, outside the plugin tsconfig
-		"eslint.config.js",
+		"eslint.config.mts",
 		"version-bump.mjs",
 		"versions.json",
 		"main.js",
