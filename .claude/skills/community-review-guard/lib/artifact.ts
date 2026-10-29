@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { previousReleaseTag, run, runOk, withWorktree } from "./exec";
+import { headSha, previousReleaseTag, run, runOk, withWorktree } from "./exec";
 import type { ArtifactMetrics, CheckContext, CheckOutput, Finding } from "./types";
 
 const SYNC_LIMIT_BYTES = 5 * 1024 * 1024;
@@ -106,8 +106,15 @@ export async function checkArtifact(
 		add({ id: "new-hosts", severity: "WARN", title: "Hosts not in the baseline; disclose any the plugin contacts", count: newHosts.length, locations: newHosts });
 	}
 
-	// Once released, the published asset must be exactly what this source builds.
-	const published = ctx.offline ? null : releaseMainJs(ctx.repoRoot, opts.version);
+	// Once released, the published asset must be exactly what the tagged source builds.
+	// Only compare when this tree IS that tag: before the version bump, HEAD still
+	// carries the previous (already published) version number.
+	const tagCommit = run("git", ["rev-parse", "--verify", "--quiet", `${opts.version}^{commit}`], ctx.repoRoot).stdout.trim();
+	const isTaggedCommit = tagCommit !== "" && tagCommit === headSha(ctx.root);
+	if (tagCommit !== "" && !isTaggedCommit) {
+		add({ id: "version-already-released", severity: "INFO", title: `Version ${opts.version} is already tagged at another commit; the release's version bump comes next` });
+	}
+	const published = ctx.offline || !isTaggedCommit ? null : releaseMainJs(ctx.repoRoot, opts.version);
 	if (published?.digest) {
 		const same = published.digest === m.sha256;
 		add({
