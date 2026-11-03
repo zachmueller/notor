@@ -268,6 +268,7 @@ describe("WebSearchQueue", () => {
 				"brave",
 				"serpapi",
 				"kagi",
+				"keenable",
 			]);
 			expect(config.maxFallbackProviders).toBe(2);
 			expect(config.providers.duckduckgo.enabled).toBe(true);
@@ -276,6 +277,7 @@ describe("WebSearchQueue", () => {
 			expect(config.providers.brave.enabled).toBe(false);
 			expect(config.providers.serpapi.enabled).toBe(false);
 			expect(config.providers.kagi.enabled).toBe(false);
+			expect(config.providers.keenable.enabled).toBe(false);
 		});
 	});
 

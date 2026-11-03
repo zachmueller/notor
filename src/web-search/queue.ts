@@ -151,6 +151,7 @@ export class WebSearchQueue {
 					"brave",
 					"serpapi",
 					"kagi",
+					"keenable",
 				],
 			maxFallbackProviders:
 				(settings.web_search_max_fallback_providers as number) ?? 2,
@@ -193,6 +194,14 @@ export class WebSearchQueue {
 						(settings.web_search_kagi_delay_ms as number) ?? 0,
 					apiKey:
 						(settings.web_search_kagi_api_key as string) ?? null,
+				},
+				keenable: {
+					enabled:
+						(settings.web_search_keenable_enabled as boolean) ?? false,
+					delayMs:
+						(settings.web_search_keenable_delay_ms as number) ?? 0,
+					apiKey:
+						(settings.web_search_keenable_api_key as string) ?? null,
 				},
 			},
 		};

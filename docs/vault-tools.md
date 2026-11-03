@@ -18,7 +18,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `manage_tags` | Add or remove tags via the frontmatter `tags` property | Act only |
 | `get_backlinks` | List all notes that link TO a given note | Plan & Act |
 | `get_outlinks` | List all notes that a given note links TO (resolved and unresolved) | Plan & Act |
-| `web_search` | Search the web (DuckDuckGo by default; Tavily, Brave, SerpAPI, Kagi available with API keys) and return titles, URLs, and snippets | Plan & Act |
+| `web_search` | Search the web (DuckDuckGo by default; Tavily, Brave, SerpAPI, Kagi, Keenable available with API keys) and return titles, URLs, and snippets | Plan & Act |
 | `fetch_webpage` | Fetch a URL and return its content as Markdown | Plan & Act |
 | `execute_command` | Run a shell command and return its output | Act only |
 | `read_file` | Read a text file from the filesystem (desktop only) | Plan & Act |
