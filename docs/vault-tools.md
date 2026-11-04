@@ -18,7 +18,7 @@ Notor exposes a set of tools the AI can invoke during a conversation to read, wr
 | `manage_tags` | Add or remove tags via the frontmatter `tags` property | Act only |
 | `get_backlinks` | List all notes that link TO a given note | Plan & Act |
 | `get_outlinks` | List all notes that a given note links TO (resolved and unresolved) | Plan & Act |
-| `web_search` | Search the web (DuckDuckGo by default; Tavily, Brave, SerpAPI, Kagi, Keenable available with API keys) and return titles, URLs, and snippets | Plan & Act |
+| `web_search` | Search the web (DuckDuckGo; more providers (Tavily, Brave, SerpAPI, Kagi, Keenable) via the multi-engine web search extension) and return titles, URLs, and snippets | Plan & Act |
 | `fetch_webpage` | Fetch a URL and return its content as Markdown | Plan & Act |
 | `execute_command` | Run a shell command and return its output | Act only |
 | `read_file` | Read a text file from the filesystem (desktop only) | Plan & Act |
@@ -394,7 +394,7 @@ The `fetch_webpage` tool lets the AI retrieve external content:
 
 ## Web search
 
-The `web_search` tool searches the web using a multi-provider queue with automatic fallback. DuckDuckGo is the default provider and requires no API key. If you configure API keys for Tavily, Brave Search, SerpAPI, or Kagi, those providers become available as fallbacks when DuckDuckGo fails or is rate-limited.
+The built-in `web_search` tool searches the web with DuckDuckGo, which requires no API key. Its settings cover the timeout, result count and DuckDuckGo request delay. Paid providers (Tavily, Brave Search, SerpAPI, Kagi and Keenable) are available through the [`multi_engine_web_search`](../examples/extensions/tools/multi-engine-web-search.md) example extension, which adds a multi-provider queue with automatic fallback when a provider fails or is rate-limited.
 
 - Returns a numbered markdown list with titles, clickable URLs, and text snippets.
 - Results are snippets only — use `fetch_webpage` on a result URL to retrieve full page content.
