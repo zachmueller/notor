@@ -24,6 +24,8 @@ describe("KeenableSearchProvider", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		// The provider uses window timers (Obsidian renderer); tests run in node.
+		vi.stubGlobal("window", globalThis);
 		provider = new KeenableSearchProvider();
 	});
 
@@ -60,6 +62,16 @@ describe("KeenableSearchProvider", () => {
 		expect(result.results).toEqual([
 			{ title: "A", url: "https://a.example", snippet: "desc" },
 			{ title: "B", url: "https://b.example", snippet: "x".repeat(500) },
+		]);
+	});
+
+	it("caps a long description and falls back to the url for an empty title", async () => {
+		respond(200, {
+			results: [{ title: "", url: "https://d.example", description: "d".repeat(900) }],
+		});
+		const result = await provider.search("q", 5, 10000, "key");
+		expect(result.results).toEqual([
+			{ title: "https://d.example", url: "https://d.example", snippet: "d".repeat(500) },
 		]);
 	});
 

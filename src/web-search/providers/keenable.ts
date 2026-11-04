@@ -29,8 +29,11 @@ export class KeenableSearchProvider implements SearchProvider {
 		apiKey: string | null,
 		signal?: AbortSignal,
 	): Promise<SearchProviderResult> {
-		const timeoutPromise = new Promise<never>((_, reject) =>
-			setTimeout(
+		let timer: number | undefined;
+		let onAbort: (() => void) | undefined;
+
+		const timeoutPromise = new Promise<never>((_, reject) => {
+			timer = window.setTimeout(
 				() =>
 					reject(
 						new Error(
@@ -38,9 +41,8 @@ export class KeenableSearchProvider implements SearchProvider {
 						),
 					),
 				timeoutMs,
-			),
-		);
-
+			);
+		});
 
 		const racers: Promise<unknown>[] = [
 			requestUrl({
@@ -65,22 +67,23 @@ export class KeenableSearchProvider implements SearchProvider {
 						reject(new DOMException("The operation was aborted.", "AbortError"));
 						return;
 					}
-					signal.addEventListener(
-						"abort",
-						() =>
-							reject(
-								new DOMException("The operation was aborted.", "AbortError"),
-							),
-						{ once: true },
-					);
+					onAbort = () =>
+						reject(new DOMException("The operation was aborted.", "AbortError"));
+					signal.addEventListener("abort", onAbort, { once: true });
 				}),
 			);
 		}
 
-		const response = (await Promise.race(racers)) as {
-			status: number;
-			text: string;
-		};
+		let response: { status: number; text: string };
+		try {
+			response = (await Promise.race(racers)) as {
+				status: number;
+				text: string;
+			};
+		} finally {
+			window.clearTimeout(timer);
+			if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+		}
 
 		if (response.status === 429) {
 			return { results: [], rateLimited: true };
@@ -96,10 +99,9 @@ export class KeenableSearchProvider implements SearchProvider {
 		const results: WebSearchResult[] = (json.results ?? [])
 			.filter((r) => typeof r.url === "string" && r.url.length > 0)
 			.map((r) => ({
-				title: r.title ?? r.url!,
+				title: r.title || r.url!,
 				url: r.url!,
-				// Prefer the short description; fall back to a truncated excerpt.
-				snippet: r.description || (r.snippet ?? "").slice(0, SNIPPET_MAX_CHARS),
+				snippet: (r.description || r.snippet || "").slice(0, SNIPPET_MAX_CHARS),
 			}));
 
 		return { results };
