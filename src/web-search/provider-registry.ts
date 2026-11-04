@@ -41,7 +41,10 @@ export class SearchProviderRegistry {
 
 	/**
 	 * Available providers sorted by user's priority order.
-	 * Providers not in `priorityOrder` are excluded (not appended).
+	 * Available providers missing from `priorityOrder` are appended after the
+	 * listed ones, in registry order, so a provider enabled after the priority
+	 * list was saved still takes part. Each provider has its own `*_enabled`
+	 * toggle, so the priority list only sets order, not on/off.
 	 * Unconfigured providers are excluded even if in the priority list.
 	 */
 	getAvailableByPriority(
@@ -56,7 +59,12 @@ export class SearchProviderRegistry {
 		const result: SearchProvider[] = [];
 		for (const type of priorityOrder) {
 			const provider = available.get(type);
-			if (provider) {
+			if (provider && !result.includes(provider)) {
+				result.push(provider);
+			}
+		}
+		for (const provider of available.values()) {
+			if (!result.includes(provider)) {
 				result.push(provider);
 			}
 		}
