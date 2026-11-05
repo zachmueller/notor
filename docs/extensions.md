@@ -547,7 +547,7 @@ Notor maintains a gallery of optional extensions in the `examples/extensions/` d
 | Name | Type | Description |
 |------|------|-------------|
 | `read-rendered-note` | Tool | Read notes with Dataview queries evaluated and rendered as Markdown |
-| `multi-engine-web-search` | Tool | Multi-provider web search with automatic fallback (Tavily, Brave, SerpAPI, DuckDuckGo) |
+| `multi-engine-web-search` | Tool | Multi-provider web search with automatic fallback (Tavily, Brave, SerpAPI, Kagi, Keenable, DuckDuckGo) |
 
 **Installation:**
 

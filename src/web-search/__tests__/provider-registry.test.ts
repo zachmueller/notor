@@ -173,7 +173,7 @@ describe("SearchProviderRegistry", () => {
 			]);
 		});
 
-		it("excludes providers not in priority list", () => {
+		it("appends available providers missing from the priority list in registry order", () => {
 			const result = registry.getAvailableByPriority(allEnabled, [
 				"tavily",
 				"duckduckgo",
@@ -181,6 +181,29 @@ describe("SearchProviderRegistry", () => {
 			expect(result.map((p) => p.meta.type)).toEqual([
 				"tavily",
 				"duckduckgo",
+				"brave",
+				"serpapi",
+			]);
+		});
+
+		it("appends a newly enabled provider to an older saved priority list", () => {
+			const keenable = createMockProvider("keenable", true);
+			registry.register(keenable);
+			const configs: Record<string, ProviderConfig> = {
+				duckduckgo: { enabled: true, delayMs: 1500, apiKey: null },
+				tavily: { enabled: true, delayMs: 0, apiKey: "tav-key" },
+				brave: { enabled: false, delayMs: 0, apiKey: null },
+				serpapi: { enabled: false, delayMs: 0, apiKey: null },
+				keenable: { enabled: true, delayMs: 0, apiKey: "keen-key" },
+			};
+			const result = registry.getAvailableByPriority(configs, [
+				"duckduckgo",
+				"tavily",
+			]);
+			expect(result.map((p) => p.meta.type)).toEqual([
+				"duckduckgo",
+				"tavily",
+				"keenable",
 			]);
 		});
 
@@ -229,6 +252,8 @@ describe("SearchProviderRegistry", () => {
 			expect(result.map((p) => p.meta.type)).toEqual([
 				"tavily",
 				"duckduckgo",
+				"brave",
+				"serpapi",
 			]);
 		});
 	});

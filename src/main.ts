@@ -146,6 +146,7 @@ import { TavilyProvider } from "./web-search/providers/tavily";
 import { BraveSearchProvider } from "./web-search/providers/brave";
 import { SerpApiProvider } from "./web-search/providers/serpapi";
 import { KagiSearchProvider } from "./web-search/providers/kagi";
+import { KeenableSearchProvider } from "./web-search/providers/keenable";
 
 // Chat blocks
 import { ChatBlockRegistry } from "./ui/chat-blocks/registry";
@@ -2161,6 +2162,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			this._searchProviderRegistry.register(new BraveSearchProvider());
 			this._searchProviderRegistry.register(new SerpApiProvider());
 			this._searchProviderRegistry.register(new KagiSearchProvider());
+			this._searchProviderRegistry.register(new KeenableSearchProvider());
 		}
 		return this._searchProviderRegistry;
 	}
