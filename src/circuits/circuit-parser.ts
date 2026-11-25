@@ -39,6 +39,7 @@ import {
 	type Vault,
 } from "obsidian";
 import { logger } from "../utils/logger";
+import { startSpan } from "../utils/startup-timing";
 import { validateCronExpression } from "../workflows/workflow-discovery";
 import { extractCodeFence } from "../extensions/parser";
 import {
@@ -567,6 +568,7 @@ export class CircuitDefinitionParser {
 	 * carries a `name_collision` warning.
 	 */
 	async discoverCircuits(): Promise<CircuitParseResult[]> {
+		const endSpan = startSpan("circuits.discover");
 		const results: CircuitParseResult[] = [];
 		for (const rootPath of this.rootPaths()) {
 			const root = this.vault.getAbstractFileByPath(rootPath);
@@ -595,6 +597,7 @@ export class CircuitDefinitionParser {
 				}
 			}
 		}
+		endSpan({ circuits: results.length });
 		return dedupeByName(results);
 	}
 

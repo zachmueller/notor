@@ -39,6 +39,7 @@ import {
 } from "../circuits/code-step-overlay";
 import { SessionLogReader } from "../circuits/session-log-reader";
 import { logger } from "../utils/logger";
+import { startSpan } from "../utils/startup-timing";
 
 const log = logger("RunTreeView");
 
@@ -205,6 +206,7 @@ export class CircuitRunTreeView extends ItemView {
 		const adapter = this.plugin.app.vault.adapter;
 		if (!(await adapter.exists(dir))) return headers;
 
+		const endSpan = startSpan("runTree.scan");
 		const listing = await adapter.list(dir);
 		for (const file of listing.files) {
 			if (!file.endsWith(".jsonl")) continue;
@@ -223,6 +225,7 @@ export class CircuitRunTreeView extends ItemView {
 				log.debug("Skipping unreadable run-tree header", { file, error: String(e) });
 			}
 		}
+		endSpan({ files: listing.files.length, headers: headers.size });
 		return headers;
 	}
 

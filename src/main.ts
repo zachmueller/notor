@@ -12,6 +12,14 @@ import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TFolder, TAbstractFile,
 import { createDefaultSettings, mergeSavedSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
+import {
+	markStartup,
+	resetStartupTimings,
+	startSpan,
+	summarizeStartupTimings,
+	timePromise,
+	timeSync,
+} from "./utils/startup-timing";
 import { notifyFileLeafActivated } from "./context/auto-context";
 
 // Workflows
@@ -533,9 +541,11 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 	async onload() {
 		log.info("Plugin loading", { version: this.manifest.version });
+		resetStartupTimings();
+		const endOnload = startSpan("onload");
 
 		// 1. Load settings (fast — required immediately)
-		await this.loadSettings();
+		await timePromise("onload.settings", this.loadSettings());
 		setLogLevel(this.settings.log_level);
 		log.debug("Settings loaded", { settings: this.settings });
 
@@ -564,9 +574,11 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 		// 2b. Initialize temp output spiller (desktop only, when enabled).
 		if (Platform.isDesktopApp && this.settings.output_spillover_enabled) {
+			const endSpiller = startSpan("onload.spiller");
 			const { TempOutputSpiller } = await import("./shell/temp-output-spiller");
 			this._tempOutputSpiller = new TempOutputSpiller();
 			await this._tempOutputSpiller.ensureSpillDir();
+			endSpiller();
 			this._tempOutputSpiller.cleanupStale().catch((e) => {
 				log.warn("Stale spillover cleanup failed", { error: String(e) });
 			});
@@ -593,6 +605,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		// fallback — wireView only wires callbacks.
 		// @see specs/ZZ-misc/multi-conversation-robustness-redesign.md — Section 4.2
 		this.registerView(CHAT_VIEW_TYPE, (leaf) => {
+			const endFactory = startSpan("chat.factory");
 			const view = new NotorChatView(leaf, this);
 
 			// Destroy any stale orchestrator at this leaf ID (Amendment R2-7).
@@ -625,6 +638,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				}
 			}, 0);
 
+			endFactory();
 			return view;
 		});
 
@@ -693,7 +707,9 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		// miss vault personas and the failed restore would clear the setting.
 		// Panels created earlier adopt the persona via setOnPersonaRestored.
 		this.app.workspace.onLayoutReady(() => {
-			this.getPersonaManager().restoreFromSettings().catch((e) => {
+			// Registered first, so this marks when layout-ready callbacks begin.
+			markStartup("layoutReady");
+			timePromise("layout.persona", this.getPersonaManager().restoreFromSettings()).catch((e) => {
 				log.warn("Failed to restore active persona from settings", { error: String(e) });
 			});
 		});
@@ -774,18 +790,21 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 		// 7. Initialize Group F: vault event hook components (F-023).
 		// Heavy init (tag shadow cache) is deferred to onLayoutReady.
-		this._initVaultEventHooks();
+		timeSync("onload.vaultHooks", () => this._initVaultEventHooks());
 
 		// 7b. Eagerly create ToolRegistry + ToolDispatcher so they exist
 		// before MCP servers fire onStatusChange("connected"). Without
 		// this, fast-connecting stdio servers silently drop their tools.
-		this.getToolRegistry();
-		this.getToolDispatcher();
+		timeSync("onload.toolRegistry", () => {
+			this.getToolRegistry();
+			this.getToolDispatcher();
+		});
 
 		// 8. Initialize MCP hub (ARCH-005).
 		// Async, non-blocking — plugin load completes without waiting for
 		// MCP server connections. Cleanup registered via this.register().
-		this._initMcpHub();
+		// The span covers only the synchronous part of every connectServer().
+		timeSync("onload.mcpInit", () => this._initMcpHub());
 
 		// 9. Kick off initial workflow discovery (C-008).
 		// Deferred until layout is ready — vault file index must be fully
@@ -802,6 +821,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			// run initial discovery. processFrontMatter atomically updates the
 			// metadata cache, so rescanWorkflows() sees injected frontmatter
 			// immediately after the promise resolves.
+			const endWorkflows = startSpan("layout.workflows");
 			const workflowsScanned = autoInjectUnidentifiedWorkflows(
 				this.app,
 				this.app.vault,
@@ -825,7 +845,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				} catch (e2) {
 					log.warn("Fallback initial workflow rescan failed", { error: String(e2) });
 				}
-			});
+			}).finally(() => endWorkflows());
 
 			// EXT-017: Discover and compile user extensions (tools + automations).
 			// Scaffold defaults for all 20 built-in tools are injected here;
@@ -834,7 +854,8 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			// However, if the dispatcher was already created (e.g., by workspace
 			// restore triggering wireView() → createOrchestrator() → getToolDispatcher()
 			// before this async reload completes), we must sync it afterwards.
-			const extensionsLoaded = this.getExtensionManager().reload(true).then(() => {
+			const endExtensions = startSpan("layout.extensions");
+			const extensionsLoaded = timePromise("layout.extensions.reload", this.getExtensionManager().reload(true)).then(() => {
 				// Sync dispatcher if it was already lazily created before reload finished.
 				// The dispatcher populates from registry.getAll() at creation time, but
 				// if created before reload, it only had use_subagent. Re-register all
@@ -878,14 +899,15 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				this.validateMemoryPresetsOnLoad();
 			}).catch((e) => {
 				log.warn("Initial extension discovery failed", { error: String(e) });
-			});
+			}).finally(() => endExtensions());
 
 			// The external API is usable once tools are registered and the first
 			// workflow/circuit scans finish (the circuit scan starts in the vault
 			// event hooks' own layout-ready callback, which has run by then).
-			void Promise.allSettled([extensionsLoaded, workflowsScanned])
+			const apiReady = Promise.allSettled([extensionsLoaded, workflowsScanned])
 				.then(() => this._initialCircuitScan)
 				.finally(() => {
+					markStartup("apiReady");
 					this._resolveApiReady();
 					// on_daily_start needs the full target set before its first check.
 					this._dailyStart?.detector.start();
@@ -893,15 +915,16 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 			// Enforce chat history retention policy (age + size limits).
 			// Fire-and-forget — non-blocking, runs once per startup.
-			this.getHistoryManager().enforceRetention().catch((e) => {
+			const retention = timePromise("layout.retention", this.getHistoryManager().enforceRetention()).catch((e) => {
 				log.warn("History retention enforcement failed", { error: String(e) });
 			});
 
 			// INT-005 (FR-125): scan for interrupted orchestration sessions and
 			// resume them. Gated on circuits_enabled; fire-and-forget so it
 			// never blocks load. Loud recovery errors surface as Notices.
+			let recovery: Promise<unknown> = Promise.resolve();
 			if (this.settings.circuits_enabled) {
-				Promise.all([
+				recovery = timePromise("layout.recoverCircuits", Promise.all([
 					import("./circuits/launch"),
 					import("./ui/circuit-modals"),
 				])
@@ -909,11 +932,19 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 						recoverCircuits(this, (flowName, question) =>
 							requestCircuitInput(this.app, flowName, question),
 						),
-					)
+					))
 					.catch((e) => log.warn("Orchestration recovery scan failed", { error: String(e) }));
 			}
+
+			// Startup timing: once the layout-ready work has settled, log a
+			// one-line summary of the notor:* timeline (see utils/startup-timing).
+			void Promise.allSettled([apiReady, retention, recovery]).then(() => {
+				markStartup("settled");
+				log.info("Startup timing", summarizeStartupTimings());
+			});
 		});
 
+		endOnload();
 		log.info("Plugin loaded");
 	}
 
@@ -1380,22 +1411,24 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		// Deferred initialization: tag shadow cache + listener evaluation after layout ready
 		this.app.workspace.onLayoutReady(() => {
 			// Initialize the tag shadow cache from Obsidian's metadata cache
-			tagShadowCache.initialize(this.app);
+			timeSync("layout.tagCache", () => tagShadowCache.initialize(this.app));
 			log.info("Tag shadow cache initialized");
 
-			// Evaluate which listeners should be active based on current settings
-			// and discovered workflows (called again after rescanWorkflows in step 8)
-			listenerManager.evaluateListeners();
+			timeSync("layout.listeners", () => {
+				// Evaluate which listeners should be active based on current settings
+				// and discovered workflows (called again after rescanWorkflows in step 8)
+				listenerManager.evaluateListeners();
 
-			// Sync cron jobs with current on_schedule hooks
-			const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
-				(h) => h.enabled
-			);
-			vaultEventScheduler.syncJobs(enabledScheduleHooks);
+				// Sync cron jobs with current on_schedule hooks
+				const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
+					(h) => h.enabled
+				);
+				vaultEventScheduler.syncJobs(enabledScheduleHooks);
+			});
 
 			// Discover scheduled orchestration flows and register their cron jobs
 			// (no-op + empty cache when circuits_enabled is off). Fire-and-forget.
-			this._initialCircuitScan = this.rescanCircuits().then(
+			this._initialCircuitScan = timePromise("layout.circuitsScan", this.rescanCircuits()).then(
 				() => undefined,
 				(e) => log.warn("Initial orchestration flow scan failed", { error: String(e) }),
 			);
@@ -2397,7 +2430,14 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		orchestrator: ChatOrchestrator,
 		savedState?: Record<string, unknown> | null,
 	): Promise<void> {
-		const load = this._loadConversation(view, orchestrator, savedState);
+		const load = timePromise(
+			"chat.load",
+			this._loadConversation(view, orchestrator, savedState),
+		);
+		// Approximate "restored conversation is on screen": the next frame after
+		// the load settles (assistant markdown renders are not awaited by the load).
+		const endPaint = startSpan("chat.paint");
+		void load.finally(() => window.requestAnimationFrame(() => endPaint()));
 		view.conversationLoad = load;
 		return load;
 	}
@@ -2417,7 +2457,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		const historyManager = this.getHistoryManager();
 		let entries: import("./chat/history").ConversationListEntry[];
 		try {
-			entries = await historyManager.listConversations();
+			entries = await timePromise("chat.list", historyManager.listConversations());
 		} catch (e) {
 			log.error("Failed to load conversation history", { error: String(e) });
 			view.isConversationLoaded = false; // allow retry
@@ -2448,7 +2488,10 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				// Workspace restore passes a conversation ID — resolve and load
 				let switched: boolean;
 				try {
-					switched = await orchestrator.switchToConversationById(savedId, { signal });
+					switched = await timePromise(
+						"chat.switchById",
+						orchestrator.switchToConversationById(savedId, { signal }),
+					);
 				} catch {
 					switched = false;
 				}

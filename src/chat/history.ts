@@ -64,6 +64,7 @@ import { logger } from "../utils/logger";
 import type { ContentBlock } from "../media/types";
 import { getTextContent } from "../media/types";
 import { atomicRewrite } from "../utils/atomic-write";
+import { startSpan } from "../utils/startup-timing";
 
 const log = logger("HistoryManager");
 
@@ -660,6 +661,8 @@ export class HistoryManager {
 	async listConversations(): Promise<ConversationListEntry[]> {
 		await this.ensureDirectory();
 
+		const endSpan = startSpan("history.list");
+		let filesRead = 0;
 		const entries: ConversationListEntry[] = [];
 		const files = await this.vault.adapter.list(normalizePath(this.historyPath));
 
@@ -674,6 +677,7 @@ export class HistoryManager {
 
 			try {
 				const content = await this.vault.adapter.read(file);
+				filesRead++;
 				const firstNewline = content.indexOf("\n");
 				const headerLine = firstNewline >= 0 ? content.substring(0, firstNewline) : content;
 
@@ -747,6 +751,7 @@ export class HistoryManager {
 		// Sort by most recent activity (newest first)
 		entries.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 
+		endSpan({ files: files.files.length, read: filesRead, listed: entries.length });
 		return entries;
 	}
 

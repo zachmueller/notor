@@ -40,6 +40,7 @@ import { McpConfigError, runHeadersHelper, type HeadersHelperContext } from "./h
 import { nodeFetch } from "./node-fetch";
 import { createAuthRefreshFetch } from "./auth-refresh-fetch";
 import { logger } from "../utils/logger";
+import { startSpan } from "../utils/startup-timing";
 import { sanitizeInputSchemaForBedrock } from "../utils/json-schema-sanitizer";
 import type { SleepWakeDetector } from "../utils/sleep-wake-detector";
 
@@ -240,6 +241,7 @@ export class McpHub {
 
 		// Set status to connecting
 		this.setStatus(connection, "connecting");
+		const endSpan = startSpan("mcp.connect", { server: serverName, type: config.type });
 
 		// Collect stderr lines for error reporting. For stdio servers,
 		// transport.stderr is a PassThrough stream available immediately
@@ -313,6 +315,7 @@ export class McpHub {
 				serverName,
 				toolCount: connection.tools.length,
 			});
+			endSpan({ status: "connected", tools: connection.tools.length });
 		} catch (e) {
 			const errorMsg = e instanceof Error ? e.message : String(e);
 			const stderrSuffix = stderrLines.length > 0
@@ -325,6 +328,7 @@ export class McpHub {
 			await this.cleanupConnection(connection);
 
 			this.setStatus(connection, "error", fullError);
+			endSpan({ status: "error" });
 
 			// Schedule auto-reconnect for HTTP transports — unless the failure is
 			// a configuration problem that retrying cannot fix.
