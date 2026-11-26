@@ -223,6 +223,20 @@ async function measureOnce(variant: WorkspaceVariant, run: number, info: Startup
 			await page.waitForTimeout(1_000);
 		}
 
+		// Correctness guard: what loaded should not change between builds.
+		const counts = await page.evaluate<{ tools: number; extensionTools: number; automations: number }>(`(() => {
+			const p = window.app.plugins.plugins.notor;
+			if (!p) return { tools: -1, extensionTools: -1, automations: -1 };
+			return {
+				tools: p.getToolRegistry().getNames().length,
+				extensionTools: p.getExtensionManager().getTools().length,
+				automations: p.getExtensionManager().getAutomations().length,
+			};
+		})()`);
+		metrics["loaded.tools"] = counts.tools;
+		metrics["loaded.extensionTools"] = counts.extensionTools;
+		metrics["loaded.automations"] = counts.automations;
+
 		const entries = await page.evaluate<RawEntry[]>(COLLECT_ENTRIES);
 
 		let obsidianStartup: unknown = null;
@@ -297,6 +311,7 @@ const HEADLINE = [
 	"runTree.scan.n", "runTree.scan.ms", "mcp.connect.n",
 	"chat.factory.ms", "chat.list.ms", "chat.switchById.ms", "chat.load.ms", "chat.paint.ms",
 	"restore.chatOnSidebarOpen", "restore.runTreeOnSidebarOpen",
+	"loaded.tools", "loaded.extensionTools", "loaded.automations",
 ];
 
 function printTable(byVariant: Record<string, Metrics>): void {
