@@ -6,7 +6,7 @@
  * depends on the scaffold source, so the build computes it once:
  *
  *  1. bundle `src/extensions/precompile-table.ts` (scaffolds + parser + the same
- *     compiler the plugin uses) for Node into a temp file and require it;
+ *     compiler the plugin uses) for Node and evaluate it in memory (no temp files);
  *  2. call `buildPrecompiledTable()` → `[sha256(kind + code), strippedCode]` pairs;
  *  3. serve `src/extensions/precompiled-scaffolds.ts` with its empty
  *     `new Map()` replaced by those entries.
@@ -18,9 +18,9 @@
 
 import esbuild from "esbuild";
 import { builtinModules, createRequire } from "node:module";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { compileFunction } from "node:vm";
 
 export const PRECOMPILED_FILTER = /src[\\/]extensions[\\/]precompiled-scaffolds\.ts$/;
 
@@ -29,9 +29,10 @@ export const EMPTY_TABLE = "PRECOMPILED_STRIPPED: ReadonlyMap<string, string> = 
 
 /** Run the generator from source and return its `[key, stripped]` entries. */
 export async function generatePrecompiledTable(projectRoot) {
+	const entry = resolve(projectRoot, "src/extensions/precompile-table.ts");
 	const result = await esbuild.build({
 		absWorkingDir: projectRoot,
-		entryPoints: [resolve(projectRoot, "src/extensions/precompile-table.ts")],
+		entryPoints: [entry],
 		bundle: true,
 		platform: "node",
 		format: "cjs",
@@ -40,15 +41,16 @@ export async function generatePrecompiledTable(projectRoot) {
 		logLevel: "silent",
 		external: ["obsidian", ...builtinModules],
 	});
-	const dir = mkdtempSync(join(tmpdir(), "notor-precompile-"));
-	try {
-		const file = join(dir, "precompile-table.cjs");
-		writeFileSync(file, result.outputFiles[0].text);
-		const { buildPrecompiledTable } = createRequire(file)(file);
-		return buildPrecompiledTable();
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+	// Evaluate the CJS bundle in memory: a scan or CI sandbox may have no writable
+	// temp directory, and writing one there failed the whole build. The virtual
+	// filename sits next to the entry so require() resolves externals from the repo.
+	const filename = join(dirname(entry), "precompile-table.bundle.cjs");
+	const mod = { exports: {} };
+	const wrapper = compileFunction(result.outputFiles[0].text, ["exports", "require", "module", "__filename", "__dirname"], {
+		filename,
+	});
+	wrapper(mod.exports, createRequire(filename), mod, filename, dirname(filename));
+	return mod.exports.buildPrecompiledTable();
 }
 
 /** precompiled-scaffolds.ts source with the empty table replaced by `entries`. */

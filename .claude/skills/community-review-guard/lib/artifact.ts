@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { headSha, previousReleaseTag, run, runOk, withWorktree } from "./exec";
+import { headSha, previousReleaseTag, run, withWorktree } from "./exec";
 import type { ArtifactMetrics, CheckContext, CheckOutput, Finding } from "./types";
 
 const SYNC_LIMIT_BYTES = 5 * 1024 * 1024;
@@ -46,8 +46,18 @@ export function measure(mainJs: string): ArtifactMetrics {
 	};
 }
 
-function build(root: string): string {
-	runOk("npm", ["run", "build"], root);
+/** Points every temp-dir variable at a path that doesn't exist (see the repro check). */
+const NO_TEMP_DIR_ENV = { TMPDIR: "/nonexistent/notor-guard-tmp", TMP: "/nonexistent/notor-guard-tmp", TEMP: "/nonexistent/notor-guard-tmp" };
+
+/** The first line that names the error (esbuild prints "✘ [ERROR] …"), for the report table. */
+function firstErrorLine(message: string): string {
+	const lines = message.split("\n").map((l) => l.trim()).filter(Boolean);
+	return (lines.find((l) => /\[ERROR\]|Error:/.test(l)) ?? lines[0] ?? "").slice(0, 300);
+}
+
+function build(root: string, env?: Record<string, string>): string {
+	const r = run("npm", ["run", "build"], root, { env });
+	if (r.status !== 0) throw new Error(`npm run build failed (${r.status}):\n${r.stderr || r.stdout}`);
 	const mainJs = join(root, "build", "main.js");
 	if (!existsSync(mainJs)) throw new Error(`npm run build produced no ${mainJs}`);
 	return mainJs;
@@ -129,7 +139,21 @@ export async function checkArtifact(
 
 	if (opts.repro) {
 		const ref = ctx.ref ?? "HEAD";
-		const clean = await withWorktree(ctx.repoRoot, ref, { install: true }, async (dir) => measure(build(dir)).sha256);
+		// The scanner's build verification failed on 0.12.3, whose build wrote to the OS
+		// temp dir; a clean build here passed. So the clean rebuild runs sandbox-like,
+		// with no usable temp dir, and a failure BLOCKs instead of crashing the guard.
+		let clean: string;
+		try {
+			clean = await withWorktree(ctx.repoRoot, ref, { install: true }, async (dir) => measure(build(dir, NO_TEMP_DIR_ENV)).sha256);
+		} catch (e) {
+			add({
+				id: "reproducible-build",
+				severity: "BLOCK",
+				title: `A clean checkout of ${ref} fails to build without a writable temp directory; the scanner's build verification will fail`,
+				detail: firstErrorLine(String(e instanceof Error ? e.message : e)),
+			});
+			return { findings, measured: { artifact: m } };
+		}
 		add({
 			id: "reproducible-build",
 			severity: clean === m.sha256 ? "INFO" : "BLOCK",
