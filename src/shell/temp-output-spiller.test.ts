@@ -5,29 +5,18 @@ vi.mock("../utils/logger", () => {
 	return { logger: () => ({ debug: noop, info: noop, warn: noop, error: noop }) };
 });
 
+import { createTempOutputSpiller, TempOutputSpiller } from "./temp-output-spiller";
+
 describe("createTempOutputSpiller", () => {
-	afterEach(() => {
-		vi.doUnmock("fs");
-		vi.resetModules();
-	});
+	afterEach(() => vi.restoreAllMocks());
 
 	it("returns a spiller when the temp directory can be created", async () => {
-		vi.resetModules();
-		const { createTempOutputSpiller, TempOutputSpiller } = await import("./temp-output-spiller");
-		const spiller = await createTempOutputSpiller();
-		expect(spiller).toBeInstanceOf(TempOutputSpiller);
+		vi.spyOn(TempOutputSpiller.prototype, "ensureSpillDir").mockResolvedValue();
+		await expect(createTempOutputSpiller()).resolves.toBeInstanceOf(TempOutputSpiller);
 	});
 
 	it("returns null instead of throwing when the directory can't be created", async () => {
-		vi.resetModules();
-		vi.doMock("fs", async (orig) => {
-			const actual = await orig<typeof import("fs")>();
-			return {
-				...actual,
-				promises: { ...actual.promises, mkdir: async () => { throw new Error("EROFS: read-only file system"); } },
-			};
-		});
-		const { createTempOutputSpiller } = await import("./temp-output-spiller");
+		vi.spyOn(TempOutputSpiller.prototype, "ensureSpillDir").mockRejectedValue(new Error("EROFS: read-only file system"));
 		await expect(createTempOutputSpiller()).resolves.toBeNull();
 	});
 });
