@@ -18,11 +18,10 @@
 import { resolveLoginShellPath } from "../shell/login-shell-path";
 
 import { Platform } from "obsidian";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { FetchLike, Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { once } from "../utils/lazy-modules";
 
 import type { NotorSettings } from "../settings";
 import type { ToolResult } from "../types";
@@ -45,6 +44,26 @@ import { sanitizeInputSchemaForBedrock } from "../utils/json-schema-sanitizer";
 import type { SleepWakeDetector } from "../utils/sleep-wake-detector";
 
 const log = logger("McpHub");
+
+/**
+ * The MCP SDK (with zod and ajv, ~1.2 MB unminified) is only needed once a
+ * connection starts, which now happens at layout ready. Loading it then, rather
+ * than through a static import, keeps it from evaluating during plugin load.
+ */
+const loadMcpSdk = once(async () => {
+	const [client, stdio, http, types] = await Promise.all([
+		import("@modelcontextprotocol/sdk/client/index.js"),
+		import("@modelcontextprotocol/sdk/client/stdio.js"),
+		import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
+		import("@modelcontextprotocol/sdk/types.js"),
+	]);
+	return {
+		Client: client.Client,
+		StdioClientTransport: stdio.StdioClientTransport,
+		StreamableHTTPClientTransport: http.StreamableHTTPClientTransport,
+		CallToolResultSchema: types.CallToolResultSchema,
+	};
+});
 
 /** Handshake timeout in milliseconds (30 seconds per spec). */
 const HANDSHAKE_TIMEOUT_MS = 30_000;
@@ -272,6 +291,7 @@ export class McpHub {
 			log.debug("Transport created", { serverName, type: config.type });
 
 			// 2. Create MCP Client
+			const { Client } = await loadMcpSdk();
 			const client = new Client(
 				{ name: "Notor", version: this.pluginVersion },
 				{ capabilities: {} }
@@ -576,6 +596,7 @@ export class McpHub {
 		}
 
 		try {
+			const { CallToolResultSchema } = await loadMcpSdk();
 			// Send tools/call with _meta.notor_mode injection (FR-58)
 			const result = await connection.client.callTool(
 				{
@@ -804,6 +825,7 @@ export class McpHub {
 			extraEnvKeys: Object.keys(env),
 		});
 
+		const { StdioClientTransport } = await loadMcpSdk();
 		const transport = new StdioClientTransport({
 			command: config.command,
 			args: config.args ?? [],
@@ -863,6 +885,7 @@ export class McpHub {
 			});
 		}
 
+		const { StreamableHTTPClientTransport } = await loadMcpSdk();
 		transport = new StreamableHTTPClientTransport(new URL(config.url), {
 			requestInit: { headers },
 			...(fetch ? { fetch } : {}),
