@@ -1117,8 +1117,8 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 	/**
 	 * Daily storage housekeeping, at most once per local day on this device:
-	 * history retention, then the sweep for data orphaned by deleted
-	 * conversations. Each step is independent; the day marker is saved only when
+	 * history retention, the checkpoint age limit across all conversations, then
+	 * the sweep for data orphaned by deleted conversations. Each step is independent; the day marker is saved only when
 	 * every step succeeded, so a failure retries on the next launch.
 	 */
 	private async enforceHistoryRetentionDaily(): Promise<void> {
@@ -1137,6 +1137,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			}
 		};
 		await step("layout.retention", () => this.getHistoryManager().enforceRetention());
+		await step("layout.checkpointAge", () => this.getCheckpointStorage().pruneExpiredEverywhere());
 		await step("layout.historyOrphans", async () => {
 			const removed = await sweepHistoryOrphans({
 				adapter: this.app.vault.adapter,

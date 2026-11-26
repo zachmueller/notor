@@ -149,3 +149,48 @@ describe("CheckpointStorage — future-version gate", () => {
 		expect(list.map((c) => c.id)).toEqual(["ckpt-current"]);
 	});
 });
+
+describe("CheckpointStorage.pruneExpiredEverywhere — daily age limit across conversations", () => {
+	const DAY = 24 * 60 * 60 * 1000;
+	const NOW = 100 * DAY;
+	const BASE = ".obsidian/plugins/notor/checkpoints";
+
+	function sweepVault(files: Record<string, number>, extraFolders: string[] = []) {
+		const removed: string[] = [];
+		const rmdirs: string[] = [];
+		const live = { ...files };
+		const folderSet = new Set([...Object.keys(files).map((f) => f.slice(0, f.lastIndexOf("/"))), ...extraFolders]);
+		const adapter = {
+			exists: async (p: string) => p === BASE || folderSet.has(p),
+			list: async (dir: string) => ({
+				files: Object.keys(live).filter((f) => f.slice(0, f.lastIndexOf("/")) === dir),
+				folders: dir === BASE ? [...folderSet].filter((f) => !rmdirs.includes(f)) : [],
+			}),
+			stat: async (p: string) => (p in live ? { mtime: live[p]!, type: "file" } : null),
+			remove: async (p: string) => { removed.push(p); delete live[p]; },
+			rmdir: async (p: string) => { rmdirs.push(p); },
+		};
+		return { vault: { adapter } as unknown as Vault, removed, rmdirs };
+	}
+
+	it("removes checkpoints older than the limit in every conversation and drops emptied folders", async () => {
+		const { vault, removed, rmdirs } = sweepVault({
+			[`${BASE}/conv-a/old.json`]: NOW - 40 * DAY,
+			[`${BASE}/conv-a/new.json`]: NOW - 2 * DAY,
+			[`${BASE}/conv-b/old1.json`]: NOW - 31 * DAY,
+			[`${BASE}/conv-b/old2.json`]: NOW - 90 * DAY,
+		});
+		const storage = new CheckpointStorage(vault, `${BASE}/`, 100, 30);
+		const result = await storage.pruneExpiredEverywhere(NOW);
+
+		expect(removed.sort()).toEqual([`${BASE}/conv-a/old.json`, `${BASE}/conv-b/old1.json`, `${BASE}/conv-b/old2.json`]);
+		expect(rmdirs).toEqual([`${BASE}/conv-b`]);
+		expect(result).toEqual({ removed: 3, folders: 1 });
+	});
+
+	it("does nothing when the age limit is not a positive number", async () => {
+		const { vault, removed } = sweepVault({ [`${BASE}/conv-a/old.json`]: 0 });
+		await new CheckpointStorage(vault, `${BASE}/`, 100, 0).pruneExpiredEverywhere(NOW);
+		expect(removed).toEqual([]);
+	});
+});

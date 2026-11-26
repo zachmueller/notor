@@ -14,6 +14,7 @@
 import type { Vault } from "obsidian";
 import type { Checkpoint } from "../types";
 import { logger } from "../utils/logger";
+import { mapWithConcurrency } from "../utils/concurrency";
 
 const log = logger("CheckpointStorage");
 
@@ -252,6 +253,52 @@ export class CheckpointStorage {
 				error: String(e),
 			});
 		}
+	}
+
+	/**
+	 * Apply the age limit to every conversation's checkpoints (the daily
+	 * housekeeping pass). {@link save} only prunes the conversation it writes to,
+	 * so checkpoints of conversations that never get another write would
+	 * otherwise be kept forever.
+	 *
+	 * Age comes from each file's modification time (one `stat` per file instead
+	 * of reading every snapshot): checkpoints are written once, at creation. A
+	 * copy synced from another device gets a later mtime and is kept a little
+	 * longer, never removed early. Emptied conversation folders are removed.
+	 */
+	async pruneExpiredEverywhere(now = Date.now()): Promise<{ removed: number; folders: number }> {
+		const result = { removed: 0, folders: 0 };
+		if (!(this.maxAgeDays > 0)) return result;
+		const base = this.basePath.replace(/\/$/, "");
+		if (!(await this.vault.adapter.exists(base))) return result;
+		const maxAgeMs = this.maxAgeDays * 24 * 60 * 60 * 1000;
+		const adapter = this.vault.adapter;
+
+		const folders = (await adapter.list(base)).folders;
+		await mapWithConcurrency(folders, 4, async (folder) => {
+			try {
+				const files = (await adapter.list(folder)).files.filter((f) => f.endsWith(".json"));
+				let kept = 0;
+				for (const file of files) {
+					const stat = await adapter.stat(file);
+					if (stat && now - stat.mtime > maxAgeMs) {
+						await adapter.remove(file);
+						result.removed++;
+					} else {
+						kept++;
+					}
+				}
+				const remaining = (await adapter.list(folder));
+				if (kept === 0 && remaining.files.length === 0 && remaining.folders.length === 0) {
+					await adapter.rmdir(folder, false);
+					result.folders++;
+				}
+			} catch (e) {
+				log.warn("Checkpoint age sweep failed for folder (non-fatal)", { folder, error: String(e) });
+			}
+		});
+		if (result.removed > 0) log.info("Pruned expired checkpoints", result);
+		return result;
 	}
 
 	// -----------------------------------------------------------------------

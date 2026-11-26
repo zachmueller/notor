@@ -71,7 +71,7 @@ Conversation history (JSONL files) and checkpoint snapshots are stored in your v
 | History max age | 90 days | Conversations older than this are eligible for cleanup |
 | Checkpoint path | `.obsidian/plugins/notor/checkpoints/` | Storage directory for checkpoint files |
 | Checkpoints per conversation | 100 | Maximum checkpoints retained per conversation |
-| Checkpoint max age | 30 days | Checkpoints older than this are eligible for cleanup |
+| Checkpoint max age | 30 days | Checkpoints older than this are removed, across all conversations, in the daily cleanup |
 
 History cleanup runs at most once a day per device, shortly after Obsidian starts (once startup work has settled). Favorited conversations are never removed.
 

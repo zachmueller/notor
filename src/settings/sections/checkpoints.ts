@@ -59,7 +59,8 @@ export function renderCheckpointSection(
 	new Setting(containerEl)
 		.setName("Maximum age (days)")
 		.setDesc(
-			"Checkpoints older than this many days are automatically pruned."
+			"Checkpoints older than this many days are automatically pruned, " +
+				"for every conversation, once a day shortly after Obsidian starts."
 		)
 		.addText((text) =>
 			text
