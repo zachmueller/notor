@@ -93,10 +93,19 @@ first, then **Info**, then the preview-scan prompt.
   undeclared `yaml` that tests import. Fix the type errors so they pass on the newest
   versions in range, and declare every package you import. The guard prints the first
   `error TS…` line.
-- **Clean checkout fails to build without a writable temp directory:** both clean builds
-  run with `TMPDIR`/`TMP`/`TEMP` pointing nowhere, in case the scanner's sandbox has no
-  temp dir (unconfirmed; the precompile-scaffolds plugin used to write there). Keep build
-  steps in memory or under the repo.
+- **Clean checkout fails to build without a writable temp directory or with a 512 MB
+  heap:** both clean builds run with `TMPDIR`/`TMP`/`TEMP` pointing nowhere and
+  `NODE_OPTIONS=--max-old-space-size=512`. The heap cap is the confirmed cause of the
+  0.12.3–0.12.4 build-verification failures, which still failed after the lockfile fix.
+  Reproduced in a clean `node:22` container capped at 1 GB: Node sized its heap at
+  ~524 MB, and `tsc -noEmit` (~600 MB) aborted with "Reached heap limit". It printed
+  nothing to stdout, which left the scanner with npm's two banner lines. So `npm run build`
+  is esbuild only. The typecheck is `npm run typecheck`, run by the release workflow.
+  `esbuild.config.mjs` sets `GOMEMLIMIT=350MiB`, so esbuild's Go service also builds
+  in a 512 MB container (it was OOM-killed, "The service was stopped"). Keep heavy work
+  (typechecks, tests) out of the build script. The temp-dir part is unconfirmed (the
+  precompile-scaffolds plugin used to write there); keep build steps in memory or under
+  the repo.
 - **Rising warnings (▲):** fix the new instances from this release (e.g. `window.setTimeout`
   instead of `setTimeout`; never store the bare function, see the renderer timer memory).
 - **Unlisted WASM / new hosts:** document them in the README's network/permissions

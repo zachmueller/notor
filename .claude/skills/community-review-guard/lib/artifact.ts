@@ -46,8 +46,18 @@ export function measure(mainJs: string): ArtifactMetrics {
 	};
 }
 
-/** Points every temp-dir variable at a path that doesn't exist (see the repro check). */
-const NO_TEMP_DIR_ENV = { TMPDIR: "/nonexistent/notor-guard-tmp", TMP: "/nonexistent/notor-guard-tmp", TEMP: "/nonexistent/notor-guard-tmp" };
+/**
+ * Clean builds run sandbox-like: no usable temp dir, and V8's heap capped at 512 MB.
+ * The cap reproduces the scanner's build verification failure on 0.12.3-0.12.4: in a
+ * 1 GB container Node sizes its heap at ~524 MB, and `tsc -noEmit` (~600 MB) aborted
+ * with "Reached heap limit" before printing anything. It overrides any NODE_OPTIONS.
+ */
+const SCANNER_LIKE_ENV = {
+	TMPDIR: "/nonexistent/notor-guard-tmp",
+	TMP: "/nonexistent/notor-guard-tmp",
+	TEMP: "/nonexistent/notor-guard-tmp",
+	NODE_OPTIONS: "--max-old-space-size=512",
+};
 
 /** The first line that names the error (esbuild prints "✘ [ERROR] …"), for the report table. */
 function firstErrorLine(message: string): string {
@@ -145,12 +155,12 @@ export async function checkArtifact(
 		// with no usable temp dir, and a failure BLOCKs instead of crashing the guard.
 		let clean: string;
 		try {
-			clean = await withWorktree(ctx.repoRoot, ref, { install: true }, async (dir) => measure(build(dir, NO_TEMP_DIR_ENV)).sha256);
+			clean = await withWorktree(ctx.repoRoot, ref, { install: true }, async (dir) => measure(build(dir, SCANNER_LIKE_ENV)).sha256);
 		} catch (e) {
 			add({
 				id: "reproducible-build",
 				severity: "BLOCK",
-				title: `A clean checkout of ${ref} fails to build without a writable temp directory; the scanner's build verification will fail`,
+				title: `A clean checkout of ${ref} fails to build without a writable temp directory or with a 512 MB heap; the scanner's build verification will fail`,
 				detail: firstErrorLine(String(e instanceof Error ? e.message : e)),
 			});
 			return { findings, measured: { artifact: m } };
@@ -170,7 +180,7 @@ export async function checkArtifact(
 		// so `tsc -noEmit` failed. This build only has to succeed; its main.js differs.
 		const fresh = await withWorktree(ctx.repoRoot, ref, { install: "fresh" }, async (dir) => {
 			try {
-				build(dir, NO_TEMP_DIR_ENV);
+				build(dir, SCANNER_LIKE_ENV);
 				return null;
 			} catch (e) {
 				return firstErrorLine(String(e instanceof Error ? e.message : e));
