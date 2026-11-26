@@ -15,7 +15,7 @@ import { buildOptionValue } from "../providers/model-grouping";
 import { resolveConversationModel, resolvePreset } from "../presets/preset-resolver";
 import { writeSelection } from "./model-selection";
 import type { ConversationManager, ForkMode } from "./conversation";
-import { HistoryManager } from "./history";
+import type { HistoryManager, StaleStateEntry } from "./history";
 import { conversationFilename } from "./history";
 import type { ConversationSession } from "./conversation-session";
 import type { StaleContentTracker } from "./stale-tracker";
@@ -89,16 +89,12 @@ export class ConversationLifecycleManager {
 	/**
 	 * Restore stale tracker state from JSONL after loading a conversation.
 	 */
-	private async restoreStaleState(filename: string): Promise<void> {
+	private restoreStaleState(entries: StaleStateEntry[] | null): void {
 		const tracker = this.getStaleTracker?.();
-		if (!tracker) return;
+		if (!tracker || !entries) return;
 
 		try {
-			const rawContent = await this.historyManager.readRawFile(filename);
-			const entries = HistoryManager.extractStaleState(rawContent);
-			if (entries) {
-				tracker.restore(entries);
-			}
+			tracker.restore(entries);
 		} catch {
 			// Non-fatal — stale state is best-effort
 		}
@@ -295,7 +291,7 @@ export class ConversationLifecycleManager {
 		view?.setRespondingState(false);
 
 		try {
-			const { conversation, messages: historyMessages } = await this.historyManager.loadConversation(filename);
+			const { conversation, messages: historyMessages, staleState } = await this.historyManager.loadConversation(filename);
 			if (signal?.aborted) return;
 
 			const activeSession = this.sessionManager.getActiveSession(conversation.id);
@@ -304,11 +300,13 @@ export class ConversationLifecycleManager {
 				return;
 			}
 
-			// No active session — standard JSONL load path
-			convManager.loadConversation(conversation, historyMessages);
+			// No active session — standard JSONL load path. Silent: the header was
+			// just read from this file, so the change callback's header write would
+			// only rewrite the whole file with what it already contains.
+			convManager.loadConversation(conversation, historyMessages, { silent: true });
 
-			// Restore stale tracker state from JSONL (if persisted)
-			await this.restoreStaleState(filename);
+			// Restore stale tracker state captured while loading (no second read)
+			this.restoreStaleState(staleState);
 
 			view?.clearMessages();
 			for (const msg of historyMessages) {
@@ -510,13 +508,19 @@ export class ConversationLifecycleManager {
 	async switchToConversationById(conversationId: string, opts?: { signal?: AbortSignal }): Promise<boolean> {
 		const signal = opts?.signal;
 		try {
-			const entries = await this.historyManager.listConversations();
+			// Resolve from the directory listing alone (filenames carry the ID), so
+			// opening a conversation doesn't read every history file. Circuit step
+			// conversations are hidden from the list but can still be opened
+			// (run-tree navigation, follow mode, the progress-Notice jump); the name
+			// lookup covers them too. Only on a miss fall back to the full listing,
+			// which also matches by header ID.
+			let filename = await this.historyManager.findConversationFilenameById(conversationId);
 			if (signal?.aborted) return false;
-			// Circuit step conversations are hidden from the list but can still be
-			// opened (run-tree navigation, follow mode, the progress-Notice jump).
-			const filename = entries.find((e) => e.id === conversationId)?.filename
-				?? await this.historyManager.findHiddenConversationFilename(conversationId);
-			if (signal?.aborted) return false;
+			if (!filename) {
+				const entries = await this.historyManager.listConversations();
+				if (signal?.aborted) return false;
+				filename = entries.find((e) => e.id === conversationId)?.filename ?? null;
+			}
 			if (!filename) {
 				log.warn("Conversation not found by ID", { conversationId });
 				return false;

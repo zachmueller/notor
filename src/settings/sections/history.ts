@@ -58,7 +58,8 @@ export function renderHistorySection(
 		.setName("Maximum age (days)")
 		.setDesc(
 			"Conversations older than this many days are automatically pruned. " +
-				"Favorited conversations are never pruned."
+				"Favorited conversations are never pruned. " +
+				"Both limits are checked once a day, shortly after Obsidian starts."
 		)
 		.addText((text) =>
 			text

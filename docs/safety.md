@@ -73,6 +73,8 @@ Conversation history (JSONL files) and checkpoint snapshots are stored in your v
 | Checkpoints per conversation | 100 | Maximum checkpoints retained per conversation |
 | Checkpoint max age | 30 days | Checkpoints older than this are eligible for cleanup |
 
+History cleanup runs at most once a day per device, shortly after Obsidian starts (once startup work has settled). Favorited conversations are never removed.
+
 ## Sub-agent security
 
 [Sub-agents](sub-agents.md) operate under a stricter security model than the main conversation:

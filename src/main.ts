@@ -13,6 +13,7 @@ import { createDefaultSettings, mergeSavedSettings, NotorSettingTab } from "./se
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
 import { scheduleWhenIdle } from "./utils/idle";
+import { isDailyTaskDue, localDayKey } from "./utils/daily-gate";
 import {
 	markStartup,
 	resetStartupTimings,
@@ -175,8 +176,11 @@ import { resolveNote } from "./utils/resolve-note";
 
 const log = logger("Main");
 
-/** Upper bound on how long the circuit recovery scan waits for an idle period. */
-const RECOVERY_IDLE_TIMEOUT_MS = 5_000;
+/** Upper bound on how long deferred startup housekeeping waits for an idle period. */
+const BACKGROUND_IDLE_TIMEOUT_MS = 5_000;
+
+/** Local-storage key (vault-scoped, not synced) for the daily history-retention gate. */
+const HISTORY_RETENTION_LAST_RUN_KEY = "notor-history-retention-last-run";
 
 /** Comparison key for a provider config, ignoring the persisted model-list cache. */
 function providerConfigKey(config: LLMProviderConfig): string {
@@ -923,11 +927,15 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 					this._dailyStart?.detector.start();
 				});
 
-			// Enforce chat history retention policy (age + size limits).
-			// Fire-and-forget — non-blocking, runs once per startup.
-			const retention = timePromise("layout.retention", this.getHistoryManager().enforceRetention()).catch((e) => {
-				log.warn("History retention enforcement failed", { error: String(e) });
-			});
+			// Enforce chat history retention policy (age + size limits). It lists
+			// every conversation file, so it runs at most once per local day, after
+			// the API-ready chain and once the renderer is idle. Fire-and-forget.
+			const retention = apiReady
+				.then(() => this.whenIdle(BACKGROUND_IDLE_TIMEOUT_MS))
+				.then(() => this.enforceHistoryRetentionDaily())
+				.catch((e) => {
+					log.warn("History retention enforcement failed", { error: String(e) });
+				});
 
 			// INT-005 (FR-125): scan for interrupted orchestration sessions and
 			// resume them. Gated on circuits_enabled; fire-and-forget so it
@@ -939,7 +947,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			let recovery: Promise<unknown> = Promise.resolve();
 			if (this.settings.circuits_enabled) {
 				recovery = apiReady
-					.then(() => this.whenIdle(RECOVERY_IDLE_TIMEOUT_MS))
+					.then(() => this.whenIdle(BACKGROUND_IDLE_TIMEOUT_MS))
 					.then(() => timePromise("layout.recoverCircuits", Promise.all([
 						import("./circuits/launch"),
 						import("./ui/circuit-modals"),
@@ -1094,6 +1102,20 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	// -----------------------------------------------------------------------
 	// Settings
 	// -----------------------------------------------------------------------
+
+	/**
+	 * Run history retention if it hasn't run yet today on this device. The marker
+	 * is saved only after a successful pass, so a failure retries next launch.
+	 */
+	private async enforceHistoryRetentionDaily(): Promise<void> {
+		const now = new Date();
+		if (!isDailyTaskDue(this.app.loadLocalStorage(HISTORY_RETENTION_LAST_RUN_KEY), now)) {
+			markStartup("layout.retention.skipped");
+			return;
+		}
+		await timePromise("layout.retention", this.getHistoryManager().enforceRetention());
+		this.app.saveLocalStorage(HISTORY_RETENTION_LAST_RUN_KEY, localDayKey(now));
+	}
 
 	/**
 	 * Resolve once the renderer is idle (or after `timeoutMs`). Never resolves if
@@ -2493,17 +2515,12 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		view.isConversationLoaded = true;
 
 		const historyManager = this.getHistoryManager();
-		let entries: import("./chat/history").ConversationListEntry[];
-		try {
-			entries = await timePromise("chat.list", historyManager.listConversations());
-		} catch (e) {
-			log.error("Failed to load conversation history", { error: String(e) });
-			view.isConversationLoaded = false; // allow retry
-			return;
-		}
-		if (signal.aborted) return;
-
-		view.renderConversationList(entries);
+		// The full history listing reads every conversation file, so build it
+		// only when a branch needs "most recent" (no saved conversation, or the
+		// saved one is gone). The panel's history picker fetches its own list
+		// when opened, so restore doesn't pre-render the hidden list.
+		let listing: Promise<import("./chat/history").ConversationListEntry[]> | null = null;
+		const listEntries = () => (listing ??= timePromise("chat.list", historyManager.listConversations()));
 
 		const savedFilename = savedState?.conversationFilename as string | undefined;
 		const savedId = savedState?.conversationId as string | undefined;
@@ -2536,6 +2553,8 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				if (signal.aborted) return;
 				if (!switched) {
 					// Conversation may have been deleted — fall back to most recent
+					const entries = await listEntries();
+					if (signal.aborted) return;
 					if (entries.length > 0) {
 						await orchestrator.switchConversation(entries[0]!.filename, { signal });
 						if (signal.aborted) return;
@@ -2545,14 +2564,20 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 					}
 				}
 				this.syncViewAfterLoad(view, orchestrator);
-			} else if (createNew || entries.length === 0) {
-				// Explicit "new panel" command or no existing conversations
+			} else if (createNew) {
+				// Explicit "new panel" command
 				await orchestrator.newConversation({ signal });
 				if (signal.aborted) return;
 				this.syncViewAfterLoad(view, orchestrator);
 			} else {
-				// No saved state — load most recent
-				await orchestrator.switchConversation(entries[0]!.filename, { signal });
+				// No saved state — load most recent, or start fresh if there is none
+				const entries = await listEntries();
+				if (signal.aborted) return;
+				if (entries.length > 0) {
+					await orchestrator.switchConversation(entries[0]!.filename, { signal });
+				} else {
+					await orchestrator.newConversation({ signal });
+				}
 				if (signal.aborted) return;
 				this.syncViewAfterLoad(view, orchestrator);
 			}

@@ -58,7 +58,13 @@ import { planSidecarPath } from "../plans/plan-store";
 import { normalizePath, type Vault } from "obsidian";
 import type { Conversation, Message } from "../types";
 import type { CompactionRecord } from "../context/compaction";
-import { chatMessagesToMessages, isSubAgentFilename, isHiddenFromConversationList } from "./sub-agent-history";
+import {
+	chatMessagesToMessages,
+	isHiddenFromConversationList,
+	isStepConversationFilename,
+	isSubAgentFilename,
+	STEP_CONVERSATION_FILE_PREFIX,
+} from "./sub-agent-history";
 import type { ChatMessage } from "../providers/provider";
 import { logger } from "../utils/logger";
 import type { ContentBlock } from "../media/types";
@@ -87,6 +93,13 @@ export interface ConversationListEntry {
 	is_favorite?: boolean;
 	/** Preset name active when conversation was created. */
 	preset_name?: string;
+}
+
+/** One persisted stale-tracker entry (a `stale_state` JSONL line holds a list). */
+export interface StaleStateEntry {
+	note_path: string;
+	body_hash: string;
+	timestamp: string;
 }
 
 /** Generate the JSONL filename for a conversation from its created_at + id. */
@@ -268,13 +281,13 @@ export class HistoryManager {
 	 */
 	static extractStaleState(
 		rawContent: string,
-	): Array<{ note_path: string; body_hash: string; timestamp: string }> | null {
+	): StaleStateEntry[] | null {
 		const lines = rawContent.split("\n");
 		for (let i = lines.length - 1; i >= 0; i--) {
 			const line = lines[i];
 			if (!line?.trim()) continue;
 			try {
-				const obj = JSON.parse(line) as { _type?: string; entries?: Array<{ note_path: string; body_hash: string; timestamp: string }> };
+				const obj = JSON.parse(line) as { _type?: string; entries?: StaleStateEntry[] };
 				if (obj._type === "stale_state") {
 					return obj.entries ?? null;
 				}
@@ -555,6 +568,11 @@ export class HistoryManager {
 	async loadConversation(filename: string): Promise<{
 		conversation: Conversation;
 		messages: Message[];
+		/**
+		 * The most recent `stale_state` entries in the file (null if none),
+		 * captured in the same pass so callers needn't re-read the file.
+		 */
+		staleState: StaleStateEntry[] | null;
 	}> {
 		const path = this.getFilePath(filename);
 		const content = await this.vault.adapter.read(path);
@@ -579,13 +597,19 @@ export class HistoryManager {
 			this.filenameOverrides.set(conversation.id, filename);
 		}
 
-		// Parse messages (remaining lines — skip non-message line types like stale_state)
+		// Parse messages (remaining lines — skip non-message line types like
+		// stale_state, keeping the last stale_state seen for the caller)
 		const messages: Message[] = [];
+		let staleState: StaleStateEntry[] | null = null;
 		for (let i = 1; i < lines.length; i++) {
 			const line = lines[i];
 			if (!line) continue;
 			try {
 				const obj = JSON.parse(line) as JsonlLine;
+				if (obj._type === "stale_state") {
+					staleState = (obj as { entries?: StaleStateEntry[] }).entries ?? null;
+					continue;
+				}
 				if (obj._type && obj._type !== "message") continue;
 				const { _type: _msgType, ...messageData } = obj;
 				// Circuit step conversations store provider-format turns (no id);
@@ -604,7 +628,7 @@ export class HistoryManager {
 			}
 		}
 
-		return { conversation, messages };
+		return { conversation, messages, staleState };
 	}
 
 	/**
@@ -674,6 +698,10 @@ export class HistoryManager {
 			// step conversations (INT-006).
 			const fname = file.split("/").pop() ?? file;
 			if (isSubAgentFilename(fname)) continue;
+			// Circuit step conversations are hidden too; skip them by name before
+			// reading (they are most of the directory on circuit-heavy installs).
+			// The header `_type` check below still catches any that slip through.
+			if (isStepConversationFilename(fname)) continue;
 
 			try {
 				const content = await this.vault.adapter.read(file);
@@ -779,6 +807,10 @@ export class HistoryManager {
 			// step conversations (INT-006).
 			const fname = file.split("/").pop() ?? file;
 			if (isSubAgentFilename(fname)) continue;
+			// Circuit step conversations are hidden too; skip them by name before
+			// reading (they are most of the directory on circuit-heavy installs).
+			// The header `_type` check below still catches any that slip through.
+			if (isStepConversationFilename(fname)) continue;
 
 			try {
 				const content = await this.vault.adapter.read(file);
@@ -971,8 +1003,36 @@ export class HistoryManager {
 	 * still be opened in a chat panel (a circuit step conversation), or null.
 	 */
 	async findHiddenConversationFilename(conversationId: string): Promise<string | null> {
-		const filename = `orchestration_step_${conversationId}.jsonl`;
+		const filename = `${STEP_CONVERSATION_FILE_PREFIX}${conversationId}.jsonl`;
 		return (await this.vault.adapter.exists(this.getFilePath(filename))) ? filename : null;
+	}
+
+	/**
+	 * Resolve a conversation ID to its history filename from the directory
+	 * listing alone (no file reads): conversation files are named
+	 * `{created}_{id}.jsonl` and circuit step conversations
+	 * `orchestration_step_{id}.jsonl`. A regular conversation wins over a step
+	 * conversation; sub-agent files are never matched (they are not openable
+	 * by ID). Returns null when no file name matches. Callers that must also
+	 * handle files whose name doesn't carry their ID fall back to
+	 * {@link listConversations}.
+	 */
+	async findConversationFilenameById(conversationId: string): Promise<string | null> {
+		if (!conversationId) return null;
+		const dir = normalizePath(this.historyPath);
+		if (!(await this.vault.adapter.exists(dir))) return null;
+		const suffix = `_${conversationId}.jsonl`;
+		let step: string | null = null;
+		for (const file of (await this.vault.adapter.list(dir)).files) {
+			const fname = file.split("/").pop() ?? file;
+			if (!fname.endsWith(suffix) || isSubAgentFilename(fname)) continue;
+			if (isStepConversationFilename(fname)) {
+				step = fname;
+				continue;
+			}
+			return fname;
+		}
+		return step;
 	}
 
 	/** Get the full vault-relative path for a history file. */

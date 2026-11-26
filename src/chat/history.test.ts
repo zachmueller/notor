@@ -429,3 +429,99 @@ describe("HistoryManager — opening circuit step conversations", () => {
 		expect(reloaded.messages.at(-1)).toMatchObject({ id: "m1", content: "follow-up" });
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Startup-cost guards: no reads of hidden files, ID lookup from filenames,
+// single-pass stale-state capture
+// ---------------------------------------------------------------------------
+
+/** makeVault plus a log of every path passed to adapter.read. */
+function makeSpiedVault(files: Record<string, string>): { vault: Vault; reads: string[] } {
+	const vault = makeVault(files);
+	const adapter = vault.adapter as unknown as { read: (p: string) => Promise<string> };
+	const inner = adapter.read;
+	const reads: string[] = [];
+	adapter.read = async (p: string) => {
+		reads.push(p);
+		return inner(p);
+	};
+	return { vault, reads };
+}
+
+describe("HistoryManager — step conversations are skipped by name before reading", () => {
+	it("listConversations and searchConversations never read orchestration_step_ files", async () => {
+		const { vault, reads } = makeSpiedVault({
+			[`${HISTORY}2026_conversation_normal.jsonl`]: NORMAL,
+			[`${HISTORY}orchestration_step_step-1.jsonl`]: STEP,
+		});
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		expect((await manager.listConversations()).map((e) => e.id)).toEqual(["normal-1"]);
+		expect((await manager.searchConversations("find me")).map((e) => e.id)).toEqual(["normal-1"]);
+		expect(reads.some((p) => p.includes("orchestration_step_"))).toBe(false);
+	});
+
+	it("still hides a step conversation whose file name lacks the prefix (header _type is authoritative)", async () => {
+		const vault = makeVault({
+			[`${HISTORY}2026_conversation_normal.jsonl`]: NORMAL,
+			[`${HISTORY}20260628_000000_step-1.jsonl`]: STEP,
+		});
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		expect((await manager.listConversations()).map((e) => e.id)).toEqual(["normal-1"]);
+	});
+});
+
+describe("HistoryManager.findConversationFilenameById — resolves from the listing, no reads", () => {
+	const files = {
+		[`${HISTORY}20260628_000000_normal-1.jsonl`]: NORMAL,
+		[`${HISTORY}orchestration_step_step-1.jsonl`]: STEP,
+		[`${HISTORY}20260628_000000_normal-1_subagent_sub-1.jsonl`]: SUBAGENT,
+		[`${HISTORY}normal-1.plan.json`]: "{}",
+	};
+
+	it("finds a regular conversation and a circuit step conversation", async () => {
+		const { vault, reads } = makeSpiedVault(files);
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		expect(await manager.findConversationFilenameById("normal-1")).toBe("20260628_000000_normal-1.jsonl");
+		expect(await manager.findConversationFilenameById("step-1")).toBe("orchestration_step_step-1.jsonl");
+		expect(reads).toEqual([]);
+	});
+
+	it("never matches sub-agent files, sidecars, partial IDs, or an empty ID", async () => {
+		const manager = new HistoryManager(makeVault(files), HISTORY, 500, 90);
+		expect(await manager.findConversationFilenameById("sub-1")).toBeNull();
+		expect(await manager.findConversationFilenameById("1")).toBeNull();
+		expect(await manager.findConversationFilenameById("missing")).toBeNull();
+		expect(await manager.findConversationFilenameById("")).toBeNull();
+	});
+
+	it("prefers the regular conversation when a step file shares the ID", async () => {
+		const manager = new HistoryManager(makeVault({
+			[`${HISTORY}orchestration_step_dup.jsonl`]: STEP,
+			[`${HISTORY}20260628_000000_dup.jsonl`]: NORMAL,
+		}), HISTORY, 500, 90);
+		expect(await manager.findConversationFilenameById("dup")).toBe("20260628_000000_dup.jsonl");
+	});
+});
+
+describe("HistoryManager.loadConversation — stale state captured in the same pass", () => {
+	it("returns the last stale_state entries and keeps them out of messages", async () => {
+		const header = JSON.stringify({ _type: "conversation", ...conv() });
+		const m = JSON.stringify({ _type: "message", ...msg() });
+		const s1 = JSON.stringify({ _type: "stale_state", entries: [{ note_path: "a.md", body_hash: "1", timestamp: "t1" }], written_at: "t1" });
+		const s2 = JSON.stringify({ _type: "stale_state", entries: [{ note_path: "b.md", body_hash: "2", timestamp: "t2" }], written_at: "t2" });
+		const file = "20260701_000000_conv-1.jsonl";
+		const { vault } = makeStatefulVault({ [`${HISTORY}${file}`]: [header, s1, m, s2].join("\n") + "\n" });
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		const { messages, staleState } = await manager.loadConversation(file);
+		expect(messages.map((x) => x.id)).toEqual(["msg-1"]);
+		expect(staleState).toEqual([{ note_path: "b.md", body_hash: "2", timestamp: "t2" }]);
+	});
+
+	it("returns null stale state when the file has none", async () => {
+		const header = JSON.stringify({ _type: "conversation", ...conv() });
+		const file = "20260701_000000_conv-1.jsonl";
+		const { vault } = makeStatefulVault({ [`${HISTORY}${file}`]: `${header}\n${JSON.stringify({ _type: "message", ...msg() })}\n` });
+		const { staleState } = await new HistoryManager(vault, HISTORY, 500, 90).loadConversation(file);
+		expect(staleState).toBeNull();
+	});
+});

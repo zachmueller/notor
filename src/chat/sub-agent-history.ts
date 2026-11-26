@@ -111,6 +111,18 @@ export function isSubAgentFilename(filename: string): boolean {
 	return filename.includes("_subagent_");
 }
 
+/** Filename prefix of circuit step conversations (see step-conversation-store.ts). */
+export const STEP_CONVERSATION_FILE_PREFIX = "orchestration_step_";
+
+/**
+ * Check whether a JSONL filename follows the circuit step-conversation naming
+ * convention. A cheap pre-read guard only: the header `_type` stays the
+ * authoritative discriminator (edges.md §4 allows a filename pre-guard).
+ */
+export function isStepConversationFilename(filename: string): boolean {
+	return filename.startsWith(STEP_CONVERSATION_FILE_PREFIX);
+}
+
 /**
  * Generalized hidden-from-flat-list predicate (INT-006).
  *
