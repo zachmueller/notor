@@ -59,6 +59,10 @@ export default tseslint.config(
 	{
 		files: ["src/**/*.ts"],
 		rules: {
+			// eslint-plugin-obsidianmd 0.6.0 turns this off, but Obsidian's community
+			// scanner still reports it (0.12.3 scorecard: 13 require() warnings), so keep
+			// it on and keep the described per-line disables at each deliberate require().
+			"@typescript-eslint/no-require-imports": "error",
 			"@typescript-eslint/no-unused-vars": ["error", {
 				varsIgnorePattern: "^_",
 				argsIgnorePattern: "^_",

@@ -62,6 +62,7 @@ function isInputRequired(kind: NotifKind): boolean {
  */
 function obsidianIsActive(): boolean {
 	try {
+		// eslint-disable-next-line @typescript-eslint/no-require-imports -- runtime require needed to access Electron's remote which has no static import path in Obsidian's plugin environment
 		const { remote } = require("electron") as {
 			remote?: {
 				getCurrentWindow?: () => { isFocused?: () => boolean };
@@ -89,6 +90,7 @@ function obsidianIsActive(): boolean {
  */
 export function focusObsidianWindow(): void {
 	try {
+		// eslint-disable-next-line @typescript-eslint/no-require-imports -- runtime require needed to access Electron's remote which has no static import path in Obsidian's plugin environment
 		const { remote } = require("electron") as {
 			remote?: { getCurrentWindow?: () => { focus?: () => void; show?: () => void } };
 		};

@@ -44,10 +44,10 @@ Exit status is 1 when anything BLOCKs.
 
 | # | Check | BLOCK when | Otherwise |
 |---|---|---|---|
-| 1 | **Freshness** (`lib/lint.ts`) | — | WARN if the repo pins an older `eslint-plugin-obsidianmd`/`typescript-eslint` than the latest. Lint always runs with the latest, from a cached toolchain in `$TMPDIR/notor-review-guard/`. |
+| 1 | **Freshness** (`lib/lint.ts`) | — | WARN if the repo pins an older `eslint-plugin-obsidianmd`/`typescript-eslint` than the latest. Lint runs with the latest, from a cached toolchain in `$TMPDIR/notor-review-guard/`, plus overrides in `scanner.eslint.config.mjs` where a scorecard showed the scanner lagging (see below). |
 | 2 | **Scanner-equivalent lint** (`scanner.eslint.config.mjs`, `lib/scope.ts`) | `eslint-comments/*` (confirmed); parse errors; presumed: `no-unsanitized/*`, `no-eval`, `no-implied-eval`, obsidianmd error-level rules | WARN for everything the scorecard shows as a warning; INFO for rules it never shows (`ui/sentence-case`, `no-deprecated`) |
 | 3 | **Restricted directives** (`lib/restricted-disables.ts`) | Disabling a rule on the plugin's restricted list, a bare disable, a whole-file disable with no matching enable, a disable without `-- reason` | WARN for the same outside the scanner's scope |
-| 4 | **Built artifact** (`lib/artifact.ts`) | A clean checkout doesn't rebuild `main.js` byte-for-byte; a published release's `main.js` digest differs from the build | WARN: over 5 MB (Sync Standard limit), unlisted WASM, ES5 helpers / `eval` / `new Function` / `atob` / `btoa` counts that rose, new hosts. INFO otherwise |
+| 4 | **Built artifact** (`lib/artifact.ts`) | A clean checkout doesn't build with no writable temp directory, or doesn't rebuild `main.js` byte-for-byte; a published release's `main.js` digest differs from the build | WARN: over 5 MB (Sync Standard limit), unlisted WASM, ES5 helpers / `eval` / `new Function` / `atob` / `btoa` counts that rose, new hosts. INFO otherwise |
 | 5 | **Advisories** (`lib/audit.ts`) | — (the scorecard treats them as warnings) | WARN for advisories new since the baseline, high/critical first |
 | 6 | **Release metadata** (`lib/metadata.ts`) | Manifest fields missing; `manifest.json` / `package.json` / `versions.json` / tag disagree; not semver; `isDesktopOnly` false while `src` imports Node modules; a published release missing `main.js` or `manifest.json` | — |
 | — | **CSS** (`lib/css.ts`) | — | WARN for `!important` in `styles.css` |
@@ -85,12 +85,17 @@ first, then **Info**, then the preview-scan prompt.
   or fix `versions.json` by hand.
 - **Reproducible build failed:** commit everything, `npm ci`, and rerun. A lockfile and
   `node_modules` out of sync is the usual cause.
+- **Clean checkout fails to build without a writable temp directory:** the clean rebuild
+  runs with `TMPDIR`/`TMP`/`TEMP` pointing nowhere, because the 0.12.3 scorecard reported
+  "Build verification failed while running the build script" for a build that wrote to
+  `os.tmpdir()` (the precompile-scaffolds plugin) and passed locally. Keep build steps in
+  memory or under the repo.
 - **Rising warnings (▲):** fix the new instances from this release (e.g. `window.setTimeout`
   instead of `setTimeout`; never store the bare function, see the renderer timer memory).
 - **Unlisted WASM / new hosts:** document them in the README's network/permissions
   disclosure, then add WASM to `allowlist.json` with a one-line reason.
-- **Freshness WARN:** bump the pin in `package.json` and get `npm run lint` green. The
-  scanner already uses the newer rules.
+- **Freshness WARN:** bump the pin in `package.json` and get `npm run lint` green. Don't
+  assume the scanner already runs the newer rules: check the next scorecard (below).
 
 ## Baseline
 
@@ -115,6 +120,16 @@ scanned from its source links, lints that commit with the guard, and matches fin
 
 The 0.12.0 result was 0 missed Risks, 0 over-strict BLOCKs, and 334 of 335 locations
 matched. Only the CSS `text-decoration` compatibility check isn't mirrored.
+
+The 0.12.3 result was also 0 missed Risks and 0 over-strict BLOCKs, but it showed that the
+scanner **lags npm's latest plugin**. The scanner still reported
+`@typescript-eslint/no-require-imports` (13 locations), which 0.6.0 turns off, and
+`no-console` / `hardcoded-config-path` in `e2e/`, which 0.6.0 exempts. It didn't report
+0.6.0's new `prefer-active-doc` (36 guard hits). No published version (0.4.2–0.6.0)
+reproduces it exactly. So `scanner.eslint.config.mjs` re-enables `no-require-imports`, and
+the repo's `eslint.config.mts` keeps it on for `src/`, so the described per-line disables
+at deliberate `require()` calls stay used. Before removing a disable because the latest
+plugin calls it unused, check that the scorecard agrees.
 
 ## Keeping it current
 

@@ -1,10 +1,10 @@
 /**
  * Checks 1 + 2 — lint the tree the way Obsidian's scanner does.
  *
- * Check 1 (freshness): the scanner applies the *latest* eslint-plugin-obsidianmd and
- * typescript-eslint; 0.12.0 shipped because we linted with a stale pin. So lint runs
- * from a cached toolchain dir with the newest versions inside the plugin's peer
- * ranges, and a stale repo pin is reported (CI's `npm run lint` would disagree).
+ * Check 1 (freshness): lint runs from a cached toolchain dir with the newest
+ * eslint-plugin-obsidianmd and typescript-eslint (0.12.0 shipped because we linted
+ * with a stale pin), and a stale repo pin is reported. The scanner can also lag the
+ * latest (0.12.3 scorecard); scanner.eslint.config.mjs holds the overrides for that.
  *
  * Check 2 (lint): scanner-equivalent config over the scanner's file scope, with
  * findings mapped to the scanner's severities. The 0.12.0 dashboard showed lint

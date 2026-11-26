@@ -20,5 +20,10 @@ export default [
 		languageOptions: {
 			parserOptions: { projectService: true, tsconfigRootDir: root },
 		},
+		rules: {
+			// Plugin 0.6.0 turns this off, but the 0.12.3 scorecard still reported it at
+			// 13 require() lines: the scanner's ruleset lags the plugin's latest.
+			"@typescript-eslint/no-require-imports": "error",
+		},
 	},
 ];
