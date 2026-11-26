@@ -237,3 +237,21 @@ export class TempOutputSpiller {
 		return this.spillDir;
 	}
 }
+
+/**
+ * Create the spiller and its temp directory, or return null when the directory
+ * can't be created (read-only or full temp volume, sandbox restrictions). Notor
+ * then behaves as with output spillover turned off: tool output is returned in
+ * full instead of being spilled to a file. A failure here must never abort
+ * plugin load.
+ */
+export async function createTempOutputSpiller(): Promise<TempOutputSpiller | null> {
+	const spiller = new TempOutputSpiller();
+	try {
+		await spiller.ensureSpillDir();
+		return spiller;
+	} catch (e) {
+		log.warn("Output spillover disabled: temp directory unavailable", { error: String(e) });
+		return null;
+	}
+}

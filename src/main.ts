@@ -595,11 +595,12 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		// 2b. Initialize temp output spiller (desktop only, when enabled).
 		if (Platform.isDesktopApp && this.settings.output_spillover_enabled) {
 			const endSpiller = startSpan("onload.spiller");
-			const { TempOutputSpiller } = await import("./shell/temp-output-spiller");
-			this._tempOutputSpiller = new TempOutputSpiller();
-			await this._tempOutputSpiller.ensureSpillDir();
+			const { createTempOutputSpiller } = await import("./shell/temp-output-spiller");
+			// Null when the temp directory can't be created: spillover is skipped
+			// instead of the error aborting the rest of onload.
+			this._tempOutputSpiller = (await createTempOutputSpiller()) ?? undefined;
 			endSpiller();
-			this._tempOutputSpiller.cleanupStale().catch((e) => {
+			this._tempOutputSpiller?.cleanupStale().catch((e) => {
 				log.warn("Stale spillover cleanup failed", { error: String(e) });
 			});
 		}
