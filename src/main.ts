@@ -13,6 +13,7 @@ import { createDefaultSettings, mergeSavedSettings, NotorSettingTab } from "./se
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
 import { scheduleWhenIdle } from "./utils/idle";
+import { settleWithin } from "./utils/settle-within";
 import { isDailyTaskDue, localDayKey } from "./utils/daily-gate";
 import {
 	markStartup,
@@ -176,6 +177,9 @@ import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effectiv
 import { resolveNote } from "./utils/resolve-note";
 
 const log = logger("Main");
+
+/** Upper bound on how long layout-ready work waits for restored chat panels to load. */
+const RESTORE_PRIORITY_CAP_MS = 2_000;
 
 /** Upper bound on how long the first daily-start check waits for MCP servers to connect. */
 const DAILY_START_MCP_WAIT_MS = 10_000;
@@ -402,6 +406,10 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	private _runCircuitTool: RunCircuitTool | null = null;
 	/** Set at the start of onunload; deferred startup callbacks check it. */
 	private _unloaded = false;
+	/** Settles once restored chat panels have loaded (see whenRestoredChatsLoaded). */
+	private _restoredChatsLoaded: Promise<void> | null = null;
+	/** Settles once MCP connections have been started (at layout ready, after restored chats). */
+	private _mcpStarted: Promise<void> | null = null;
 	/** Circuit names already reported as colliding across roots (one Notice per name per load). */
 	private readonly _reportedCircuitCollisions = new Set<string>();
 	/** Cached data-root decision (see `getCircuitDataRootName`). */
@@ -842,31 +850,37 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			// run initial discovery. processFrontMatter atomically updates the
 			// metadata cache, so rescanWorkflows() sees injected frontmatter
 			// immediately after the promise resolves.
-			const endWorkflows = startSpan("layout.workflows");
-			const workflowsScanned = autoInjectUnidentifiedWorkflows(
-				this.app,
-				this.app.vault,
-				this.app.metadataCache,
-				this.settings.notor_dir
-			).then((injectedPaths) => {
-				if (injectedPaths.length > 0) {
-					new Notice(
-						`Auto-identified ${injectedPaths.length} workflow${injectedPaths.length > 1 ? "s" : ""} in workflows/`
-					);
-				}
-				try {
-					this.rescanWorkflows();
-				} catch (e) {
-					log.warn("Post-injection workflow rescan failed", { error: String(e) });
-				}
-			}).catch((e) => {
-				log.warn("Auto-inject workflow frontmatter failed", { error: String(e) });
-				try {
-					this.rescanWorkflows();
-				} catch (e2) {
-					log.warn("Fallback initial workflow rescan failed", { error: String(e2) });
-				}
-			}).finally(() => endWorkflows());
+			// Heavier layout-ready work waits until restored chat panels have
+			// loaded their conversation (capped), so a visible chat appears first.
+			const restoredChats = this.whenRestoredChatsLoaded();
+			const workflowsScanned = restoredChats.then(() => {
+				if (this._unloaded) return;
+				const endWorkflows = startSpan("layout.workflows");
+				return autoInjectUnidentifiedWorkflows(
+					this.app,
+					this.app.vault,
+					this.app.metadataCache,
+					this.settings.notor_dir
+				).then((injectedPaths) => {
+					if (injectedPaths.length > 0) {
+						new Notice(
+							`Auto-identified ${injectedPaths.length} workflow${injectedPaths.length > 1 ? "s" : ""} in workflows/`
+						);
+					}
+					try {
+						this.rescanWorkflows();
+					} catch (e) {
+						log.warn("Post-injection workflow rescan failed", { error: String(e) });
+					}
+				}).catch((e) => {
+					log.warn("Auto-inject workflow frontmatter failed", { error: String(e) });
+					try {
+						this.rescanWorkflows();
+					} catch (e2) {
+						log.warn("Fallback initial workflow rescan failed", { error: String(e2) });
+					}
+				}).finally(() => endWorkflows());
+			});
 
 			// EXT-017: Discover and compile user extensions (tools + automations).
 			// Scaffold defaults for all 20 built-in tools are injected here;
@@ -875,52 +889,55 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			// However, if the dispatcher was already created (e.g., by workspace
 			// restore triggering wireView() → createOrchestrator() → getToolDispatcher()
 			// before this async reload completes), we must sync it afterwards.
-			const endExtensions = startSpan("layout.extensions");
-			const extensionsLoaded = timePromise("layout.extensions.reload", this.getExtensionManager().reload(true)).then(() => {
-				// Sync dispatcher if it was already lazily created before reload finished.
-				// The dispatcher populates from registry.getAll() at creation time, but
-				// if created before reload, it only had use_subagent. Re-register all
-				// extension tools now.
-				if (this._toolDispatcher) {
-					const registry = this.getToolRegistry();
-					for (const tool of registry.getAll()) {
-						if (!this._toolDispatcher.hasTool(tool.name)) {
-							this._toolDispatcher.registerTool(tool);
+			const extensionsLoaded = restoredChats.then(() => {
+				if (this._unloaded) return;
+				const endExtensions = startSpan("layout.extensions");
+				return timePromise("layout.extensions.reload", this.getExtensionManager().reload(true)).then(() => {
+					// Sync dispatcher if it was already lazily created before reload finished.
+					// The dispatcher populates from registry.getAll() at creation time, but
+					// if created before reload, it only had use_subagent. Re-register all
+					// extension tools now.
+					if (this._toolDispatcher) {
+						const registry = this.getToolRegistry();
+						for (const tool of registry.getAll()) {
+							if (!this._toolDispatcher.hasTool(tool.name)) {
+								this._toolDispatcher.registerTool(tool);
+							}
 						}
 					}
-				}
 
-				// Populate sub-agent profile cache now that all extension tools are registered.
-				const useSubagentTool = this.getToolRegistry().get(USE_SUBAGENT_TOOL_NAME);
-				if (useSubagentTool && useSubagentTool instanceof UseSubagentTool) {
-					useSubagentTool.refreshVisibleProfiles().catch((e) =>
-						log.warn("Failed to load initial sub-agent profiles", { error: String(e) })
-					);
-				}
+					// Populate sub-agent profile cache now that all extension tools are registered.
+					const useSubagentTool = this.getToolRegistry().get(USE_SUBAGENT_TOOL_NAME);
+					if (useSubagentTool && useSubagentTool instanceof UseSubagentTool) {
+						useSubagentTool.refreshVisibleProfiles().catch((e) =>
+							log.warn("Failed to load initial sub-agent profiles", { error: String(e) })
+						);
+					}
 
-				// Re-evaluate vault event listeners to pick up automation triggers
-				if (this._vaultEventListenerManager) {
-					this._vaultEventListenerManager.evaluateListeners();
-				}
-				// Sync scheduler to pick up on_schedule automations
-				if (this._vaultEventScheduler) {
-					const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
-						(h) => h.enabled
-					);
-					this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
-				}
+					// Re-evaluate vault event listeners to pick up automation triggers
+					if (this._vaultEventListenerManager) {
+						this._vaultEventListenerManager.evaluateListeners();
+					}
+					// Sync scheduler to pick up on_schedule automations
+					if (this._vaultEventScheduler) {
+						const enabledScheduleHooks = this.settings.vault_event_hooks.on_schedule.filter(
+							(h) => h.enabled
+						);
+						this._vaultEventScheduler.syncJobs(enabledScheduleHooks);
+					}
 
-				// EXT-024: Register file watchers after initial discovery
-				this.registerExtensionVaultWatcher();
+					// EXT-024: Register file watchers after initial discovery
+					this.registerExtensionVaultWatcher();
 
-				// Register persona file watchers for auto-refresh
-				this.registerPersonaVaultWatcher();
+					// Register persona file watchers for auto-refresh
+					this.registerPersonaVaultWatcher();
 
-				// Validate memory presets on load — disable feature if required presets are missing.
-				this.validateMemoryPresetsOnLoad();
-			}).catch((e) => {
-				log.warn("Initial extension discovery failed", { error: String(e) });
-			}).finally(() => endExtensions());
+					// Validate memory presets on load — disable feature if required presets are missing.
+					this.validateMemoryPresetsOnLoad();
+				}).catch((e) => {
+					log.warn("Initial extension discovery failed", { error: String(e) });
+				}).finally(() => endExtensions());
+			});
 
 			// The external API is usable once tools are registered and the first
 			// workflow/circuit scans finish (the circuit scan starts in the vault
@@ -1166,6 +1183,32 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			}
 		});
 		if (ok) this.app.saveLocalStorage(HISTORY_RETENTION_LAST_RUN_KEY, localDayKey(now));
+	}
+
+	/**
+	 * Resolve once every chat panel that is actually mounted at layout ready has
+	 * loaded its conversation, or after {@link RESTORE_PRIORITY_CAP_MS}. Deferred
+	 * (hidden) panels don't count, so with collapsed sidebars this resolves
+	 * immediately. Memoized: every caller shares the same wait.
+	 */
+	private whenRestoredChatsLoaded(): Promise<void> {
+		this._restoredChatsLoaded ??= new Promise<void>((resolve) => {
+			// One macrotask: restored panels' setState (or the factory's
+			// setTimeout(0) fallback) has started their load by then.
+			window.setTimeout(() => {
+				const loads = this.app.workspace
+					.getLeavesOfType(CHAT_VIEW_TYPE)
+					.map((leaf) => leaf.view)
+					.filter((view): view is NotorChatView => view instanceof NotorChatView)
+					.map((view) => view.conversationLoad)
+					.filter((load): load is Promise<void> => !!load);
+				void settleWithin(loads, RESTORE_PRIORITY_CAP_MS).then((outcome) => {
+					if (loads.length > 0) markStartup("restoredChatsLoaded", { outcome, panels: loads.length });
+					resolve();
+				});
+			}, 0);
+		});
+		return this._restoredChatsLoaded;
 	}
 
 	/**
@@ -1538,7 +1581,9 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 			// Discover scheduled orchestration flows and register their cron jobs
 			// (no-op + empty cache when circuits_enabled is off). Fire-and-forget.
-			this._initialCircuitScan = timePromise("layout.circuitsScan", this.rescanCircuits()).then(
+			this._initialCircuitScan = this.whenRestoredChatsLoaded()
+				.then(() => (this._unloaded ? [] : timePromise("layout.circuitsScan", this.rescanCircuits())))
+				.then(
 				() => undefined,
 				(e) => log.warn("Initial orchestration flow scan failed", { error: String(e) }),
 			);
@@ -1674,25 +1719,28 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		// plugin load and layout restore. The hub, ToolRegistry and ToolDispatcher
 		// already exist, so status subscribers and tool registration are unaffected.
 		this.app.workspace.onLayoutReady(() => {
-			timeSync("layout.mcpConnect", () => {
-				// Non-blocking — fires off connections asynchronously
-				mcpHub.initialize(this.settings, mcpSecrets).catch((e) => {
-					log.error("McpHub initialization failed", { error: String(e) });
+			this._mcpStarted = this.whenRestoredChatsLoaded().then(() => {
+				if (this._unloaded) return;
+				timeSync("layout.mcpConnect", () => {
+					// Non-blocking — fires off connections asynchronously
+					mcpHub.initialize(this.settings, mcpSecrets).catch((e) => {
+						log.error("McpHub initialization failed", { error: String(e) });
+					});
+
+					// Subscribe MCP reconnection to the shared sleep/wake detector created
+					// in _initVaultEventHooks (runs before _initMcpHub).
+					if (this._sleepWakeDetector) {
+						mcpHub.startSleepDetection(this._sleepWakeDetector);
+					} else {
+						log.warn("SleepWakeDetector unavailable; MCP sleep reconnection disabled");
+					}
+
+					// Catch-up: after a microtask yield, register tools for any servers
+					// that connected before the onStatusChange listener was fully wired.
+					queueMicrotask(() => this._syncMcpToolRegistrations());
 				});
-
-				// Subscribe MCP reconnection to the shared sleep/wake detector created
-				// in _initVaultEventHooks (runs before _initMcpHub).
-				if (this._sleepWakeDetector) {
-					mcpHub.startSleepDetection(this._sleepWakeDetector);
-				} else {
-					log.warn("SleepWakeDetector unavailable; MCP sleep reconnection disabled");
-				}
-
-				// Catch-up: after a microtask yield, register tools for any servers
-				// that connected before the onStatusChange listener was fully wired.
-				queueMicrotask(() => this._syncMcpToolRegistrations());
+				log.info("McpHub connections launching in background");
 			});
-			log.info("McpHub connections launching in background");
 		});
 
 		log.info("McpHub created (connections start at layout ready)");
@@ -1706,9 +1754,12 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	private waitForInitialMcpConnects(capMs: number): Promise<void> {
 		const hub = this._mcpHub;
 		if (!hub) return Promise.resolve();
+		// Connections may start a little after layout ready (see _initMcpHub), so
+		// wait for them to start before waiting for them to settle.
+		const started = this._mcpStarted ?? Promise.resolve();
 		return new Promise((resolve) => {
 			const timer = window.setTimeout(resolve, capMs);
-			void hub.whenInitialConnectsSettled().then(() => {
+			void started.then(() => hub.whenInitialConnectsSettled()).then(() => {
 				window.clearTimeout(timer);
 				resolve();
 			});
