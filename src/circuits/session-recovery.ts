@@ -43,12 +43,16 @@
 
 import type { AggregateBudget } from "../run-loop/types";
 import { logger } from "../utils/logger";
+import { mapWithConcurrency } from "../utils/concurrency";
 import { DEFAULT_MAX_COST_USD, DEFAULT_MAX_ITERATIONS } from "./constants";
 import { SessionLogParseError, SessionLogReader } from "./session-log-reader";
 import type { SessionLogEntry } from "./session-log";
 import type { CircuitEvent, CircuitSessionMeta } from "./types";
 
 const log = logger("SessionRecovery");
+
+/** Max concurrent `session.json` reads during the recovery scan. */
+export const META_READ_CONCURRENCY = 16;
 
 // ---------------------------------------------------------------------------
 // Recovery action (the classified dangling tail)
@@ -275,9 +279,13 @@ export class SessionRecovery {
 		const errors: RecoveryError[] = [];
 
 		// Pass 1: read all metas (so chaining can resolve its predecessor's status).
+		// Reads run concurrently (a long-lived install has thousands of finished
+		// sessions, and each read is an async vault round-trip); results are then
+		// processed in listing order so `metas` / `errors` order is unchanged.
 		const metas = new Map<string, CircuitSessionMeta>();
-		for (const id of sessionIds) {
-			const raw = await fs.readMeta(id);
+		const raws = await mapWithConcurrency(sessionIds, META_READ_CONCURRENCY, (id) => fs.readMeta(id));
+		for (const [i, id] of sessionIds.entries()) {
+			const raw = raws[i] ?? null;
 			if (raw === null) {
 				errors.push({ sessionId: id, reason: "session.json is missing." });
 				continue;

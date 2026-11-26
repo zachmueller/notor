@@ -12,6 +12,7 @@ import { Notice, Platform, Plugin, WorkspaceLeaf, TFile, TFolder, TAbstractFile,
 import { createDefaultSettings, mergeSavedSettings, NotorSettingTab } from "./settings";
 import type { NotorSettings } from "./settings";
 import { logger, setLogLevel } from "./utils/logger";
+import { scheduleWhenIdle } from "./utils/idle";
 import {
 	markStartup,
 	resetStartupTimings,
@@ -173,6 +174,9 @@ import { EffectiveConfigInspectorView, INSPECTOR_VIEW_TYPE } from "./ui/effectiv
 import { resolveNote } from "./utils/resolve-note";
 
 const log = logger("Main");
+
+/** Upper bound on how long the circuit recovery scan waits for an idle period. */
+const RECOVERY_IDLE_TIMEOUT_MS = 5_000;
 
 /** Comparison key for a provider config, ignoring the persisted model-list cache. */
 function providerConfigKey(config: LLMProviderConfig): string {
@@ -382,6 +386,12 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 * `circuits_enabled` is off.
 	 */
 	private _discoveredCircuits: Circuit[] = [];
+	/**
+	 * The registered `run_circuit` tool (null when circuits are off). Its
+	 * invocable-circuit enum is fed from `rescanCircuits()` so startup and vault
+	 * rescans share one discovery pass.
+	 */
+	private _runCircuitTool: RunCircuitTool | null = null;
 	/** Circuit names already reported as colliding across roots (one Notice per name per load). */
 	private readonly _reportedCircuitCollisions = new Set<string>();
 	/** Cached data-root decision (see `getCircuitDataRootName`). */
@@ -922,17 +932,28 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			// INT-005 (FR-125): scan for interrupted orchestration sessions and
 			// resume them. Gated on circuits_enabled; fire-and-forget so it
 			// never blocks load. Loud recovery errors surface as Notices.
+			// Deferred until the API-ready chain (which includes the initial circuit
+			// scan) has settled and the renderer is idle, so it doesn't compete with
+			// restoring the workspace. Reuses that scan's circuits instead of running
+			// its own discovery.
 			let recovery: Promise<unknown> = Promise.resolve();
 			if (this.settings.circuits_enabled) {
-				recovery = timePromise("layout.recoverCircuits", Promise.all([
-					import("./circuits/launch"),
-					import("./ui/circuit-modals"),
-				])
-					.then(([{ recoverCircuits }, { requestCircuitInput }]) =>
-						recoverCircuits(this, (flowName, question) =>
-							requestCircuitInput(this.app, flowName, question),
-						),
-					))
+				recovery = apiReady
+					.then(() => this.whenIdle(RECOVERY_IDLE_TIMEOUT_MS))
+					.then(() => timePromise("layout.recoverCircuits", Promise.all([
+						import("./circuits/launch"),
+						import("./ui/circuit-modals"),
+					])
+						.then(([{ recoverCircuits }, { requestCircuitInput }]) =>
+							recoverCircuits(
+								this,
+								(flowName, question) => requestCircuitInput(this.app, flowName, question),
+								{
+									resolveFlows: () =>
+										Promise.resolve(new Map(this._discoveredCircuits.map((f) => [f.name, f]))),
+								},
+							),
+						)))
 					.catch((e) => log.warn("Orchestration recovery scan failed", { error: String(e) }));
 			}
 
@@ -1073,6 +1094,16 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	// -----------------------------------------------------------------------
 	// Settings
 	// -----------------------------------------------------------------------
+
+	/**
+	 * Resolve once the renderer is idle (or after `timeoutMs`). Never resolves if
+	 * the plugin unloads first: the pending callback is cancelled on unload.
+	 */
+	private whenIdle(timeoutMs: number): Promise<void> {
+		return new Promise((resolve) => {
+			this.register(scheduleWhenIdle(() => resolve(), timeoutMs));
+		});
+	}
 
 	async loadSettings() {
 		const defaults = createDefaultSettings(this.app.vault.configDir);
@@ -1962,10 +1993,16 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		};
 		const runFlowTool = new RunCircuitTool(composition, spawnChildFlow);
 		registry.register(runFlowTool);
+		this._runCircuitTool = runFlowTool;
 		// Prime the invocable-flow cache (hot-reloaded again at each execute()).
-		runFlowTool.refreshInvocableCircuits().catch((e) =>
-			log.warn("Failed to prime run_flow invocable flows", { error: String(e) }),
-		);
+		// During onload the vault index isn't populated, so a discovery here finds
+		// nothing; the layout-ready `rescanCircuits()` fills the cache instead.
+		// Later registrations (circuits toggled on in settings) prime directly.
+		if (this.app.workspace.layoutReady) {
+			runFlowTool.refreshInvocableCircuits().catch((e) =>
+				log.warn("Failed to prime run_flow invocable flows", { error: String(e) }),
+			);
+		}
 	}
 
 	/**
@@ -1986,6 +2023,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		} else if (!this.settings.circuits_enabled && present) {
 			registry.unregister(RUN_CIRCUIT_TOOL_NAME);
 			this._toolDispatcher?.unregisterTool(RUN_CIRCUIT_TOOL_NAME);
+			this._runCircuitTool = null;
 		}
 	}
 
@@ -2709,6 +2747,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			);
 			const parsed = await parser.discoverCircuits();
 			this._discoveredCircuits = parsed.map((p) => p.flow);
+			this._runCircuitTool?.setInvocableCircuits(this._discoveredCircuits);
 			this.reportCircuitNameCollisions(parsed);
 			log.debug("Flow cache updated", {
 				count: this._discoveredCircuits.length,

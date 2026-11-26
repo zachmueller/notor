@@ -133,6 +133,19 @@ describe("RunCircuitTool", () => {
 		expect(tool.description).toContain("Beta: a question");
 	});
 
+	it("setInvocableCircuits fills the enum from a shared discovery result, dropping non-invocable circuits", () => {
+		const composition = fakeComposition([]);
+		const tool = new RunCircuitTool(composition, vi.fn());
+		tool.setInvocableCircuits([flow("Alpha"), flow("Hidden", { invocable: false }), flow("Beta", { flowInputs: null })]);
+
+		expect(tool.input_schema.properties?.circuit?.enum).toEqual(["Alpha", "Beta"]);
+		expect(tool.description).toContain("Alpha: a question");
+		expect(tool.description).toContain("Beta: (no input contract declared)");
+		expect(tool.description).not.toContain("Hidden");
+		// No discovery of its own.
+		expect(composition.listInvocableCircuits).not.toHaveBeenCalled();
+	});
+
 	it("refuses outside an orchestration context (Issue-4) — no spawn", async () => {
 		const spawn = vi.fn();
 		const tool = new RunCircuitTool(fakeComposition([flow("Alpha")]), spawn as unknown as SpawnChildCircuit);

@@ -30,6 +30,7 @@
 import type { Tool, JSONSchema, ToolExecuteOptions, ToolResult } from "./tool";
 import type { CircuitCompositionManager } from "../circuits/circuit-composition-manager";
 import type { SpawnChildCircuit } from "../circuits/child-circuit";
+import type { Circuit } from "../circuits/types";
 import { canSpawnChild } from "../run-loop/budget";
 import { logger } from "../utils/logger";
 
@@ -106,10 +107,22 @@ export class RunCircuitTool implements Tool {
 	async refreshInvocableCircuits(): Promise<void> {
 		try {
 			const flows = await this.compositionManager.listInvocableCircuits();
-			this.cachedInvocable = flows.map((f) => ({ name: f.name, inputs: f.flowInputs }));
+			this.setInvocableCircuits(flows);
 		} catch (e) {
 			log.warn("Failed to refresh invocable flows", { error: String(e) });
 		}
+	}
+
+	/**
+	 * Replace the cached invocable-flow list from an already-discovered circuit
+	 * list (the plugin's shared `rescanCircuits()` result), so startup and vault
+	 * rescans don't each run their own discovery. Non-invocable circuits are
+	 * filtered out here, exactly as `listInvocableCircuits()` does.
+	 */
+	setInvocableCircuits(flows: readonly Circuit[]): void {
+		this.cachedInvocable = flows
+			.filter((f) => f.invocable)
+			.map((f) => ({ name: f.name, inputs: f.flowInputs }));
 	}
 
 	// -- Execute ---------------------------------------------------------------

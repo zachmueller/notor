@@ -35,6 +35,24 @@ export interface SessionReadFs extends RecoveryFs {
 	readEvals(sessionId: string): Promise<string | null>;
 }
 
+/**
+ * Read `path`, or `null` if it does not exist. Reads first and only checks
+ * existence when the read fails, so the common case (file present) costs one
+ * vault round-trip instead of two. A read failure on a file that does exist is
+ * re-thrown unchanged, matching the old `exists` + `read` behaviour.
+ */
+export async function readIfPresent(
+	fsVault: Pick<VaultSessionFs, "exists" | "read">,
+	path: string,
+): Promise<string | null> {
+	try {
+		return await fsVault.read(path);
+	} catch (e) {
+		if (!(await fsVault.exists(path))) return null;
+		throw e;
+	}
+}
+
 /** Build the {@link RecoveryFs} the scan + child-resume read sessions through (plus `readEvals` for evaluation). */
 export function makeRecoveryFs(
 	host: CircuitHost,
@@ -49,19 +67,13 @@ export function makeRecoveryFs(
 			return listing.folders.map((f) => f.split("/").pop() ?? f);
 		},
 		readMeta: async (sessionId) => {
-			const path = `${sessionsRoot}/${sessionId}/session.json`;
-			if (!(await fsVault.exists(path))) return null;
-			return fsVault.read(path);
+			return readIfPresent(fsVault, `${sessionsRoot}/${sessionId}/session.json`);
 		},
 		readLog: async (sessionId) => {
-			const path = `${sessionsRoot}/${sessionId}/session-log.jsonl`;
-			if (!(await fsVault.exists(path))) return null;
-			return fsVault.read(path);
+			return readIfPresent(fsVault, `${sessionsRoot}/${sessionId}/session-log.jsonl`);
 		},
 		readEvals: async (sessionId) => {
-			const path = `${sessionsRoot}/${sessionId}/evals.jsonl`;
-			if (!(await fsVault.exists(path))) return null;
-			return fsVault.read(path);
+			return readIfPresent(fsVault, `${sessionsRoot}/${sessionId}/evals.jsonl`);
 		},
 	};
 }

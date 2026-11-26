@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { recoverCircuits, dismissRecoveredSession } from "./recovery-boot";
+import { recoverCircuits, dismissRecoveredSession, readIfPresent } from "./recovery-boot";
 import { CircuitSessionManager } from "./session-manager";
 import type { RecoveryFs, RecoverableSession } from "./session-recovery";
 import type { CircuitHost } from "./host";
@@ -294,5 +294,23 @@ describe("dismissRecoveredSession — persists a terminal status", () => {
 		const sessionManager = new CircuitSessionManager("notor", failingFs);
 		const recovered = { sessionId: "s1", meta: meta({ session_id: "s1" }) } as unknown as RecoverableSession;
 		await expect(dismissRecoveredSession(recovered, sessionManager)).resolves.toBeUndefined();
+	});
+});
+
+describe("readIfPresent — one round-trip when the file exists", () => {
+	it("returns the content without an exists() check", async () => {
+		const fsVault = { read: vi.fn(async () => "{}"), exists: vi.fn(async () => true) };
+		await expect(readIfPresent(fsVault, "a/session.json")).resolves.toBe("{}");
+		expect(fsVault.exists).not.toHaveBeenCalled();
+	});
+
+	it("returns null when the read fails because the file is missing", async () => {
+		const fsVault = { read: vi.fn(async () => { throw new Error("ENOENT"); }), exists: vi.fn(async () => false) };
+		await expect(readIfPresent(fsVault, "a/session.json")).resolves.toBeNull();
+	});
+
+	it("re-throws a read failure on a file that exists", async () => {
+		const fsVault = { read: vi.fn(async () => { throw new Error("EACCES"); }), exists: vi.fn(async () => true) };
+		await expect(readIfPresent(fsVault, "a/session.json")).rejects.toThrow("EACCES");
 	});
 });

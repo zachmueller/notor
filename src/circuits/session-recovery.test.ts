@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { SessionRecovery, type RecoveryFs } from "./session-recovery";
+import { META_READ_CONCURRENCY, SessionRecovery, type RecoveryFs } from "./session-recovery";
 import { DEFAULT_MAX_COST_USD, DEFAULT_MAX_ITERATIONS } from "./constants";
 import type { SessionLogEntry } from "./session-log";
 import type { CircuitSessionMeta } from "./types";
@@ -374,6 +374,30 @@ class FakeRecoveryFs implements RecoveryFs {
 }
 
 describe("SessionRecovery — scan", () => {
+	it("reads session metas concurrently (bounded) and keeps listing order for results and errors", async () => {
+		const ids = Array.from({ length: 40 }, (_, i) => `s${String(i).padStart(2, "0")}`);
+		let active = 0;
+		let peak = 0;
+		const fs: RecoveryFs = {
+			listSessions: async () => ids,
+			readMeta: async (id) => {
+				active++;
+				peak = Math.max(peak, active);
+				// Later ids finish first, so order must come from the listing.
+				await new Promise((r) => setTimeout(r, 40 - Number(id.slice(1))));
+				active--;
+				if (id === "s03" || id === "s30") return null;
+				return JSON.stringify(meta({ session_id: id, origin: "user", status: "interrupted" }));
+			},
+			readLog: async () => jsonl([sessionStart("user"), eventEmitted(1, "build.start", "obj"), turnStart(2, "Planner", "build.start")]),
+		};
+		const { recoverable, errors } = await recovery.scan(fs);
+		expect(peak).toBeGreaterThan(1);
+		expect(peak).toBeLessThanOrEqual(META_READ_CONCURRENCY);
+		expect(errors.map((e) => e.sessionId)).toEqual(["s03", "s30"]);
+		expect(recoverable.map((r) => r.sessionId)).toEqual(ids.filter((id) => id !== "s03" && id !== "s30"));
+	});
+
 	it("selects recoverable roots and classifies each, ignoring terminal sessions", async () => {
 		const fs = new FakeRecoveryFs({
 			"sess-user": {
