@@ -571,6 +571,14 @@ export interface NotorSettings {
 	circuits_enabled: boolean;
 
 	/**
+	 * Days to keep finished circuit runs (session folder, its step conversations
+	 * and their sub-agent runs). A run tree is deleted in the daily cleanup only
+	 * when every session in it has finished and its newest activity is older
+	 * than this. Active and interrupted runs are never deleted. 0 keeps all.
+	 */
+	circuits_session_retention_days: number;
+
+	/**
 	 * When true, a run that terminates with `status: "error"` writes a
 	 * human-readable Markdown debug report to
 	 * `{notor_dir}/orchestrations/failures/{flow-slug}-{session_id}.md` — composed

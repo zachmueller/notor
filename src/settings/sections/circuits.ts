@@ -122,6 +122,27 @@ export function renderCircuitsSection(
 				}),
 		);
 
+	// Run-history retention. Applied by the daily cleanup shortly after startup.
+	new Setting(containerEl)
+		.setName("Keep finished runs (days)")
+		.setDesc(
+			"Finished circuit runs older than this are deleted in the daily cleanup: " +
+				"the run's session folder, its step conversations and their sub-agent runs. " +
+				"A run is kept while any part of it is still active or paused. Use 0 to keep all runs.",
+		)
+		.addText((text) =>
+			text
+				.setPlaceholder("90")
+				.setValue(String(ctx.settings.circuits_session_retention_days))
+				.onChange(async (value) => {
+					const parsed = parseInt(value, 10);
+					if (!isNaN(parsed) && parsed >= 0) {
+						ctx.settings.circuits_session_retention_days = parsed;
+						await ctx.saveSettings();
+					}
+				}),
+		);
+
 	// Whether orchestration reads/writes open notes in the editor. Read at launch
 	// time, so toggling needs no extension reload — just persist. Independent of
 	// the General "Open notes on access" setting; a flow can override it per-run

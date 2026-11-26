@@ -119,7 +119,7 @@ import { buildUtils } from "./extensions/runtime-context";
 import type { ExtensionUtils } from "./extensions/runtime-context/types";
 import type { Circuit } from "./circuits/types";
 import { CIRCUIT_ROOT_DIR_NAMES } from "./circuits/schema-aliases";
-import { resolveCircuitDataRootName, type CircuitDataRootName } from "./circuits/data-root";
+import { circuitDataRootPath, resolveCircuitDataRootName, type CircuitDataRootName } from "./circuits/data-root";
 
 // Extensions
 import { ExtensionManager } from "./extensions/manager";
@@ -938,16 +938,6 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 					});
 				});
 
-			// Enforce chat history retention policy (age + size limits). It lists
-			// every conversation file, so it runs at most once per local day, after
-			// the API-ready chain and once the renderer is idle. Fire-and-forget.
-			const retention = apiReady
-				.then(() => this.whenIdle(BACKGROUND_IDLE_TIMEOUT_MS))
-				.then(() => this.enforceHistoryRetentionDaily())
-				.catch((e) => {
-					log.warn("History retention enforcement failed", { error: String(e) });
-				});
-
 			// INT-005 (FR-125): scan for interrupted orchestration sessions and
 			// resume them. Gated on circuits_enabled; fire-and-forget so it
 			// never blocks load. Loud recovery errors surface as Notices.
@@ -975,6 +965,18 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 						)))
 					.catch((e) => log.warn("Orchestration recovery scan failed", { error: String(e) }));
 			}
+
+			// Daily storage housekeeping (history retention, checkpoint age limit,
+			// orphan sweep, circuit run retention). It lists every conversation file,
+			// so it runs at most once per local day, after the recovery scan (which it
+			// must not race: circuit retention deletes session folders) and once the
+			// renderer is idle. Fire-and-forget.
+			const retention = Promise.allSettled([apiReady, recovery])
+				.then(() => this.whenIdle(BACKGROUND_IDLE_TIMEOUT_MS))
+				.then(() => this.enforceHistoryRetentionDaily())
+				.catch((e) => {
+					log.warn("History retention enforcement failed", { error: String(e) });
+				});
 
 			// Startup timing: once the layout-ready work has settled, log a
 			// one-line summary of the notor:* timeline (see utils/startup-timing).
@@ -1117,8 +1119,9 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 	/**
 	 * Daily storage housekeeping, at most once per local day on this device:
-	 * history retention, the checkpoint age limit across all conversations, then
-	 * the sweep for data orphaned by deleted conversations. Each step is independent; the day marker is saved only when
+	 * history retention, the checkpoint age limit across all conversations,
+	 * circuit run retention (when circuits are enabled), then the sweep for data
+	 * orphaned by deleted conversations. Each step is independent; the day marker is saved only when
 	 * every step succeeded, so a failure retries on the next launch.
 	 */
 	private async enforceHistoryRetentionDaily(): Promise<void> {
@@ -1138,6 +1141,19 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		};
 		await step("layout.retention", () => this.getHistoryManager().enforceRetention());
 		await step("layout.checkpointAge", () => this.getCheckpointStorage().pruneExpiredEverywhere());
+		if (this.settings.circuits_enabled) {
+			await step("layout.circuitRetention", async () => {
+				const { pruneFinishedCircuitSessions } = await import("./circuits/session-retention");
+				await pruneFinishedCircuitSessions({
+					adapter: this.app.vault.adapter,
+					circuitRootPath: circuitDataRootPath(this.settings.notor_dir.replace(/\/+$/, ""), this.getCircuitDataRootName()),
+					historyPath: this.settings.history_path,
+					retentionDays: this.settings.circuits_session_retention_days,
+					// Spread a large backlog across days, pausing for idle time between batches.
+					pause: () => this.whenIdle(BACKGROUND_IDLE_TIMEOUT_MS),
+				});
+			});
+		}
 		await step("layout.historyOrphans", async () => {
 			const removed = await sweepHistoryOrphans({
 				adapter: this.app.vault.adapter,
