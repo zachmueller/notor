@@ -83,7 +83,7 @@ async function findAppPage(browser: Browser, timeout = 60_000): Promise<Page> {
 				} catch { /* not ready */ }
 			}
 		}
-		await new Promise((r) => window.setTimeout(r, 250));
+		await new Promise((r) => setTimeout(r, 250));
 	}
 	throw new Error("Obsidian app page not found");
 }
@@ -94,7 +94,7 @@ async function pollUntil(page: Page, expr: string, timeout: number, interval = 2
 		try {
 			if (await page.evaluate(expr)) return true;
 		} catch { /* navigation / reload */ }
-		await new Promise((r) => window.setTimeout(r, interval));
+		await new Promise((r) => setTimeout(r, interval));
 	}
 	return false;
 }
@@ -150,7 +150,7 @@ async function withObsidian<T>(fn: (page: Page) => Promise<T>): Promise<T> {
 	} finally {
 		if (browser) await browser.close().catch(() => {});
 		if (obsidian) await closeObsidian(obsidian).catch(() => {});
-		await new Promise((r) => window.setTimeout(r, 1_500));
+		await new Promise((r) => setTimeout(r, 1_500));
 	}
 }
 
