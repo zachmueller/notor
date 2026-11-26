@@ -91,6 +91,16 @@ export class TagShadowCache {
 		});
 	}
 
+	/**
+	 * Drop every entry and re-initialize from the metadata cache. Used when the
+	 * on-tag-change listener (re)starts: entries are only kept current while that
+	 * listener runs, so a rebuild at registration gives a correct baseline.
+	 */
+	rebuild(app: App): void {
+		this.cache.clear();
+		this.initialize(app);
+	}
+
 	// ---------------------------------------------------------------------------
 	// Read / write
 	// ---------------------------------------------------------------------------

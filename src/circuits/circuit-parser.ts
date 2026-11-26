@@ -40,6 +40,7 @@ import {
 } from "obsidian";
 import { logger } from "../utils/logger";
 import { startSpan } from "../utils/startup-timing";
+import { mapWithConcurrency } from "../utils/concurrency";
 import { validateCronExpression } from "../workflows/workflow-discovery";
 import { extractCodeFence } from "../extensions/parser";
 import {
@@ -68,6 +69,22 @@ import {
 } from "./schema-aliases";
 
 const log = logger("FlowParser");
+
+/** Max circuits parsed at once during discovery. */
+const CIRCUIT_PARSE_CONCURRENCY = 4;
+/** Max step / evaluator notes read at once within one circuit. */
+const NOTE_PARSE_CONCURRENCY = 8;
+
+type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+/** Run `fn`, capturing a rejection as a value so ordered error handling can follow. */
+async function settle<T>(fn: () => Promise<T>): Promise<Settled<T>> {
+	try {
+		return { ok: true, value: await fn() };
+	} catch (error) {
+		return { ok: false, error };
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Errors / results
@@ -577,6 +594,7 @@ export class CircuitDefinitionParser {
 				continue;
 			}
 
+			const candidates: TFolder[] = [];
 			for (const child of root.children) {
 				if (!(child instanceof TFolder)) continue;
 				const defPath = `${child.path}/definition.md`;
@@ -586,16 +604,24 @@ export class CircuitDefinitionParser {
 				// Only directories whose definition.md carries the discriminator.
 				const cache = this.metadataCache.getFileCache(defFile);
 				if (!isCircuitDefinitionType(cache?.frontmatter?.["notor-type"])) continue;
+				candidates.push(child);
+			}
 
-				try {
-					results.push(await this.parseFlowDir(child));
-				} catch (e) {
+			// Parse circuits concurrently (each reads its step notes); results and
+			// failure logs keep folder order, as with the sequential loop.
+			const parsed = await mapWithConcurrency(candidates, CIRCUIT_PARSE_CONCURRENCY, (dir) =>
+				settle(() => this.parseFlowDir(dir)),
+			);
+			parsed.forEach((outcome, i) => {
+				if (outcome.ok) {
+					results.push(outcome.value);
+				} else {
 					log.warn("Failed to parse circuit, skipping", {
-						path: child.path,
-						error: e instanceof Error ? e.message : String(e),
+						path: candidates[i]!.path,
+						error: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
 					});
 				}
-			}
+			});
 		}
 		endSpan({ circuits: results.length });
 		return dedupeByName(results);
@@ -717,16 +743,26 @@ export class CircuitDefinitionParser {
 		const evalsDir = `${dir.path}/evals`;
 		const evaluators: EvaluatorDefinition[] = [];
 		const seen = new Set<string>();
-		for (const link of links) {
-			const linkText = stripWikilink(link);
-			try {
+		// Resolve + parse every evaluator note concurrently, then apply the
+		// per-link checks in declaration order (same warnings as a sequential pass).
+		const parsed = await mapWithConcurrency(links, NOTE_PARSE_CONCURRENCY, (link) =>
+			settle(async () => {
+				const linkText = stripWikilink(link);
 				const file = resolveLinkedNote(this.vault, this.metadataCache, linkText, evalsDir, definitionPath);
 				if (!file) {
 					throw new CircuitParseError(
 						`evaluator '${linkText}' could not be resolved under '${evalsDir}/'.`,
 					);
 				}
-				const evaluator = await this.evaluatorParser.parse(file, evalsDir);
+				return this.evaluatorParser.parse(file, evalsDir);
+			}),
+		);
+		for (const [i, link] of links.entries()) {
+			const linkText = stripWikilink(link);
+			try {
+				const outcome = parsed[i]!;
+				if (!outcome.ok) throw outcome.error;
+				const evaluator = outcome.value;
 				if (seen.has(evaluator.name)) {
 					throw new CircuitParseError(`evaluator name '${evaluator.name}' is declared twice.`);
 				}
@@ -751,15 +787,27 @@ export class CircuitDefinitionParser {
 		const stepsDir = `${dir.path}/steps`;
 		const steps: StepDefinition[] = [];
 
-		for (const link of stepLinks) {
+		// Resolve every link, parse the resolvable step notes concurrently, then
+		// walk the outcomes in declaration order so the first problem in order is
+		// the error thrown, exactly as with a sequential pass.
+		const files = stepLinks.map((link) =>
+			resolveLinkedNote(this.vault, this.metadataCache, stripWikilink(link), stepsDir, definitionPath),
+		);
+		const parsed = await mapWithConcurrency(files, NOTE_PARSE_CONCURRENCY, (file) =>
+			file ? settle(() => this.stepParser.parse(file)) : Promise.resolve({ ok: true as const, value: null }),
+		);
+
+		for (const [i, link] of stepLinks.entries()) {
 			const linkText = stripWikilink(link);
-			const file = resolveLinkedNote(this.vault, this.metadataCache, linkText, stepsDir, definitionPath);
+			const file = files[i];
 			if (!file) {
 				throw new CircuitParseError(
 					`Flow '${flowName}': step '${linkText}' could not be resolved under '${stepsDir}/'.`,
 				);
 			}
-			const step = await this.stepParser.parse(file);
+			const outcome = parsed[i]!;
+			if (!outcome.ok) throw outcome.error;
+			const step = outcome.value;
 			if (!step) {
 				throw new CircuitParseError(
 					`Flow '${flowName}': note '${file.path}' is not a valid circuit step.`,

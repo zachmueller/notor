@@ -1366,6 +1366,16 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		);
 		this._vaultEventListenerManager = listenerManager;
 
+		// The tag shadow cache walks every note's frontmatter tags; build it only
+		// when an on-tag-change listener actually starts (it is the cache's only
+		// consumer), and never before the metadata cache is populated.
+		listenerManager.setOnTagChangeListenerStart(() => {
+			this.app.workspace.onLayoutReady(() => {
+				timeSync("layout.tagCache", () => tagShadowCache.rebuild(this.app));
+				log.info("Tag shadow cache initialized");
+			});
+		});
+
 		// Register handler callbacks for all event types
 		listenerManager.setEventHandler("on_note_open", {
 			type: "on_note_open",
@@ -1474,10 +1484,6 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 		// Deferred initialization: tag shadow cache + listener evaluation after layout ready
 		this.app.workspace.onLayoutReady(() => {
-			// Initialize the tag shadow cache from Obsidian's metadata cache
-			timeSync("layout.tagCache", () => tagShadowCache.initialize(this.app));
-			log.info("Tag shadow cache initialized");
-
 			timeSync("layout.listeners", () => {
 				// Evaluate which listeners should be active based on current settings
 				// and discovered workflows (called again after rescanWorkflows in step 8)

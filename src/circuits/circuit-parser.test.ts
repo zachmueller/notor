@@ -762,3 +762,44 @@ describe("CircuitDefinitionParser — circuit topic aliases", () => {
 		expect(alias.warnings).toEqual(canonical.warnings);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Concurrent discovery keeps sequential semantics (order + first error)
+// ---------------------------------------------------------------------------
+
+describe("CircuitDefinitionParser — concurrent note reads", () => {
+	function flowFilesAt(dir: string, name: string): Record<string, FileFixture> {
+		const out: Record<string, FileFixture> = {};
+		for (const [path, fx] of Object.entries(validFlowFiles({ "notor-flow-name": name }))) {
+			out[path.replace(FLOW_DIR, dir)] = fx;
+		}
+		return out;
+	}
+
+	it("returns circuits in folder order even when earlier circuits finish reading last", async () => {
+		const files = {
+			...flowFilesAt("notor/orchestrations/a", "Alpha"),
+			...flowFilesAt("notor/orchestrations/b", "Beta"),
+			...flowFilesAt("notor/orchestrations/c", "Gamma"),
+		};
+		const { vault, metadataCache } = buildFakeVault(files);
+		const read = (vault as unknown as { read: (f: TFile) => Promise<string> }).read;
+		const delays: Record<string, number> = { a: 30, b: 15, c: 0 };
+		(vault as unknown as { read: (f: TFile) => Promise<string> }).read = async (f: TFile) => {
+			await new Promise((r) => setTimeout(r, delays[f.path.split("/")[2]!] ?? 0));
+			return read(f);
+		};
+		const results = await new CircuitDefinitionParser(vault, metadataCache, "notor").discoverCircuits();
+		expect(results.map((r) => r.flow.name)).toEqual(["Alpha", "Beta", "Gamma"]);
+	});
+
+	it("throws the first problem in step declaration order", async () => {
+		const withBad = (steps: string[]) => {
+			const files = validFlowFiles({ "notor-steps": steps });
+			files[`${FLOW_DIR}/steps/bad.md`] = { frontmatter: { "notor-type": "not-a-step" }, body: "x" };
+			return files;
+		};
+		await expect(parserFor(withBad(["[[ghost]]", "[[bad]]"])).parseCircuitByDir(FLOW_DIR)).rejects.toThrow(/ghost/);
+		await expect(parserFor(withBad(["[[bad]]", "[[ghost]]"])).parseCircuitByDir(FLOW_DIR)).rejects.toThrow(/bad\.md/);
+	});
+});

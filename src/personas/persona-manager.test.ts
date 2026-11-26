@@ -79,3 +79,30 @@ describe("PersonaManager.restoreFromSettings — restored event", () => {
 		expect(settings.active_persona).toBe("");
 	});
 });
+
+describe("PersonaManager — persists only actual changes", () => {
+	beforeEach(() => {
+		discovered.list = [persona("writer"), persona("editor")];
+	});
+
+	function managerWithSave(activePersona: string) {
+		const settings = { notor_dir: "notor", active_persona: activePersona, model_presets: [] };
+		const save = vi.fn(async () => {});
+		const pm = new PersonaManager({} as never, {} as never, settings as never, {} as never, save);
+		return { pm, settings, save };
+	}
+
+	it("restoring the already-saved persona at startup does not write data.json", async () => {
+		const { pm, save } = managerWithSave("writer");
+		await pm.restoreFromSettings();
+		expect(pm.getActivePersona()?.name).toBe("writer");
+		expect(save).not.toHaveBeenCalled();
+	});
+
+	it("activating a different persona still persists it", async () => {
+		const { pm, settings, save } = managerWithSave("writer");
+		await pm.activatePersona("editor");
+		expect(settings.active_persona).toBe("editor");
+		expect(save).toHaveBeenCalledTimes(1);
+	});
+});

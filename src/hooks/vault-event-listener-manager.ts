@@ -106,6 +106,9 @@ export class VaultEventListenerManager {
 	 */
 	private extensionAutomationsAccessor: ((trigger: string) => unknown[]) | null = null;
 
+	/** Called each time the on-tag-change listener is registered (see setter). */
+	private onTagChangeListenerStart: (() => void) | null = null;
+
 	constructor(
 		plugin: Plugin,
 		getSettings: () => NotorSettings,
@@ -151,6 +154,15 @@ export class VaultEventListenerManager {
 	setExtensionAutomations(accessor: (trigger: string) => unknown[]): void {
 		this.extensionAutomationsAccessor = accessor;
 		log.debug("Extension automations accessor set");
+	}
+
+	/**
+	 * Run `callback` each time the on-tag-change listener is registered, before it
+	 * starts receiving events. The plugin builds the tag shadow cache here, so a
+	 * vault with no tag-change hooks never walks every note's tags.
+	 */
+	setOnTagChangeListenerStart(callback: () => void): void {
+		this.onTagChangeListenerStart = callback;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -335,6 +347,8 @@ export class VaultEventListenerManager {
 			return null;
 		}
 		const { handler } = handlerEntry;
+
+		this.onTagChangeListenerStart?.();
 
 		const ref = this.plugin.app.metadataCache.on(
 			"changed",

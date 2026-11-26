@@ -159,8 +159,12 @@ export class PersonaManager {
 		}
 
 		this.activePersona = persona;
-		this.settings.active_persona = name;
-		await this.saveData();
+		// Persist only an actual change: restoring the already-saved persona at
+		// startup would otherwise rewrite data.json on every launch.
+		if (this.settings.active_persona !== name) {
+			this.settings.active_persona = name;
+			await this.saveData();
+		}
 
 		log.info("Persona activated", {
 			name,
