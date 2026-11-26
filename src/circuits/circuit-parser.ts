@@ -70,10 +70,10 @@ import {
 
 const log = logger("FlowParser");
 
-/** Max circuits parsed at once during discovery. */
-const CIRCUIT_PARSE_CONCURRENCY = 4;
+/** Max circuits parsed at once during discovery (2 × 4 notes ≈ the 4-thread read pool). */
+const CIRCUIT_PARSE_CONCURRENCY = 2;
 /** Max step / evaluator notes read at once within one circuit. */
-const NOTE_PARSE_CONCURRENCY = 8;
+const NOTE_PARSE_CONCURRENCY = 4;
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
 

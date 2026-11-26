@@ -51,8 +51,12 @@ import type { CircuitEvent, CircuitSessionMeta } from "./types";
 
 const log = logger("SessionRecovery");
 
-/** Max concurrent `session.json` reads during the recovery scan. */
-export const META_READ_CONCURRENCY = 16;
+/**
+ * Max concurrent `session.json` reads during the recovery scan. Vault reads run
+ * on a small worker pool (libuv's default is 4 threads), so going wider gains
+ * no throughput and only makes every other vault read queue behind the scan.
+ */
+export const META_READ_CONCURRENCY = 4;
 
 // ---------------------------------------------------------------------------
 // Recovery action (the classified dangling tail)
