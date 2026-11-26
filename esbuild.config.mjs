@@ -5,6 +5,7 @@ import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { STRIP_FILTER, stripScriptInjectionSource } from './esbuild/strip-script-injection.mjs';
+import { precompileScaffoldsPlugin } from './esbuild/precompile-scaffolds.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const buildDir = resolve(__dirname, 'build');
@@ -69,7 +70,9 @@ const context = await esbuild.context({
 	treeShaking: true,
 	outfile: "build/main.js",
 	minify: prod,
-	plugins: [stripScriptInjectionPlugin],
+	// precompile-scaffolds: strips built-in extension scaffolds at build time
+	// (see esbuild/precompile-scaffolds.mjs) so startup skips Sucrase for them.
+	plugins: [stripScriptInjectionPlugin, precompileScaffoldsPlugin(__dirname)],
 });
 
 /**

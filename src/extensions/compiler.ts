@@ -7,6 +7,13 @@
 
 import { transform } from "sucrase";
 import type { CompiledExtensionFn } from "./types";
+import { PRECOMPILED_STRIPPED, precompiledKey, type PrecompiledKind } from "./precompiled-scaffolds";
+
+/** Build-time stripped output for this exact source, if the build precompiled it. */
+function lookupPrecompiled(kind: PrecompiledKind, code: string): string | undefined {
+	if (PRECOMPILED_STRIPPED.size === 0) return undefined;
+	return PRECOMPILED_STRIPPED.get(precompiledKey(kind, code));
+}
 
 // ---------------------------------------------------------------------------
 // AsyncFunction constructor
@@ -30,6 +37,9 @@ const AsyncFunction = AsyncFunctionProto.constructor as new (
  * @throws Error with descriptive message if Sucrase encounters a syntax error
  */
 export function stripTypes(code: string): string {
+	// Built-in scaffolds are stripped at build time (exact-source match only).
+	const precompiled = lookupPrecompiled("plain", code);
+	if (precompiled !== undefined) return precompiled;
 	try {
 		const result = transform(code, {
 			transforms: ["typescript"],
@@ -48,7 +58,9 @@ export function stripTypes(code: string): string {
  * transform converts these to `exports.render = function render(...)`, which
  * populates the `exports` object injected by `compileBlockModule`.
  */
-function stripTypesForBlock(code: string): string {
+export function stripTypesForBlock(code: string): string {
+	const precompiled = lookupPrecompiled("block", code);
+	if (precompiled !== undefined) return precompiled;
 	try {
 		const result = transform(code, {
 			transforms: ["typescript", "imports"],
