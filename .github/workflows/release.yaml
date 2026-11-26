@@ -27,6 +27,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Kept out of `npm run build`: Obsidian's build verification runs that script in
+      # a memory-capped container where tsc (~600 MB heap) runs out of memory.
+      - name: Typecheck
+        run: npm run typecheck
+
       # Re-lints with the scanner's latest rules and scope, and checks the release
       # metadata against the tag (.claude/skills/community-review-guard).
       - name: Community review guard

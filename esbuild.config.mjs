@@ -7,6 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { STRIP_FILTER, stripScriptInjectionSource } from './esbuild/strip-script-injection.mjs';
 import { precompileScaffoldsPlugin } from './esbuild/precompile-scaffolds.mjs';
 
+// esbuild's Go service starts on the first API call and inherits this env. A soft
+// memory limit keeps it from being OOM-killed in small containers (Obsidian's build
+// verification; a 512 MB container failed with "The service was stopped" without it).
+// GC tuning only: the output is identical. An explicit GOMEMLIMIT wins.
+process.env.GOMEMLIMIT ??= "350MiB";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const buildDir = resolve(__dirname, 'build');
 
