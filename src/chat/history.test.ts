@@ -525,3 +525,32 @@ describe("HistoryManager.loadConversation — stale state captured in the same p
 		expect(staleState).toBeNull();
 	});
 });
+
+describe("HistoryManager.deleteConversationFile — removes the conversation's leftovers", () => {
+	it("deletes its webview sidecar and sub-agent files, keeps others, and fires the deleted hook", async () => {
+		const id = "11111111-2222-3333-4444-555555555555";
+		const other = "99999999-8888-7777-6666-555555555555";
+		const file = `20260701_000000_${id}.jsonl`;
+		const { vault, files } = makeStatefulVault({
+			[`${HISTORY}${file}`]: "{}\n",
+			[`${HISTORY}${id}.plan.json`]: "{}",
+			[`${HISTORY}${id}.webview.json`]: "{}",
+			[`${HISTORY}20260701_000000_${id}_subagent_inv-1.jsonl`]: "{}\n",
+			[`${HISTORY}20260701_000000_${id}_subagent_inv-2.jsonl`]: "{}\n",
+			[`${HISTORY}20260702_000000_${other}_subagent_inv-3.jsonl`]: "{}\n",
+			[`${HISTORY}${other}.webview.json`]: "{}",
+		});
+		(vault.adapter as unknown as { remove: (p: string) => Promise<void> }).remove = async (p: string) => { delete files[p]; };
+		const manager = new HistoryManager(vault, HISTORY, 500, 90);
+		const deleted: string[] = [];
+		manager.setOnConversationDeleted((cid) => { deleted.push(cid); });
+
+		await manager.deleteConversationFile(file);
+
+		expect(Object.keys(files).sort()).toEqual([
+			`${HISTORY}20260702_000000_${other}_subagent_inv-3.jsonl`,
+			`${HISTORY}${other}.webview.json`,
+		]);
+		expect(deleted).toEqual([id]);
+	});
+});

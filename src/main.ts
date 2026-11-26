@@ -79,6 +79,7 @@ import { NoteOpener } from "./tools/note-opener";
 // Chat
 import { ToolDispatcher } from "./chat/dispatcher";
 import { HistoryManager } from "./chat/history";
+import { sweepHistoryOrphans } from "./chat/history-orphans";
 import { SystemPromptBuilder } from "./chat/system-prompt";
 import { ChatOrchestrator, type SessionGuard } from "./chat/orchestrator";
 import type { ConversationSession } from "./chat/conversation-session";
@@ -1115,8 +1116,10 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	// -----------------------------------------------------------------------
 
 	/**
-	 * Run history retention if it hasn't run yet today on this device. The marker
-	 * is saved only after a successful pass, so a failure retries next launch.
+	 * Daily storage housekeeping, at most once per local day on this device:
+	 * history retention, then the sweep for data orphaned by deleted
+	 * conversations. Each step is independent; the day marker is saved only when
+	 * every step succeeded, so a failure retries on the next launch.
 	 */
 	private async enforceHistoryRetentionDaily(): Promise<void> {
 		const now = new Date();
@@ -1124,8 +1127,27 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 			markStartup("layout.retention.skipped");
 			return;
 		}
-		await timePromise("layout.retention", this.getHistoryManager().enforceRetention());
-		this.app.saveLocalStorage(HISTORY_RETENTION_LAST_RUN_KEY, localDayKey(now));
+		let ok = true;
+		const step = async (name: string, run: () => Promise<unknown>) => {
+			try {
+				await timePromise(name, run());
+			} catch (e) {
+				ok = false;
+				log.warn("Daily storage housekeeping step failed", { step: name, error: String(e) });
+			}
+		};
+		await step("layout.retention", () => this.getHistoryManager().enforceRetention());
+		await step("layout.historyOrphans", async () => {
+			const removed = await sweepHistoryOrphans({
+				adapter: this.app.vault.adapter,
+				historyPath: this.settings.history_path,
+				checkpointPath: this.settings.checkpoint_path,
+			});
+			if (removed.subAgentFiles || removed.sidecars || removed.checkpointFolders) {
+				log.info("Removed data of deleted conversations", removed);
+			}
+		});
+		if (ok) this.app.saveLocalStorage(HISTORY_RETENTION_LAST_RUN_KEY, localDayKey(now));
 	}
 
 	/**
@@ -2134,6 +2156,10 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				this.settings.history_path,
 				this.settings.history_max_size_mb,
 				this.settings.history_max_age_days
+			);
+			// A deleted conversation's checkpoints live outside the history folder.
+			this._historyManager.setOnConversationDeleted((id) =>
+				this.getCheckpointStorage().deleteAllForConversation(id),
 			);
 		}
 		return this._historyManager;

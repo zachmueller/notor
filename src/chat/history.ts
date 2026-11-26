@@ -95,6 +95,14 @@ export interface ConversationListEntry {
 	preset_name?: string;
 }
 
+/** Marker in sub-agent conversation file names: `{ts}_{parentId}_subagent_{inv}.jsonl`. */
+export const SUB_AGENT_FILENAME_MARKER = "_subagent_";
+
+/** `{historyPath}{conversationId}.webview.json` — a webview extension's persisted URL. */
+export function webviewSidecarPath(historyPath: string, conversationId: string): string {
+	return normalizePath(`${historyPath}${historyPath.endsWith("/") ? "" : "/"}${conversationId}.webview.json`);
+}
+
 /** One persisted stale-tracker entry (a `stale_state` JSONL line holds a list). */
 export interface StaleStateEntry {
 	note_path: string;
@@ -137,12 +145,23 @@ export class HistoryManager {
 	 */
 	private readonly filenameOverrides = new Map<string, string>();
 
+	/** Called after a conversation file is deleted (the plugin removes its checkpoints). */
+	private onConversationDeleted: ((conversationId: string) => void | Promise<void>) | null = null;
+
 	constructor(
 		private readonly vault: Vault,
 		private historyPath: string,
 		private maxSizeMb: number,
 		private maxAgeDays: number
 	) {}
+
+	/**
+	 * Register cleanup for data stored outside the history folder (checkpoints)
+	 * that belongs to a conversation, run after {@link deleteConversationFile}.
+	 */
+	setOnConversationDeleted(callback: (conversationId: string) => void | Promise<void>): void {
+		this.onConversationDeleted = callback;
+	}
 
 	// -----------------------------------------------------------------------
 	// Configuration
@@ -1111,18 +1130,47 @@ export class HistoryManager {
 		await this.deleteSidecars(filename);
 	}
 
-	/** Remove `{id}.plan.json` for the conversation named by `filename`, if present. */
+	/**
+	 * Remove what belongs only to the conversation named by `filename`: its
+	 * `{id}.plan.json` and `{id}.webview.json` sidecars, its sub-agent
+	 * conversation files (`…_{id}_subagent_…`), and — through the
+	 * {@link setOnConversationDeleted} hook — its checkpoints.
+	 */
 	private async deleteSidecars(filename: string): Promise<void> {
 		const match = /_([0-9a-f-]{36})\.jsonl$/i.exec(filename);
 		if (!match) return;
-		const planPath = planSidecarPath(this.historyPath, match[1]!);
+		const id = match[1]!;
+		await this.removeIfExists(planSidecarPath(this.historyPath, id), "plan sidecar");
+		await this.removeIfExists(webviewSidecarPath(this.historyPath, id), "webview sidecar");
+
 		try {
-			if (await this.vault.adapter.exists(planPath)) {
-				await this.vault.adapter.remove(planPath);
-				log.info("Deleted plan sidecar", { path: planPath });
+			const dir = normalizePath(this.historyPath);
+			if (await this.vault.adapter.exists(dir)) {
+				const marker = `_${id}${SUB_AGENT_FILENAME_MARKER}`;
+				for (const file of (await this.vault.adapter.list(dir)).files) {
+					const fname = file.split("/").pop() ?? file;
+					if (fname.includes(marker)) await this.removeIfExists(file, "sub-agent conversation");
+				}
 			}
 		} catch (e) {
-			log.warn("Failed to delete plan sidecar", { path: planPath, error: String(e) });
+			log.warn("Failed to delete sub-agent conversations", { conversationId: id, error: String(e) });
+		}
+
+		try {
+			await this.onConversationDeleted?.(id);
+		} catch (e) {
+			log.warn("Conversation-deleted hook failed", { conversationId: id, error: String(e) });
+		}
+	}
+
+	private async removeIfExists(path: string, what: string): Promise<void> {
+		try {
+			if (await this.vault.adapter.exists(path)) {
+				await this.vault.adapter.remove(path);
+				log.info(`Deleted ${what}`, { path });
+			}
+		} catch (e) {
+			log.warn(`Failed to delete ${what}`, { path, error: String(e) });
 		}
 	}
 }

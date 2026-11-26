@@ -75,6 +75,8 @@ Conversation history (JSONL files) and checkpoint snapshots are stored in your v
 
 History cleanup runs at most once a day per device, shortly after Obsidian starts (once startup work has settled). Favorited conversations are never removed.
 
+Deleting a conversation, by hand or through cleanup, also deletes what belongs only to it: its sub-agent runs, its checkpoints, and its plan and web-view sidecar files. The daily cleanup also removes such leftovers when their conversation no longer exists (for example after a delete on another device), once they have been untouched for a day.
+
 ## Sub-agent security
 
 [Sub-agents](sub-agents.md) operate under a stricter security model than the main conversation:

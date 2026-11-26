@@ -2,7 +2,8 @@ import type { BuilderContext, ExtensionUtils, WebviewElement } from "./types";
 import { logger } from "../../utils/logger";
 import { NoteOpener } from "../../tools/note-opener";
 import { TOOLS_DEFAULT_DISABLED } from "../../settings/constants";
-import { Notice, Platform, normalizePath } from "obsidian";
+import { webviewSidecarPath } from "../../chat/history";
+import { Notice, Platform } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 
 function getAvailableKeys(root: unknown, pathParts: string[]): string {
@@ -188,17 +189,13 @@ export function buildPluginUtils(ctx: BuilderContext): Pick<ExtensionUtils,
 			},
 
 			persistUrl: async (cId: string, url: string) => {
-				const sidecarPath = normalizePath(
-					`${plugin.settings.history_path}${cId}.webview.json`,
-				);
+				const sidecarPath = webviewSidecarPath(plugin.settings.history_path, cId);
 				const data = JSON.stringify({ url, timestamp: new Date().toISOString() });
 				await plugin.app.vault.adapter.write(sidecarPath, data);
 			},
 
 			readPersistedUrl: async (cId: string) => {
-				const sidecarPath = normalizePath(
-					`${plugin.settings.history_path}${cId}.webview.json`,
-				);
+				const sidecarPath = webviewSidecarPath(plugin.settings.history_path, cId);
 				try {
 					const raw = await plugin.app.vault.adapter.read(sidecarPath);
 					const parsed = JSON.parse(raw) as { url?: unknown };
