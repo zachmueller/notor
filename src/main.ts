@@ -176,6 +176,9 @@ import { resolveNote } from "./utils/resolve-note";
 
 const log = logger("Main");
 
+/** Upper bound on how long the first daily-start check waits for MCP servers to connect. */
+const DAILY_START_MCP_WAIT_MS = 10_000;
+
 /** Upper bound on how long deferred startup housekeeping waits for an idle period. */
 const BACKGROUND_IDLE_TIMEOUT_MS = 5_000;
 
@@ -396,6 +399,8 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 	 * rescans share one discovery pass.
 	 */
 	private _runCircuitTool: RunCircuitTool | null = null;
+	/** Set at the start of onunload; deferred startup callbacks check it. */
+	private _unloaded = false;
 	/** Circuit names already reported as colliding across roots (one Notice per name per load). */
 	private readonly _reportedCircuitCollisions = new Set<string>();
 	/** Cached data-root decision (see `getCircuitDataRootName`). */
@@ -923,8 +928,13 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 				.finally(() => {
 					markStartup("apiReady");
 					this._resolveApiReady();
-					// on_daily_start needs the full target set before its first check.
-					this._dailyStart?.detector.start();
+					// on_daily_start needs the full target set before its first check,
+					// and its runs may use MCP tools: wait (capped) for the initial MCP
+					// connection attempts so those tools exist, as they did when MCP
+					// connected during onload.
+					void this.waitForInitialMcpConnects(DAILY_START_MCP_WAIT_MS).then(() => {
+						if (!this._unloaded) this._dailyStart?.detector.start();
+					});
 				});
 
 			// Enforce chat history retention policy (age + size limits). It lists
@@ -979,6 +989,7 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 
 	onunload() {
 		log.info("Plugin unloading");
+		this._unloaded = true;
 		this._apiHandle?.dispose();
 		setPlanReviewController(null);
 
@@ -1611,24 +1622,51 @@ export default class NotorPlugin extends Plugin implements CircuitHost {
 		// to the old unencrypted localStorage location.
 		const mcpSecrets = createMcpSecretStore(this.app);
 
-		// Initialize McpHub — non-blocking, fires off connections asynchronously
-		mcpHub.initialize(this.settings, mcpSecrets).catch((e) => {
-			log.error("McpHub initialization failed", { error: String(e) });
+		// Start connecting once the workspace layout is ready rather than during
+		// onload: spawning every stdio server (plus the synchronous part of each
+		// connect — keychain reads, login-shell PATH) otherwise lands on top of
+		// plugin load and layout restore. The hub, ToolRegistry and ToolDispatcher
+		// already exist, so status subscribers and tool registration are unaffected.
+		this.app.workspace.onLayoutReady(() => {
+			timeSync("layout.mcpConnect", () => {
+				// Non-blocking — fires off connections asynchronously
+				mcpHub.initialize(this.settings, mcpSecrets).catch((e) => {
+					log.error("McpHub initialization failed", { error: String(e) });
+				});
+
+				// Subscribe MCP reconnection to the shared sleep/wake detector created
+				// in _initVaultEventHooks (runs before _initMcpHub).
+				if (this._sleepWakeDetector) {
+					mcpHub.startSleepDetection(this._sleepWakeDetector);
+				} else {
+					log.warn("SleepWakeDetector unavailable; MCP sleep reconnection disabled");
+				}
+
+				// Catch-up: after a microtask yield, register tools for any servers
+				// that connected before the onStatusChange listener was fully wired.
+				queueMicrotask(() => this._syncMcpToolRegistrations());
+			});
+			log.info("McpHub connections launching in background");
 		});
 
-		// Subscribe MCP reconnection to the shared sleep/wake detector created
-		// in _initVaultEventHooks (runs before _initMcpHub).
-		if (this._sleepWakeDetector) {
-			mcpHub.startSleepDetection(this._sleepWakeDetector);
-		} else {
-			log.warn("SleepWakeDetector unavailable; MCP sleep reconnection disabled");
-		}
+		log.info("McpHub created (connections start at layout ready)");
+	}
 
-		// Catch-up: after a microtask yield, register tools for any servers
-		// that connected before the onStatusChange listener was fully wired.
-		queueMicrotask(() => this._syncMcpToolRegistrations());
-
-		log.info("McpHub initialized (connections launching in background)");
+	/**
+	 * Resolve once the initial MCP connection attempts have settled, or after
+	 * `capMs`, whichever comes first. Used to keep MCP tools available to the
+	 * first daily-start check, as they were when connections began in onload.
+	 */
+	private waitForInitialMcpConnects(capMs: number): Promise<void> {
+		const hub = this._mcpHub;
+		if (!hub) return Promise.resolve();
+		return new Promise((resolve) => {
+			const timer = window.setTimeout(resolve, capMs);
+			void hub.whenInitialConnectsSettled().then(() => {
+				window.clearTimeout(timer);
+				resolve();
+			});
+		});
 	}
 
 	/**

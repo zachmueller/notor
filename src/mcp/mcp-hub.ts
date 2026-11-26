@@ -95,6 +95,8 @@ export class McpHub {
 
 	/** Plugin settings reference (read-only). */
 	private settings: NotorSettings | null = null;
+	/** Settles when the initial connection attempts from initialize() finish. */
+	private initialConnects: Promise<void> | null = null;
 
 	/** Resolver for credentials stored in Obsidian's SecretStorage. */
 	private secrets: McpSecretResolver | null = null;
@@ -156,15 +158,27 @@ export class McpHub {
 		});
 
 		// Fire off all connections asynchronously — do NOT await
-		for (const [serverName] of enabledServers) {
+		const attempts = enabledServers.map(([serverName]) =>
 			this.connectServer(serverName).catch((e) => {
 				log.error("Failed to connect server during initialization", {
 					serverName,
 					error: String(e),
 				});
-			});
-		}
+			}),
+		);
+		this.initialConnects = Promise.allSettled(attempts).then(() => undefined);
 		return Promise.resolve();
+	}
+
+	/**
+	 * Resolves once every server enabled at {@link initialize} has finished its
+	 * first connection attempt, whether it connected or failed (a hung handshake
+	 * settles at the handshake timeout; callers wanting a shorter wait race it
+	 * with their own timer). Resolves immediately before `initialize()` or when
+	 * no server is enabled.
+	 */
+	whenInitialConnectsSettled(): Promise<void> {
+		return this.initialConnects ?? Promise.resolve();
 	}
 
 	/**
