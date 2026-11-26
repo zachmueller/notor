@@ -1,6 +1,7 @@
 /**
- * Deferred loaders for heavy document libraries (docx, mammoth, PizZip,
- * Turndown + domino, xmldom). Only npm packages are loaded here (a bare
+ * Deferred loaders for heavy libraries: document libraries (docx, mammoth,
+ * PizZip, Turndown + domino, xmldom) and Sucrase (only needed to compile user
+ * extensions now that built-in scaffolds are precompiled at build time). Only npm packages are loaded here (a bare
  * `require` of a package also resolves under vitest); local modules that use
  * these libraries call the loaders inside their functions instead.
  *
@@ -17,6 +18,7 @@ import type TurndownService from "turndown";
 import type * as DocxModule from "docx";
 import type PizZipModule from "pizzip";
 import type * as XmldomModule from "@xmldom/xmldom";
+import type * as SucraseModule from "sucrase";
 
 /** Unwrap a CommonJS-interop default export (`import X from` semantics). */
 export function interopDefault<T>(mod: unknown): T {
@@ -57,6 +59,11 @@ export const loadDocx = once(() =>
 export const loadPizZip = once(() =>
 	// eslint-disable-next-line @typescript-eslint/no-require-imports -- deferred evaluation of a bundled module (see file header)
 	interopDefault<typeof PizZipModule>(require("pizzip")),
+);
+
+export const loadSucrase = once(() =>
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- deferred evaluation of a bundled module (see file header)
+	require("sucrase") as typeof SucraseModule,
 );
 
 export const loadXmldom = once(() =>

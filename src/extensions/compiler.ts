@@ -5,7 +5,7 @@
  * JavaScript into an AsyncFunction with injected context arguments.
  */
 
-import { transform } from "sucrase";
+import { loadSucrase } from "../utils/lazy-modules";
 import type { CompiledExtensionFn } from "./types";
 import { PRECOMPILED_STRIPPED, precompiledKey, type PrecompiledKind } from "./precompiled-scaffolds";
 
@@ -41,7 +41,7 @@ export function stripTypes(code: string): string {
 	const precompiled = lookupPrecompiled("plain", code);
 	if (precompiled !== undefined) return precompiled;
 	try {
-		const result = transform(code, {
+		const result = loadSucrase().transform(code, {
 			transforms: ["typescript"],
 		});
 		return result.code;
@@ -62,7 +62,7 @@ export function stripTypesForBlock(code: string): string {
 	const precompiled = lookupPrecompiled("block", code);
 	if (precompiled !== undefined) return precompiled;
 	try {
-		const result = transform(code, {
+		const result = loadSucrase().transform(code, {
 			transforms: ["typescript", "imports"],
 		});
 		return result.code;

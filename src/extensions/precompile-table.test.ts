@@ -52,30 +52,27 @@ describe("buildPrecompiledTable", () => {
 });
 
 describe("compiler with a populated table", () => {
-	it("returns the precompiled output without running Sucrase, and compiles misses normally", async () => {
+	it("returns the precompiled output for a hit and compiles misses with Sucrase", async () => {
 		vi.resetModules();
-		const transform = vi.fn((code: string) => ({ code: `/*sucrase*/${code}` }));
-		vi.doMock("sucrase", () => ({ transform }));
+		// Sentinels Sucrase could never produce from these sources: seeing them proves the table was used.
 		vi.doMock("./precompiled-scaffolds", async (orig) => {
 			const actual = await orig<typeof import("./precompiled-scaffolds")>();
 			return {
 				...actual,
 				PRECOMPILED_STRIPPED: new Map([
-					[actual.precompiledKey("plain", "const a: number = 1;"), "const a = 1;"],
-					[actual.precompiledKey("block", "export function render() {}"), "exports.render = function render() {}"],
+					[actual.precompiledKey("plain", "const a: number = 1;"), "/*precompiled plain*/"],
+					[actual.precompiledKey("block", "export function render() {}"), "/*precompiled block*/"],
 				]),
 			};
 		});
 		const { stripTypes, stripTypesForBlock } = await import("./compiler");
 
-		expect(stripTypes("const a: number = 1;")).toBe("const a = 1;");
-		expect(stripTypesForBlock("export function render() {}")).toBe("exports.render = function render() {}");
-		expect(transform).not.toHaveBeenCalled();
+		expect(stripTypes("const a: number = 1;")).toBe("/*precompiled plain*/");
+		expect(stripTypesForBlock("export function render() {}")).toBe("/*precompiled block*/");
+		// Same source under the other transform is a miss → real Sucrase output.
+		expect(stripTypesForBlock("const a: number = 1;")).toContain("const a = 1;");
+		expect(stripTypes("const b: string = 'x';")).toBe("const b = 'x';");
 
-		expect(stripTypes("const b: string = 'x';")).toBe("/*sucrase*/const b: string = 'x';");
-		expect(transform).toHaveBeenCalledTimes(1);
-
-		vi.doUnmock("sucrase");
 		vi.doUnmock("./precompiled-scaffolds");
 		vi.resetModules();
 	});
