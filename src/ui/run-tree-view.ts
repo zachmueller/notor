@@ -40,10 +40,14 @@ import {
 import { SessionLogReader } from "../circuits/session-log-reader";
 import { logger } from "../utils/logger";
 import { startSpan } from "../utils/startup-timing";
+import { readFirstLine } from "../utils/file-head";
 
 const log = logger("RunTreeView");
 
 export const CIRCUIT_RUN_TREE_VIEW_TYPE = "notor-run-tree-view";
+
+/** Live updates during a run rebuild the tree at most this often. */
+export const LIVE_REBUILD_INTERVAL_MS = 1_000;
 
 /** A node in the run tree, resolved from a step / sub-agent conversation header. */
 interface RunTreeNode {
@@ -88,6 +92,14 @@ export class CircuitRunTreeView extends ItemView {
 	/** conversation id → manual collapse state (ephemeral; not persisted). */
 	private readonly collapsed = new Set<string>();
 	private selectedId?: string;
+	/** Incremented per build; a build whose generation is stale stops rendering. */
+	private buildGeneration = 0;
+	/** Pending coalesced live rebuild (window timer handle). */
+	private liveRebuildTimer: number | null = null;
+	/** A live update arrived while the view was hidden; rebuild when shown. */
+	private staleWhileHidden = false;
+	/** Root (`session|conversation`) the current DOM shows; null while loading. */
+	private renderedRootKey: string | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -119,7 +131,10 @@ export class CircuitRunTreeView extends ItemView {
 			typeof s.rootSessionId === "string" ? s.rootSessionId : this.rootSessionId;
 		this.rootConversationId =
 			typeof s.rootConversationId === "string" ? s.rootConversationId : this.rootConversationId;
-		await this.rebuild();
+		// Don't await: Obsidian waits on setState while restoring the workspace,
+		// and the scan reads every step / sub-agent header. The view shows a
+		// loading state until the build finishes.
+		void this.rebuild();
 	}
 
 	async onOpen(): Promise<void> {
@@ -130,16 +145,58 @@ export class CircuitRunTreeView extends ItemView {
 		// (turn.start / turn.complete / event.emitted surface through it).
 		try {
 			const tracker = this.plugin.getWorkflowActivityTracker?.();
-			this.unsubscribe = tracker?.onChange?.(() => void this.rebuild());
+			this.unsubscribe = tracker?.onChange?.(() => this.scheduleLiveRebuild());
 		} catch (e) {
 			log.debug("Run-tree live subscription unavailable", { error: String(e) });
 		}
-		await this.rebuild();
+		// A sidebar expanding or a tab switch makes a hidden view visible again.
+		this.registerEvent(this.app.workspace.on("layout-change", () => this.rebuildIfStaleAndShown()));
+		void this.rebuild();
+	}
+
+	onResize(): void {
+		this.rebuildIfStaleAndShown();
 	}
 
 	async onClose(): Promise<void> {
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
+		if (this.liveRebuildTimer !== null) {
+			window.clearTimeout(this.liveRebuildTimer);
+			this.liveRebuildTimer = null;
+		}
+		this.buildGeneration++;
+	}
+
+	// -- Live updates ------------------------------------------------------------
+
+	/**
+	 * Coalesce activity-tracker updates (every turn start / finish / event during
+	 * a run) into at most one rebuild per {@link LIVE_REBUILD_INTERVAL_MS}, and
+	 * none while the view is hidden: it rebuilds once when shown again.
+	 */
+	private scheduleLiveRebuild(): void {
+		if (!this.isViewShown()) {
+			this.staleWhileHidden = true;
+			return;
+		}
+		if (this.liveRebuildTimer !== null) return;
+		this.liveRebuildTimer = window.setTimeout(() => {
+			this.liveRebuildTimer = null;
+			if (this.isViewShown()) void this.rebuild();
+			else this.staleWhileHidden = true;
+		}, LIVE_REBUILD_INTERVAL_MS);
+	}
+
+	private rebuildIfStaleAndShown(): void {
+		if (!this.staleWhileHidden || !this.isViewShown()) return;
+		this.staleWhileHidden = false;
+		void this.rebuild();
+	}
+
+	private isViewShown(): boolean {
+		const el = this.containerEl as HTMLElement & { isShown?: () => boolean };
+		return typeof el.isShown === "function" ? el.isShown() : true;
 	}
 
 	// -- Build -----------------------------------------------------------------
@@ -147,15 +204,48 @@ export class CircuitRunTreeView extends ItemView {
 	private async rebuild(): Promise<void> {
 		const container = this.containerEl.children[1] as HTMLElement;
 		if (!container) return;
+		const generation = ++this.buildGeneration;
+		const hasRoot = !!(this.rootSessionId || this.rootConversationId);
+		const rootKey = hasRoot ? `${this.rootSessionId ?? ""}|${this.rootConversationId ?? ""}` : "";
+
+		// All async work happens before the DOM is touched, so a live rebuild keeps
+		// the previous tree on screen until the new one is ready, and an older
+		// build that finishes late (stale generation) renders nothing. A new root
+		// shows a loading state meanwhile.
+		if (hasRoot && this.renderedRootKey !== rootKey) {
+			container.empty();
+			container.addClass("notor-run-tree-container");
+			container.createDiv({ cls: "notor-run-tree-empty", text: "Loading run tree…" });
+			this.treeEl = undefined;
+			this.renderedRootKey = null;
+		}
+
+		let roots: RunTreeNode[] = [];
+		let scanFailed = false;
+		if (hasRoot) {
+			try {
+				roots = this.buildRoots(await this.scanHeaders());
+				// Overlay code steps (no conversation file — read from each session's
+				// log) so the run-tree shows deterministic steps + their
+				// `orchestration.log` logic-path logs, interleaved by hop order.
+				if (roots.length > 0) await this.overlayCodeSteps(roots);
+			} catch (e) {
+				log.warn("Run-tree scan failed", { error: String(e) });
+				scanFailed = true;
+			}
+		}
+		if (generation !== this.buildGeneration) return;
+
 		container.empty();
 		container.addClass("notor-run-tree-container");
+		this.renderedRootKey = rootKey;
 
 		const header = container.createDiv({ cls: "notor-run-tree-header" });
 		header.createEl("h3", { text: "Run tree" });
 
 		this.treeEl = container.createDiv({ cls: "notor-run-tree" });
 
-		if (!this.rootSessionId && !this.rootConversationId) {
+		if (!hasRoot) {
 			this.treeEl.createDiv({
 				cls: "notor-run-tree-empty",
 				text: "No run selected. Open the run tree from a run_circuit / sub-agent card, the activity indicator, or a progress Notice.",
@@ -163,16 +253,11 @@ export class CircuitRunTreeView extends ItemView {
 			return;
 		}
 
-		let headers: Map<string, ScannedHeader>;
-		try {
-			headers = await this.scanHeaders();
-		} catch (e) {
-			log.warn("Run-tree scan failed", { error: String(e) });
+		if (scanFailed) {
 			this.treeEl.createDiv({ cls: "notor-run-tree-empty", text: "Could not read the run history." });
 			return;
 		}
 
-		const roots = this.buildRoots(headers);
 		if (roots.length === 0) {
 			this.treeEl.createDiv({
 				cls: "notor-run-tree-empty",
@@ -180,11 +265,6 @@ export class CircuitRunTreeView extends ItemView {
 			});
 			return;
 		}
-
-		// Overlay code steps (no conversation file — read from each session's log)
-		// so the run-tree shows deterministic steps + their `orchestration.log`
-		// logic-path logs, interleaved with conversation steps by hop order.
-		await this.overlayCodeSteps(roots);
 
 		// Aggregate rollup header (whole-run token sums from the scanned step headers).
 		this.renderRollupHeader(header, roots);
@@ -214,9 +294,8 @@ export class CircuitRunTreeView extends ItemView {
 			// Only orchestration step + sub-agent conversation files (the hidden ones).
 			if (!fname.startsWith("orchestration_step_") && !fname.includes("_subagent_")) continue;
 			try {
-				const content = await adapter.read(file);
-				const nl = content.indexOf("\n");
-				const headerLine = nl >= 0 ? content.slice(0, nl) : content;
+				// Only the header line is used: read just the start of the file.
+				const headerLine = await readFirstLine(adapter, file);
 				if (!headerLine.trim()) continue;
 				const h = JSON.parse(headerLine) as ScannedHeader;
 				h.schema_version ??= 1;
