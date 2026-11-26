@@ -143,7 +143,7 @@ export function parseImageDimensions(
 // ---------------------------------------------------------------------------
 
 async function convertWebpToPng(buffer: Buffer): Promise<{ buffer: Buffer; width: number; height: number }> {
-	const blob = new Blob([buffer], { type: "image/webp" });
+	const blob = new Blob([new Uint8Array(buffer)], { type: "image/webp" });
 	const url = URL.createObjectURL(blob);
 
 	try {

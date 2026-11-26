@@ -105,7 +105,7 @@ interface CompressionResult {
  * Load a buffer into an HTMLImageElement and wait for it to decode.
  */
 async function loadImage(buffer: Buffer, mediaType: ImageMediaType): Promise<HTMLImageElement> {
-	const blob = new Blob([buffer], { type: mediaType });
+	const blob = new Blob([new Uint8Array(buffer)], { type: mediaType });
 	const url = URL.createObjectURL(blob);
 
 	try {
