@@ -52,12 +52,13 @@ const NO_TEMP_DIR_ENV = { TMPDIR: "/nonexistent/notor-guard-tmp", TMP: "/nonexis
 /** The first line that names the error (esbuild prints "✘ [ERROR] …"), for the report table. */
 function firstErrorLine(message: string): string {
 	const lines = message.split("\n").map((l) => l.trim()).filter(Boolean);
-	return (lines.find((l) => /\[ERROR\]|Error:/.test(l)) ?? lines[0] ?? "").slice(0, 300);
+	return (lines.find((l) => /\[ERROR\]|Error:|error TS\d+/.test(l)) ?? lines[0] ?? "").slice(0, 300);
 }
 
 function build(root: string, env?: Record<string, string>): string {
 	const r = run("npm", ["run", "build"], root, { env });
-	if (r.status !== 0) throw new Error(`npm run build failed (${r.status}):\n${r.stderr || r.stdout}`);
+	// Both streams: tsc reports type errors on stdout while npm writes to stderr.
+	if (r.status !== 0) throw new Error(`npm run build failed (${r.status}):\n${r.stdout}\n${r.stderr}`);
 	const mainJs = join(root, "build", "main.js");
 	if (!existsSync(mainJs)) throw new Error(`npm run build produced no ${mainJs}`);
 	return mainJs;
@@ -161,6 +162,27 @@ export async function checkArtifact(
 				? `A clean checkout of ${ref} rebuilds main.js byte-for-byte`
 				: `A clean checkout of ${ref} builds a different main.js; commit everything and npm ci before releasing`,
 			detail: clean === m.sha256 ? undefined : `${m.sha256} (this tree) vs ${clean} (clean ${ref})`,
+		});
+
+		// The scanner's build verification failed on 0.12.3 and 0.12.4 with only npm's
+		// notices captured: it doesn't build from our lockfile. A lockless install pulled
+		// typescript 5.9 (Buffer no longer a BlobPart) and dropped the undeclared `yaml`,
+		// so `tsc -noEmit` failed. This build only has to succeed; its main.js differs.
+		const fresh = await withWorktree(ctx.repoRoot, ref, { install: "fresh" }, async (dir) => {
+			try {
+				build(dir, NO_TEMP_DIR_ENV);
+				return null;
+			} catch (e) {
+				return firstErrorLine(String(e instanceof Error ? e.message : e));
+			}
+		});
+		add({
+			id: "fresh-install-build",
+			severity: fresh === null ? "INFO" : "BLOCK",
+			title: fresh === null
+				? `A clean checkout of ${ref} builds with freshly resolved dependencies (no lockfile)`
+				: `A clean checkout of ${ref} fails to build with freshly resolved dependencies (no lockfile); the scanner's build verification will fail`,
+			detail: fresh ?? undefined,
 		});
 	}
 	return { findings, measured: { artifact: m } };

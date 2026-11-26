@@ -47,7 +47,7 @@ Exit status is 1 when anything BLOCKs.
 | 1 | **Freshness** (`lib/lint.ts`) | — | WARN if the repo pins an older `eslint-plugin-obsidianmd`/`typescript-eslint` than the latest. Lint runs with the latest, from a cached toolchain in `$TMPDIR/notor-review-guard/`, plus overrides in `scanner.eslint.config.mjs` where a scorecard showed the scanner lagging (see below). |
 | 2 | **Scanner-equivalent lint** (`scanner.eslint.config.mjs`, `lib/scope.ts`) | `eslint-comments/*` (confirmed); parse errors; presumed: `no-unsanitized/*`, `no-eval`, `no-implied-eval`, obsidianmd error-level rules | WARN for everything the scorecard shows as a warning; INFO for rules it never shows (`ui/sentence-case`, `no-deprecated`) |
 | 3 | **Restricted directives** (`lib/restricted-disables.ts`) | Disabling a rule on the plugin's restricted list, a bare disable, a whole-file disable with no matching enable, a disable without `-- reason` | WARN for the same outside the scanner's scope |
-| 4 | **Built artifact** (`lib/artifact.ts`) | A clean checkout doesn't build with no writable temp directory, or doesn't rebuild `main.js` byte-for-byte; a published release's `main.js` digest differs from the build | WARN: over 5 MB (Sync Standard limit), unlisted WASM, ES5 helpers / `eval` / `new Function` / `atob` / `btoa` counts that rose, new hosts. INFO otherwise |
+| 4 | **Built artifact** (`lib/artifact.ts`) | A clean checkout doesn't rebuild `main.js` byte-for-byte (`npm ci`, no writable temp dir); a clean checkout doesn't build with freshly resolved dependencies (no lockfile); a published release's `main.js` digest differs from the build | WARN: over 5 MB (Sync Standard limit), unlisted WASM, ES5 helpers / `eval` / `new Function` / `atob` / `btoa` counts that rose, new hosts. INFO otherwise |
 | 5 | **Advisories** (`lib/audit.ts`) | — (the scorecard treats them as warnings) | WARN for advisories new since the baseline, high/critical first |
 | 6 | **Release metadata** (`lib/metadata.ts`) | Manifest fields missing; `manifest.json` / `package.json` / `versions.json` / tag disagree; not semver; `isDesktopOnly` false while `src` imports Node modules; a published release missing `main.js` or `manifest.json` | — |
 | — | **CSS** (`lib/css.ts`) | — | WARN for `!important` in `styles.css` |
@@ -85,11 +85,18 @@ first, then **Info**, then the preview-scan prompt.
   or fix `versions.json` by hand.
 - **Reproducible build failed:** commit everything, `npm ci`, and rerun. A lockfile and
   `node_modules` out of sync is the usual cause.
-- **Clean checkout fails to build without a writable temp directory:** the clean rebuild
-  runs with `TMPDIR`/`TMP`/`TEMP` pointing nowhere, because the 0.12.3 scorecard reported
-  "Build verification failed while running the build script" for a build that wrote to
-  `os.tmpdir()` (the precompile-scaffolds plugin) and passed locally. Keep build steps in
-  memory or under the repo.
+- **Clean checkout fails to build with freshly resolved dependencies:** the scanner's
+  build verification doesn't use `package-lock.json`. 0.12.3 and 0.12.4 failed it
+  ("Build verification failed while running the build script", output: only npm's
+  `npm notice run …` lines, because `tsc` errors go to stdout). A lockless install pulled
+  TypeScript 5.9 (a Node `Buffer` is no longer a `BlobPart`) and no longer hoisted the
+  undeclared `yaml` that tests import. Fix the type errors so they pass on the newest
+  versions in range, and declare every package you import. The guard prints the first
+  `error TS…` line.
+- **Clean checkout fails to build without a writable temp directory:** both clean builds
+  run with `TMPDIR`/`TMP`/`TEMP` pointing nowhere, in case the scanner's sandbox has no
+  temp dir (unconfirmed; the precompile-scaffolds plugin used to write there). Keep build
+  steps in memory or under the repo.
 - **Rising warnings (▲):** fix the new instances from this release (e.g. `window.setTimeout`
   instead of `setTimeout`; never store the bare function, see the renderer timer memory).
 - **Unlisted WASM / new hosts:** document them in the README's network/permissions

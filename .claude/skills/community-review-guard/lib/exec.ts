@@ -66,13 +66,19 @@ export function previousReleaseTag(repoRoot: string, version: string): string | 
 export async function withWorktree<T>(
 	repoRoot: string,
 	ref: string,
-	opts: { install: boolean },
+	opts: { install: boolean | "fresh" },
 	fn: (dir: string) => Promise<T>,
 ): Promise<T> {
 	const dir = mkdtempSync(join(tmpdir(), "notor-guard-wt-"));
 	runOk("git", ["worktree", "add", "--detach", "--force", dir, ref], repoRoot);
 	try {
-		if (opts.install) {
+		if (opts.install === "fresh") {
+			// Resolve every range anew, ignoring package-lock.json, as the scanner's
+			// build verification evidently does (see the fresh-install check).
+			process.stderr.write(`[guard] npm install without the lockfile in worktree at ${ref}…\n`);
+			rmSync(join(dir, "package-lock.json"), { force: true });
+			runOk("npm", ["install", "--no-audit", "--no-fund", "--no-package-lock", "--loglevel=error"], dir);
+		} else if (opts.install) {
 			process.stderr.write(`[guard] npm ci in worktree at ${ref}…\n`);
 			runOk("npm", ["ci", "--no-audit", "--no-fund", "--loglevel=error"], dir);
 		}
