@@ -75,8 +75,8 @@ function mulberry32(seed: number): () => number {
 function sampleDeciles(rand: () => number, d: Deciles): number {
 	const x = rand() * 10;
 	const i = Math.min(9, Math.floor(x));
-	const lo = d[i]!;
-	const hi = d[i + 1]!;
+	const lo = d[i];
+	const hi = d[i + 1];
 	return Math.round(lo + (hi - lo) * (x - i));
 }
 
@@ -138,7 +138,7 @@ function conversationJsonl(
 	targetLines?: number,
 ): string {
 	const lines = [JSON.stringify({ schema_version: 1, provider_id: "local", model_id: "fixture-model", total_input_tokens: 0, total_output_tokens: 0, estimated_cost: null, mode: "act", ...header })];
-	let bytes = lines[0]!.length + 1;
+	let bytes = lines[0].length + 1;
 	const perMessage = targetLines ? Math.max(200, Math.floor(targetBytes / Math.max(1, targetLines - 1))) : 4000;
 	let i = 0;
 	while (bytes < targetBytes && (!targetLines || lines.length < targetLines)) {
@@ -338,7 +338,7 @@ export function generateStartupFixture(vaultDir: string, opts: StartupFixtureOpt
 		write(path.join(dir, ".tasks", "tasks.json"), "[]");
 		write(path.join(dir, ".scratchpad", "notes.txt"), "scratch\n");
 	}
-	const runTreeRootSessionId = sessionIds[0]!;
+	const runTreeRootSessionId = sessionIds[0];
 
 	// --- History: conversations, step conversations, sub-agents -------------
 	const convIds: string[] = [];
@@ -389,7 +389,7 @@ export function generateStartupFixture(vaultDir: string, opts: StartupFixtureOpt
 
 	for (let i = 0; i < n(P.subAgentConversations.count); i++) {
 		const parent = i % convIds.length;
-		const parentFile = convFiles[parent]!;
+		const parentFile = convFiles[parent];
 		const parentTs = parentFile.slice(0, 15);
 		const id = uuid(rand);
 		const createdMs = NOW - Math.floor(rand() * 80) * DAY;
@@ -405,7 +405,7 @@ export function generateStartupFixture(vaultDir: string, opts: StartupFixtureOpt
 	const ckConvs = Math.min(n(P.checkpoints.conversations), convIds.length);
 	const ckTotal = n(P.checkpoints.count);
 	for (let i = 0; i < ckTotal; i++) {
-		const convId = convIds[i % ckConvs]!;
+		const convId = convIds[i % ckConvs];
 		const id = uuid(rand);
 		const size = sampleDeciles(rand, P.checkpoints.sizes);
 		write(path.join(checkpointDir, convId, `${id}.json`), JSON.stringify({

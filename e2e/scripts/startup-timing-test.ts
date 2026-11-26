@@ -46,7 +46,7 @@ import {
 
 function arg(name: string, fallback: string): string {
 	const i = process.argv.indexOf(`--${name}`);
-	return i >= 0 && process.argv[i + 1] && !process.argv[i + 1]!.startsWith("--") ? process.argv[i + 1]! : fallback;
+	return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith("--") ? process.argv[i + 1] : fallback;
 }
 const flag = (name: string) => process.argv.includes(`--${name}`);
 
@@ -83,7 +83,7 @@ async function findAppPage(browser: Browser, timeout = 60_000): Promise<Page> {
 				} catch { /* not ready */ }
 			}
 		}
-		await new Promise((r) => setTimeout(r, 250));
+		await new Promise((r) => window.setTimeout(r, 250));
 	}
 	throw new Error("Obsidian app page not found");
 }
@@ -94,7 +94,7 @@ async function pollUntil(page: Page, expr: string, timeout: number, interval = 2
 		try {
 			if (await page.evaluate(expr)) return true;
 		} catch { /* navigation / reload */ }
-		await new Promise((r) => setTimeout(r, interval));
+		await new Promise((r) => window.setTimeout(r, interval));
 	}
 	return false;
 }
@@ -150,7 +150,7 @@ async function withObsidian<T>(fn: (page: Page) => Promise<T>): Promise<T> {
 	} finally {
 		if (browser) await browser.close().catch(() => {});
 		if (obsidian) await closeObsidian(obsidian).catch(() => {});
-		await new Promise((r) => setTimeout(r, 1_500));
+		await new Promise((r) => window.setTimeout(r, 1_500));
 	}
 }
 
@@ -193,7 +193,7 @@ async function measureOnce(variant: WorkspaceVariant, run: number, info: Startup
 		const metrics: Metrics = {};
 
 		if (variant === "collapsed") {
-			const chat = await page.evaluate(`(async () => {
+			const chat = await page.evaluate<number>(`(async () => {
 				const t0 = performance.now();
 				window.app.workspace.leftSplit.expand();
 				const deadline = Date.now() + ${RESTORE_TIMEOUT_MS};
@@ -203,11 +203,11 @@ async function measureOnce(variant: WorkspaceVariant, run: number, info: Startup
 					await new Promise((r) => setTimeout(r, 50));
 				}
 				return -1;
-			})()`) as number;
+			})()`);
 			if (chat < 0) notes.push("chat restore did not finish after expanding the left sidebar");
 			else metrics["restore.chatOnSidebarOpen"] = chat;
 
-			const tree = await page.evaluate(`(async () => {
+			const tree = await page.evaluate<number>(`(async () => {
 				const t0 = performance.now();
 				window.app.workspace.rightSplit.expand();
 				const deadline = Date.now() + ${RESTORE_TIMEOUT_MS};
@@ -217,17 +217,17 @@ async function measureOnce(variant: WorkspaceVariant, run: number, info: Startup
 					await new Promise((r) => setTimeout(r, 50));
 				}
 				return -1;
-			})()`) as number;
+			})()`);
 			if (tree < 0) notes.push("run-tree scan not seen after expanding the right sidebar");
 			else metrics["restore.runTreeOnSidebarOpen"] = tree;
 			await page.waitForTimeout(1_000);
 		}
 
-		const entries = await page.evaluate(COLLECT_ENTRIES) as RawEntry[];
+		const entries = await page.evaluate<RawEntry[]>(COLLECT_ENTRIES);
 
 		let obsidianStartup: unknown = null;
 		try {
-			const json = await page.evaluate(`window.handleCli ? window.handleCli(["dev:startup", "format=json"]) : null`) as string | null;
+			const json = await page.evaluate<string | null>(`window.handleCli ? window.handleCli(["dev:startup", "format=json"]) : null`);
 			obsidianStartup = json ? JSON.parse(json) : null;
 		} catch (e) {
 			notes.push(`dev:startup unavailable: ${String(e)}`);
@@ -243,7 +243,7 @@ async function measureOnce(variant: WorkspaceVariant, run: number, info: Startup
 		metrics["at.layoutReady"] = mark("layoutReady");
 		metrics["at.apiReady"] = mark("apiReady");
 		metrics["at.settled"] = mark("settled");
-		metrics["settledAfterLayoutReady"] = metrics["at.settled"]! - metrics["at.layoutReady"]!;
+		metrics["settledAfterLayoutReady"] = metrics["at.settled"] - metrics["at.layoutReady"];
 
 		const names = [...new Set(entries.filter((e) => e.kind === "measure").map((e) => e.name))];
 		for (const name of names) {
@@ -276,7 +276,7 @@ function median(xs: number[]): number {
 	const v = xs.filter((x) => !Number.isNaN(x)).sort((a, b) => a - b);
 	if (v.length === 0) return NaN;
 	const m = Math.floor(v.length / 2);
-	return v.length % 2 ? v[m]! : (v[m - 1]! + v[m]!) / 2;
+	return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
 }
 
 function medians(runs: RunResult[]): Metrics {
@@ -305,8 +305,8 @@ function printTable(byVariant: Record<string, Metrics>): void {
 	console.log("\nMedians (ms; .n = call count; at.* = ms since renderer time origin)\n");
 	console.log("".padEnd(w) + variants.map((v) => v.padStart(12)).join(""));
 	for (const k of HEADLINE) {
-		if (variants.every((v) => byVariant[v]![k] === undefined)) continue;
-		console.log(k.padEnd(w) + variants.map((v) => fmt(byVariant[v]![k]).padStart(12)).join(""));
+		if (variants.every((v) => byVariant[v][k] === undefined)) continue;
+		console.log(k.padEnd(w) + variants.map((v) => fmt(byVariant[v][k]).padStart(12)).join(""));
 	}
 }
 
