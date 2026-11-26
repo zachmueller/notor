@@ -1,7 +1,7 @@
 {
-	"ref": "0.12.3",
-	"version": "0.12.3",
-	"measuredAt": "2026-11-26T03:17:29.294Z",
+	"ref": "0.12.4",
+	"version": "0.12.4",
+	"measuredAt": "2026-11-26T04:18:53.821Z",
 	"tools": {
 		"eslint-plugin-obsidianmd": "0.6.0",
 		"typescript-eslint": "8.74.0",
