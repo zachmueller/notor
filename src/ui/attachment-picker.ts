@@ -37,7 +37,7 @@ import {
 	readExternalFile,
 	isDuplicate,
 } from "../context/attachment";
-import mammoth from "mammoth";
+import { loadMammoth } from "../utils/lazy-modules";
 import { detectMediaFormat } from "../media/format-detector";
 import { processImage } from "../media/image-processor";
 import { processPdf } from "../media/pdf-processor";
@@ -1026,7 +1026,7 @@ export async function readExternalDocxFile(absolutePath: string): Promise<string
 	// eslint-disable-next-line @typescript-eslint/no-require-imports -- Node.js fs has no static import path in Obsidian's plugin sandbox
 	const fs = require("fs") as typeof import("fs");
 	const buffer = Buffer.from(fs.readFileSync(absolutePath));
-	const { value } = await mammoth.extractRawText({ buffer });
+	const { value } = await loadMammoth().extractRawText({ buffer });
 	return value;
 }
 

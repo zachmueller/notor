@@ -9,7 +9,7 @@
  * @see private/extract_docx_comments-impl-plan.md — implementation plan
  */
 
-import { DOMParser } from "@xmldom/xmldom";
+import { loadXmldom } from "../utils/lazy-modules";
 import { createHash } from "crypto";
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ function formatDate(isoDate: string): string {
  * Parse `word/comments.xml` into raw comment objects.
  */
 export function parseCommentsXml(xml: string): RawComment[] {
-	const doc = new DOMParser().parseFromString(xml, "text/xml");
+	const doc = new (loadXmldom().DOMParser)().parseFromString(xml, "text/xml");
 	const comments = doc.getElementsByTagNameNS(W_NS, "comment");
 	const result: RawComment[] = [];
 
@@ -142,7 +142,7 @@ export function parseCommentsExtendedXml(xml: string): {
 		return { resolvedIds: new Set(), threadingMap: new Map() };
 	}
 
-	const doc = new DOMParser().parseFromString(xml, "text/xml");
+	const doc = new (loadXmldom().DOMParser)().parseFromString(xml, "text/xml");
 	const elements = doc.getElementsByTagNameNS(W15_NS, "commentEx");
 	const resolvedIds = new Set<string>();
 	const threadingMap = new Map<string, string>();
@@ -184,7 +184,7 @@ export function extractQuotedText(
 	documentXml: string,
 	commentId: string
 ): string {
-	const doc = new DOMParser().parseFromString(documentXml, "text/xml");
+	const doc = new (loadXmldom().DOMParser)().parseFromString(documentXml, "text/xml");
 	const collected: string[] = [];
 	let capturing = false;
 
@@ -227,7 +227,7 @@ export function extractQuotedText(
 export function parsePeopleXml(xml: string): Map<string, string> {
 	if (!xml || xml.trim() === "") return new Map();
 
-	const doc = new DOMParser().parseFromString(xml, "text/xml");
+	const doc = new (loadXmldom().DOMParser)().parseFromString(xml, "text/xml");
 	const people = doc.getElementsByTagNameNS(W15_NS, "person");
 	const map = new Map<string, string>();
 

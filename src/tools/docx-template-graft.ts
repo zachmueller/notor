@@ -10,8 +10,8 @@
  * resolution, and Content_Types merging.
  */
 
-import PizZip from "pizzip";
-import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
+import type PizZip from "pizzip";
+import { loadXmldom } from "../utils/lazy-modules";
 
 /**
  * Graft generated DOCX body content into a template, preserving the
@@ -24,6 +24,7 @@ export async function graftIntoTemplate(
 	generatedZip: PizZip,
 	templateZip: PizZip,
 ): Promise<void> {
+	const { DOMParser, XMLSerializer } = loadXmldom();
 	const parser = new DOMParser();
 	const serializer = new XMLSerializer();
 

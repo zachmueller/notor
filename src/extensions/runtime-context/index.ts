@@ -28,15 +28,12 @@ import { buildCircuitUtils } from "./circuit-utils";
 import { buildVoiceUtils } from "./voice-utils";
 import { RUNTIME_API_VERSION } from "./version";
 
-// Bundled libraries (for buildLibs)
-import mammoth from "mammoth";
-import TurndownService from "turndown";
+// Bundled libraries (for buildLibs). The heavy document libraries load on first
+// access through lazy-modules.ts so they don't evaluate during plugin load.
 import { gfm } from "turndown-plugin-gfm";
-import * as docx from "docx";
-import PizZip from "pizzip";
 import { marked } from "marked";
-import * as xmldom from "@xmldom/xmldom";
 import { Cron } from "croner";
+import { loadDocx, loadMammoth, loadPizZip, loadTurndown, loadXmldom } from "../../utils/lazy-modules";
 
 // Node built-ins exposed to extensions (externalized by esbuild's node target)
 import * as fs from "node:fs";
@@ -107,20 +104,22 @@ export function buildUtils(plugin: NotorPlugin, conversationId?: string, sourceE
 /**
  * Build the `libs` object exposing bundled libraries to extensions.
  *
- * `unpdf` is a lazy wrapper preserving the deferred loading pattern
- * from `src/media/pdf-processor.ts` to avoid regressing startup time.
+ * `unpdf` / `exceljs` are async thunks preserving the deferred loading pattern
+ * from `src/media/pdf-processor.ts`. `mammoth`, `Turndown`, `docx`, `PizZip` and
+ * `xmldom` are lazy getters: same synchronous API for extensions, but each
+ * library evaluates on first access instead of at plugin load.
  */
 export function buildLibs(): ExtensionLibs {
 	return {
-		mammoth,
-		Turndown: TurndownService,
+		get mammoth() { return loadMammoth(); },
+		get Turndown() { return loadTurndown(); },
 		turndownGfm: { gfm },
 		unpdf: () => import("unpdf"),
 		exceljs: () => import("exceljs"),
-		docx,
-		PizZip,
+		get docx() { return loadDocx(); },
+		get PizZip() { return loadPizZip(); },
 		marked,
-		xmldom,
+		get xmldom() { return loadXmldom(); },
 		croner: { Cron },
 		fs,
 		crypto,
