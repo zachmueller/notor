@@ -129,7 +129,10 @@ interface RunResult {
 
 function prepareVault(variant: WorkspaceVariant, info: StartupFixtureInfo): void {
 	fs.rmSync(VAULT_DIR, { recursive: true, force: true });
-	fs.cpSync(TEMPLATE_DIR, VAULT_DIR, { recursive: true });
+	// Preserve mtimes: Obsidian's metadata cache (IndexedDB, keyed by vault id)
+	// is reused only for files whose mtime/size are unchanged, so a plain copy
+	// would make every launch re-index the whole vault, unlike a real restart.
+	fs.cpSync(TEMPLATE_DIR, VAULT_DIR, { recursive: true, preserveTimestamps: true });
 	fs.writeFileSync(
 		path.join(VAULT_DIR, ".obsidian", "workspace.json"),
 		JSON.stringify(buildWorkspace(variant, info), null, 2),
