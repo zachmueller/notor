@@ -57,6 +57,8 @@ const MCP = Number(arg("mcp", "10"));
 const LOG_LEVEL = arg("log-level", "debug") as "debug" | "info" | "warn" | "error";
 const LABEL = arg("label", "run");
 const CDP_PORT = Number(arg("cdp-port", "9231"));
+/** Clear the daily-housekeeping marker so every launch runs the first-of-day pass. */
+const DAILY_PASS = flag("daily-pass");
 
 const TMP = fs.realpathSync(os.tmpdir());
 const TEMPLATE_DIR = path.join(TMP, "notor-startup-fixture");
@@ -158,6 +160,7 @@ async function withObsidian<T>(fn: (page: Page) => Promise<T>): Promise<T> {
 async function primeCommunityPlugins(info: StartupFixtureInfo): Promise<void> {
 	prepareVault("collapsed", info);
 	await withObsidian(async (page) => {
+		if (DAILY_PASS) await page.evaluate(`window.app.saveLocalStorage("notor-history-retention-last-run", null)`);
 		const enabled = await page.evaluate("window.app.plugins.isEnabled()");
 		if (enabled) return;
 		console.log("[prime] Enabling community plugins for the fixture vault");
@@ -233,6 +236,20 @@ async function measureOnce(variant: WorkspaceVariant, run: number, info: Startup
 				automations: p.getExtensionManager().getAutomations().length,
 			};
 		})()`);
+		if (DAILY_PASS) {
+			const left = await page.evaluate<{ sessions: number; steps: number }>(`(async () => {
+				const a = window.app.vault.adapter;
+				const p = window.app.plugins.plugins.notor;
+				const root = "notor/orchestrations/sessions";
+				const sessions = (await a.exists(root)) ? (await a.list(root)).folders.length : -1;
+				const h = p.settings.history_path.replace(/\\/+$/, "");
+				const steps = (await a.list(h)).files.filter((f) => f.split("/").pop().startsWith("orchestration_step_")).length;
+				return { sessions, steps };
+			})()`);
+			metrics["after.sessions"] = left.sessions;
+			metrics["after.stepConversations"] = left.steps;
+			await page.evaluate(`window.app.saveLocalStorage("notor-history-retention-last-run", null)`);
+		}
 		metrics["loaded.tools"] = counts.tools;
 		metrics["loaded.extensionTools"] = counts.extensionTools;
 		metrics["loaded.automations"] = counts.automations;
@@ -312,6 +329,8 @@ const HEADLINE = [
 	"chat.factory.ms", "chat.list.ms", "chat.switchById.ms", "chat.load.ms", "chat.paint.ms",
 	"restore.chatOnSidebarOpen", "restore.runTreeOnSidebarOpen",
 	"loaded.tools", "loaded.extensionTools", "loaded.automations",
+	"layout.checkpointAge.ms", "layout.circuitRetention.ms", "layout.historyOrphans.ms",
+	"after.sessions", "after.stepConversations",
 ];
 
 function printTable(byVariant: Record<string, Metrics>): void {

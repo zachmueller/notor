@@ -115,9 +115,11 @@ function markdownFiller(rand: () => number, n: number): string {
 	return parts.join("").slice(0, Math.max(0, n));
 }
 
-function write(file: string, content: string | Buffer): void {
+function write(file: string, content: string | Buffer, mtimeMs?: number): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	fs.writeFileSync(file, content);
+	// Realistic modification times: retention and cleanup rules key off them.
+	if (mtimeMs !== undefined) fs.utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
 }
 
 // ---------------------------------------------------------------------------
@@ -321,11 +323,12 @@ export function generateStartupFixture(vaultDir: string, opts: StartupFixtureOpt
 		sessionIds.push(sid);
 		const startedMs = NOW - Math.floor(rand() * 200) * DAY;
 		const dir = path.join(sessionsRoot, sid);
+		const lastWriteMs = startedMs + 10 * 60_000;
 		write(path.join(dir, "session.json"), JSON.stringify({
 			session_id: sid, flow_name: circuitNames[i % circuitNames.length], status: "completed",
 			iteration: 3, active_step: null, started_at: new Date(startedMs).toISOString(),
 			prompt: "Fixture objective", parent_session_id: null, origin: "user", schema_version: 1,
-		}, null, 2));
+		}, null, 2), lastWriteMs);
 		const logBytes = sampleDeciles(rand, P.circuitSessions.logSizes);
 		const logLines: string[] = [];
 		let b = 0;
@@ -334,7 +337,7 @@ export function generateStartupFixture(vaultDir: string, opts: StartupFixtureOpt
 			logLines.push(line);
 			b += line.length + 1;
 		}
-		write(path.join(dir, "session-log.jsonl"), logLines.join("\n") + "\n");
+		write(path.join(dir, "session-log.jsonl"), logLines.join("\n") + "\n", lastWriteMs);
 		write(path.join(dir, ".tasks", "tasks.json"), "[]");
 		write(path.join(dir, ".scratchpad", "notes.txt"), "scratch\n");
 	}
@@ -363,7 +366,7 @@ export function generateStartupFixture(vaultDir: string, opts: StartupFixtureOpt
 		const content = isRestored
 			? conversationJsonl(rand, header, P.restored.bytes, P.restored.lines)
 			: conversationJsonl(rand, header, sampleDeciles(rand, P.conversations.sizes));
-		write(path.join(historyDir, file), content);
+		write(path.join(historyDir, file), content, updatedMs);
 	}
 
 	const stepCount = n(P.stepConversations.count);
@@ -384,7 +387,7 @@ export function generateStartupFixture(vaultDir: string, opts: StartupFixtureOpt
 			orchestration_edges: edges,
 		};
 		if (inRoot) prevRootStep = id;
-		write(path.join(historyDir, `orchestration_step_${id}.jsonl`), conversationJsonl(rand, header, sampleDeciles(rand, P.stepConversations.sizes)));
+		write(path.join(historyDir, `orchestration_step_${id}.jsonl`), conversationJsonl(rand, header, sampleDeciles(rand, P.stepConversations.sizes)), createdMs);
 	}
 
 	for (let i = 0; i < n(P.subAgentConversations.count); i++) {
@@ -398,7 +401,7 @@ export function generateStartupFixture(vaultDir: string, opts: StartupFixtureOpt
 			created_at: new Date(createdMs).toISOString(), updated_at: new Date(createdMs).toISOString(),
 			parent_conversation_id: convIds[parent],
 		};
-		write(path.join(historyDir, `${parentTs}_${convIds[parent]}_subagent_${id}.jsonl`), conversationJsonl(rand, header, sampleDeciles(rand, P.subAgentConversations.sizes)));
+		write(path.join(historyDir, `${parentTs}_${convIds[parent]}_subagent_${id}.jsonl`), conversationJsonl(rand, header, sampleDeciles(rand, P.subAgentConversations.sizes)), createdMs);
 	}
 
 	// --- Checkpoints (not read at startup today; present for disk realism) --
@@ -408,11 +411,12 @@ export function generateStartupFixture(vaultDir: string, opts: StartupFixtureOpt
 		const convId = convIds[i % ckConvs];
 		const id = uuid(rand);
 		const size = sampleDeciles(rand, P.checkpoints.sizes);
+		const ckMs = NOW - (i % 60) * DAY;
 		write(path.join(checkpointDir, convId, `${id}.json`), JSON.stringify({
 			id, conversation_id: convId, note_path: firstNote, content: markdownFiller(rand, size),
-			timestamp: new Date(NOW - (i % 60) * DAY).toISOString(), description: "fixture", tool_name: "write_note",
+			timestamp: new Date(ckMs).toISOString(), description: "fixture", tool_name: "write_note",
 			message_id: uuid(rand), schema_version: 1,
-		}, null, 2));
+		}, null, 2), ckMs);
 	}
 
 	// --- Plugin settings -----------------------------------------------------
