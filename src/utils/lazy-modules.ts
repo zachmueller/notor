@@ -42,31 +42,25 @@ export function once<T>(load: () => T): () => T {
 /* Each require() below is resolved and bundled by esbuild; it only defers evaluation. */
 
 export const loadMammoth = once(() =>
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- deferred evaluation of a bundled module (see file header)
 	interopDefault<typeof MammothModule>(require("mammoth")),
 );
 
 export const loadTurndown = once(() =>
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- deferred evaluation of a bundled module (see file header)
 	interopDefault<typeof TurndownService>(require("turndown")),
 );
 
 export const loadDocx = once(() =>
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- deferred evaluation of a bundled module (see file header)
 	require("docx") as typeof DocxModule,
 );
 
 export const loadPizZip = once(() =>
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- deferred evaluation of a bundled module (see file header)
 	interopDefault<typeof PizZipModule>(require("pizzip")),
 );
 
 export const loadSucrase = once(() =>
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- deferred evaluation of a bundled module (see file header)
 	require("sucrase") as typeof SucraseModule,
 );
 
 export const loadXmldom = once(() =>
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- deferred evaluation of a bundled module (see file header)
 	require("@xmldom/xmldom") as typeof XmldomModule,
 );

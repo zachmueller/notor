@@ -46,7 +46,7 @@
 		"@types/picomatch": "^4.0.3",
 		"@types/turndown": "^5.0.6",
 		"esbuild": "0.25.5",
-		"eslint-plugin-obsidianmd": "0.4.2",
+		"eslint-plugin-obsidianmd": "0.6.0",
 		"globals": "14.0.0",
 		"jiti": "2.6.1",
 		"jsdom": "^29.0.1",
@@ -54,7 +54,7 @@
 		"tslib": "2.4.0",
 		"tsx": "^4.19.0",
 		"typescript": "^5.8.3",
-		"typescript-eslint": "8.72.1",
+		"typescript-eslint": "8.74.0",
 		"vitest": "^4.1.0"
 	},
 	"dependencies": {

@@ -272,11 +272,15 @@ export async function runTest(
 	let collector: LogCollector | undefined;
 
 	// Signal handling for graceful cleanup on Ctrl+C
-	const signalCleanup = async () => {
+	const cleanupAndExit = async () => {
 		console.log("\n  Signal received — cleaning up...");
 		restoreDataJson();
 		if (obsidian) await closeObsidian(obsidian).catch(() => {});
 		process.exit(1);
+	};
+	// Signal listeners must return void; keep one reference so removeListener matches.
+	const signalCleanup = () => {
+		void cleanupAndExit();
 	};
 	process.on("SIGINT", signalCleanup);
 	process.on("SIGTERM", signalCleanup);

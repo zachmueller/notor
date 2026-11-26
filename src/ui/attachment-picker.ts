@@ -474,7 +474,7 @@ export class VaultNoteSuggest extends AbstractInputSuggest<VaultNoteSuggestion> 
 			// Alias match: show the matched alias with highlights
 			if (suggestion.matchSource === "alias" && suggestion.matchedAlias && suggestion.match?.match.matches) {
 				const aliasEl = container.createSpan({ cls: "notor-suggest-alias" });
-				aliasEl.createSpan({ cls: "notor-suggest-alias-label", text: "aka " });
+				aliasEl.createSpan({ cls: "notor-suggest-alias-label", text: "Alias: " });
 				renderMatches(aliasEl, suggestion.matchedAlias, suggestion.match.match.matches);
 			}
 		}
@@ -785,7 +785,6 @@ export class SectionSuggest extends AbstractInputSuggest<SectionSuggestion> {
  */
 export function getAbsoluteFilePath(file: File): string | undefined {
 	try {
-		// eslint-disable-next-line @typescript-eslint/no-require-imports -- runtime require needed to access Electron's webUtils which has no static import path in Obsidian's plugin environment
 		const { webUtils } = require("electron") as {
 			webUtils?: { getPathForFile?: (f: File) => string };
 		};
@@ -831,7 +830,6 @@ export async function readExternalBinaryFile(
 	settings: NotorSettings,
 	maxSizeMb = 50,
 ): Promise<{ base64: string; mediaType: string; width?: number; height?: number } | null> {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- Node.js fs has no static import path in Obsidian's plugin sandbox
 	const fs = require("fs") as typeof import("fs");
 
 	const stats = fs.statSync(absolutePath);
@@ -880,7 +878,6 @@ export async function readExternalPdfFile(
 	absolutePath: string,
 	maxSizeMb = 50,
 ): Promise<{ base64: string; pageCount?: number; extractedText?: string; extractedImages?: ExtractedPdfImage[] } | null> {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- Node.js fs has no static import path in Obsidian's plugin sandbox
 	const fs = require("fs") as typeof import("fs");
 
 	const stats = fs.statSync(absolutePath);
@@ -1023,7 +1020,6 @@ async function extractPdfImages(
  * Throws on read or conversion failure so the caller can surface a Notice.
  */
 export async function readExternalDocxFile(absolutePath: string): Promise<string> {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- Node.js fs has no static import path in Obsidian's plugin sandbox
 	const fs = require("fs") as typeof import("fs");
 	const buffer = Buffer.from(fs.readFileSync(absolutePath));
 	const { value } = await loadMammoth().extractRawText({ buffer });

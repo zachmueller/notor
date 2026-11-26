@@ -120,9 +120,9 @@ class SessionChecklistModal extends Modal {
 			row.createSpan({ cls: "notor-circuit-eval-when", text: formatWhen(s.startedAt) });
 			row.createSpan({ cls: "notor-circuit-eval-cost", text: s.costUsd === null ? "cost ?" : `$${s.costUsd.toFixed(2)}` });
 			if (s.alreadyEvaluated) {
-				row.createSpan({ cls: "notor-circuit-eval-badge", text: "evaluated" });
+				row.createSpan({ cls: "notor-circuit-eval-badge", text: "Evaluated" });
 			} else if (s.passCount > 0) {
-				row.createSpan({ cls: "notor-circuit-eval-badge notor-circuit-eval-badge--stale", text: "older evaluators" });
+				row.createSpan({ cls: "notor-circuit-eval-badge notor-circuit-eval-badge--stale", text: "Older evaluators" });
 			}
 			row.createSpan({ cls: "notor-circuit-eval-objective", text: truncate(s.objective, 90) || s.sessionId });
 			row.title = `${s.sessionId} · ${s.origin}${s.lastEvaluatedAt ? ` · last evaluated ${formatWhen(s.lastEvaluatedAt)}` : ""}`;

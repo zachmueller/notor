@@ -156,7 +156,7 @@ export class SettingsPopover {
 
 	private buildPresetSelect(container: HTMLElement): void {
 		const presetSection = container.createDiv({ cls: "notor-settings-section notor-preset-section" });
-		presetSection.createDiv({ cls: "notor-settings-label", text: "Model Preset" });
+		presetSection.createDiv({ cls: "notor-settings-label", text: "Model preset" });
 
 		const presets = this.deps.getAvailablePresets?.() ?? [];
 		const providerLabels: Record<string, string> = {};

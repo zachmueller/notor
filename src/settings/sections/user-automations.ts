@@ -318,7 +318,7 @@ function renderFlowRow(
 	// "circuit" badge to distinguish circuits from workflows in the list.
 	setting.nameEl.createSpan({
 		cls: "notor-automation-builtin-badge",
-		text: "circuit",
+		text: "Circuit",
 	});
 
 	// Status dot (cron job state; daily-start circuits have no job)
@@ -387,7 +387,7 @@ function renderFlowEvalRow(
 
 	setting.nameEl.createSpan({
 		cls: "notor-automation-builtin-badge",
-		text: "circuit eval",
+		text: "Circuit eval",
 	});
 
 	const isActive = scheduler?.isJobActive(circuitEvalJobKey(flow.flowDir)) ?? false;
@@ -446,7 +446,7 @@ function renderAutomationRow(
 	if (item.isBuiltin) {
 		setting.nameEl.createSpan({
 			cls: "notor-automation-builtin-badge",
-			text: "built-in",
+			text: "Built-in",
 		});
 	}
 

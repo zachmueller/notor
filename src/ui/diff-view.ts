@@ -368,7 +368,7 @@ export function renderReplaceInNoteDiffPreview(
 			blockLabel.textContent = `Change ${blockDiff.blockIndex + 1}`;
 
 			if (blockDiff.isDeletion) {
-				blockHeaderEl.createSpan({ cls: "notor-diff-block-badge notor-diff-badge-delete", text: "delete" });
+				blockHeaderEl.createSpan({ cls: "notor-diff-block-badge notor-diff-badge-delete", text: "Delete" });
 			}
 
 			// Per-block accept/reject toggle button
@@ -661,7 +661,7 @@ function renderFileDiffLines(container: HTMLElement, diff: FileDiff): void {
 	const lines = diff.lines;
 
 	if (lines.length === 0) {
-		container.createDiv({ cls: "notor-diff-empty", text: "(empty)" });
+		container.createDiv({ cls: "notor-diff-empty", text: "(Empty)" });
 		return;
 	}
 
