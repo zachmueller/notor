@@ -90,6 +90,8 @@ function setup() {
 			onChange: (cb: () => void) => { listeners.push(cb); return () => undefined; },
 		}),
 		getCircuitDataRootName: () => "circuits",
+		openChatPanel: vi.fn(async () => undefined),
+		getActiveOrchestrator: () => ({ switchToConversationById: vi.fn(async () => true) }),
 	};
 	const view = new CircuitRunTreeView({ app } as never, plugin as never);
 	const shown = { value: true };
@@ -171,5 +173,20 @@ describe("CircuitRunTreeView", () => {
 		view.onResize();
 		await flush();
 		expect(list.mock.calls.length).toBe(before + 1);
+	});
+
+	it("re-renders from the last scan on a node click instead of rescanning", async () => {
+		const { view, list, text } = setup();
+		await view.onOpen();
+		await view.setState({ rootSessionId: "sess-1" }, {} as never);
+		await flush();
+		const before = list.mock.calls.length;
+
+		const header = view.containerEl.querySelector(".notor-run-tree-node-header") as HTMLElement | null;
+		expect(header).not.toBeNull();
+		header!.click();
+		await flush();
+		expect(list.mock.calls.length).toBe(before);
+		expect(text()).toContain("Step one");
 	});
 });

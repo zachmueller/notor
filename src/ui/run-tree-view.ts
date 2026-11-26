@@ -100,6 +100,8 @@ export class CircuitRunTreeView extends ItemView {
 	private staleWhileHidden = false;
 	/** Root (`session|conversation`) the current DOM shows; null while loading. */
 	private renderedRootKey: string | null = null;
+	/** The last completed scan, reused when only view state (collapse/selection) changes. */
+	private lastBuild: { rootKey: string; hasRoot: boolean; roots: RunTreeNode[]; scanFailed: boolean } | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -236,6 +238,32 @@ export class CircuitRunTreeView extends ItemView {
 		}
 		if (generation !== this.buildGeneration) return;
 
+		this.lastBuild = { rootKey, hasRoot, roots, scanFailed };
+		this.render(container, this.lastBuild);
+	}
+
+	/**
+	 * Re-render the last scan without touching disk: expand/collapse and node
+	 * selection only change view state. Falls back to a full build if nothing
+	 * has been scanned for the current root yet.
+	 */
+	private rerender(): void {
+		const container = this.containerEl.children[1] as HTMLElement;
+		const rootKey = this.rootSessionId || this.rootConversationId
+			? `${this.rootSessionId ?? ""}|${this.rootConversationId ?? ""}`
+			: "";
+		if (!container || !this.lastBuild || this.lastBuild.rootKey !== rootKey) {
+			void this.rebuild();
+			return;
+		}
+		this.render(container, this.lastBuild);
+	}
+
+	private render(
+		container: HTMLElement,
+		build: { rootKey: string; hasRoot: boolean; roots: RunTreeNode[]; scanFailed: boolean },
+	): void {
+		const { rootKey, hasRoot, roots, scanFailed } = build;
 		container.empty();
 		container.addClass("notor-run-tree-container");
 		this.renderedRootKey = rootKey;
@@ -519,7 +547,7 @@ export class CircuitRunTreeView extends ItemView {
 				e.stopPropagation();
 				if (isCollapsed) this.collapsed.delete(node.conversationId);
 				else this.collapsed.add(node.conversationId);
-				void this.rebuild();
+				this.rerender();
 			});
 		} else {
 			headerRow.createSpan({ cls: "notor-run-tree-toggle-spacer" });
@@ -547,13 +575,13 @@ export class CircuitRunTreeView extends ItemView {
 			headerRow.addEventListener("click", () => {
 				this.selectedId = node.conversationId;
 				void this.navigateTo(node.conversationId);
-				void this.rebuild();
+				this.rerender();
 			});
 		} else {
 			headerRow.addClass("is-not-clickable");
 			headerRow.addEventListener("click", () => {
 				this.selectedId = node.conversationId;
-				void this.rebuild();
+				this.rerender();
 			});
 		}
 
